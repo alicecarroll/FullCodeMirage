@@ -1,5 +1,6 @@
-#include "PressureControl.h"
+#include "PressureControlUpdated.h"
 #include "driver/gpio.h"
+#include <stdio.h>
 
 // ------------------------------------------------------------------
 // Pin assignments — from the Pressure MCU pinout table.
@@ -357,3 +358,13 @@ void pdb_relay3_off() { pdb_relay3_set(0); }
 
 void pdb_relay4_on()  { pdb_relay4_set(1); }
 void pdb_relay4_off() { pdb_relay4_set(0); }
+
+
+// ------------------------------------------------------------------
+// Example ESP-IDF entry point
+// ------------------------------------------------------------------
+
+extern "C" void app_main(void)
+{
+    printf("Hello\n");
+}
