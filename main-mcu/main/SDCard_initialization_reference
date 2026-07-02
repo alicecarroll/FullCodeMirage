@@ -1,0 +1,77 @@
+/*This is code which the SDCard.cpp assumes have been run to initialize it.
+* Saved for reference.
+*/
+
+//h
+
+/**
+ * @brief  Register the SD card on the already-initialised SPI2 bus
+ *         and mount the FAT filesystem.
+ *         Called by hardware_init() in Initialize.cpp — do not call directly.
+ *
+ * @return ESP_OK on success, or an esp_err_t error code.
+ */
+esp_err_t sd_mount(void);
+
+
+/**
+ * @brief  Unmount the FAT filesystem and release the SD card SPI device.
+ *         Called by hardware_deinit() in Initialize.cpp — do not call directly.
+ */
+void sd_unmount(void);
+
+
+//cpp
+
+//These two are not used anymore in the SDCard.cpp
+static sdmmc_card_t  *s_card   = NULL;
+static bool           s_mounted = false;
+
+
+// ---------------------------------------------------------------------------
+// Mount / unmount  (called from Initialize.cpp, not by application code)
+// ---------------------------------------------------------------------------
+
+esp_err_t sd_mount(void)
+{
+    if (s_mounted) {
+        ESP_LOGW(TAG, "Already mounted");
+        return ESP_OK;
+    }
+
+    // Register the SD card as an SPI device on the existing SPI2 bus
+    sdspi_device_config_t dev_cfg = SDSPI_DEVICE_CONFIG_DEFAULT();
+    dev_cfg.gpio_cs = SD_PIN_CS;
+    dev_cfg.host_id = SPI2_HOST;
+
+    esp_vfs_fat_sdmmc_mount_config_t mount_cfg = {
+        .format_if_mount_failed = true, //Should we have this at all? Could be dangerous?
+        .max_files              = 5,            //Max number of open files. //should also be defined in settings?
+        .allocation_unit_size   = 16 * 2 * 512, //Mby easier if this is SD_BUFFER_SIZE?
+    };
+
+    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+    host.slot = SPI2_HOST;
+
+    esp_err_t ret = esp_vfs_fat_sdspi_mount(SD_MOUNT_POINT, &host,
+                                             &dev_cfg, &mount_cfg, &s_card);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Mount failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    s_mounted = true;
+    ESP_LOGI(TAG, "Mounted at %s", SD_MOUNT_POINT);
+    sdmmc_card_print_info(stdout, s_card);
+    return ESP_OK;
+}
+
+void sd_unmount(void)
+{
+    if (!s_mounted) return;
+
+    esp_vfs_fat_sdcard_unmount(SD_MOUNT_POINT, s_card);
+    s_card    = NULL;
+    s_mounted = false;
+    ESP_LOGI(TAG, "Unmounted");
+}
