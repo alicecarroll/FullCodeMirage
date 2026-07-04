@@ -1,0 +1,3 @@
+[submodule "Groundstation"]
+	path = Groundstation
+	url = https://github.com/Abdullah-Alsakka/BX39_MIRAGE_GroundStation

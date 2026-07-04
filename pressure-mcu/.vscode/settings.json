@@ -6,7 +6,7 @@
   ],
   "idf.port": "/dev/cu.usbmodem1101",
   "idf.portWin": "COM6",
-  "idf.currentSetup": "/Users/jonathan/esp/esp-idf",
+  "idf.currentSetup": "C:\\esp\\v6.0.1\\esp-idf",
   "idf.customExtraVars": {
     "IDF_TARGET": "esp32c5",
     "IDF_PATH": "/Users/jonathan/esp/esp-idf"
