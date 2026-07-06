@@ -14,8 +14,26 @@
 #include "watchdog.h"
 #include "main.h"
 
-
 bool loop_exp = true;
+
+static void print_sensor_data(const SensorData *data)
+{
+    if (data == nullptr)
+    {
+        return;
+    }
+
+    printf("Time: %02u:%02u:%02u\n", data->hours, data->minutes, data->seconds);
+    printf("Temps: Tp1=%.2f C Tp2=%.2f C Tp3=%.2f C Tp4=%.2f C Tp5=%.2f C Tp6=%.2f C Tt1=%.2f C Tt2=%.2f C Tt3=%.2f C Ta1=%.2f C Ta2=%.2f C\n",
+           data->Tp1, data->Tp2, data->Tp3, data->Tp4, data->Tp5, data->Tp6,
+           data->Tt1, data->Tt2, data->Tt3, data->Ta1, data->Ta2);
+    printf("Pressures: Pa1=%.2f Pp1=%.2f Pp2=%.2f Pp3=%.2f\n",
+           data->Pa1, data->Pp1, data->Pp2, data->Pp3);
+    printf("Ambient: Ha1=%.2f %% RH\n", data->Ha1);
+    printf("K96: CO2=%.2f ppm pressure=%.2f hPa temp=%.2f C humidity=%.2f RH error=%u\n",
+           data->K96_CO2, data->K96_pressure, data->K96_temperature,
+           data->K96_humidity, data->K96_error);
+}
 
 /* Modes
  * 1: Test Loop
@@ -23,28 +41,21 @@ bool loop_exp = true;
  * 3: Meassurement
  * 4: Humidity
  */
-int mode = DEFAULT_MODE; // 1
+int mode = 2;
 
 // Watchdog
-bool system_ok;
+bool system_ok = true;
 
 // Ethernet
 uint8_t ethernet_recieve_buf[ETHERNET_BUF_SIZE] = {0};
 size_t ethernet_recieve_buf_size = ETHERNET_BUF_SIZE;
 size_t ethernet_recieve_buf_bytes_read = 0;
-uint8_t main_ip[] = WIZ_IP;
-int port = WIZ_SOCKET;
-uint8_t targetip[4] = {192, 168, 0, 1};
 
-esp_err_t spi_err=init_spi();
-esp_err_t i2c_err=init_i2c();
-esp_err_t sd_err=sd_mount();
+//bool command_received = false;
 
-bool command_received = false;
-
-bool con_lost = false; // To track connection status
-int64_t loss_timestamp_us = -1; // To track when connection was lost for termination
-int loops_since_connection = 0; // To buffer short con losses for stable running
+//bool connection_lost = false; // To track connection status
+//int64_t loss_timestamp_us = -1; // To track when connection was lost for termination
+//int loops_since_connection = 0; // To buffer short con losses for stable running
 
 //Pressure
 bool shutters_open = false; // To track if shutters are open
@@ -69,7 +80,7 @@ extern "C" void app_main()
     init_gpio_pins();
     printf("GPIO initialized\n");
 
-    //esp_err_t spi_err = init_spi();
+    esp_err_t spi_err = init_spi();
     if (spi_err != ESP_OK)
     {
         printf("SPI init failed: %s\n", esp_err_to_name(spi_err));
@@ -77,7 +88,7 @@ extern "C" void app_main()
     }
     printf("SPI initialized\n");
 
-    //esp_err_t i2c_err = init_i2c();
+    esp_err_t i2c_err = init_i2c();
     if (i2c_err != ESP_OK)
     {
         printf("I2C init failed: %s\n", esp_err_to_name(i2c_err));
@@ -89,7 +100,6 @@ extern "C" void app_main()
     init_sensors();
     printf("Sensors initialized\n");
 
-    //esp_err_t sd_err = sd_mount();
     //spi_device_interface_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT(); 
     //slot_config.spics_io_num = CS_SD_PIN; 
     esp_err_t sd_err = sd_mount(); //sd_mount(&slot_config)
@@ -100,17 +110,6 @@ extern "C" void app_main()
     else
     {
         printf("SD card mounted\n");
-    }
-
-    //wiz_connect(*target_ip, 10);
-    wiz_ensure_connected(main_ip, WIZ_SOCKET);
-    if(wiz_ensure_connected(main_ip, port) == ESP_OK)
-    {
-        con_lost=false;
-    }
-    else
-    {
-        con_lost=true;
     }
 
     while (loop_exp == true)
@@ -138,8 +137,6 @@ void loop()
         printf("Reading sensors...\n");
         read_sensors();
         print_sensor_data(&sensor_data);
-        printf("Connection lost: %B\n", con_lost);
-        
         // buffer_SD_data_csv(&sensor_data);
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
