@@ -22,7 +22,8 @@ void init_gpio_pins()
         (1ULL << Thermal_reset_PIN) |
         (1ULL << Preassure_reset_PIN) |
         (1ULL << K96_EN_PIN) |
-        (1ULL << Reset_WIZ_PIN); // CS_SD_PIN and CS_WIZ_PIN removed from here!
+        (1ULL << Reset_WIZ_PIN) |
+        (1ULL << CS_WIZ_PIN);
 
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
@@ -33,7 +34,8 @@ void init_gpio_pins()
     gpio_set_level(Thermal_reset_PIN, 1);   
     gpio_set_level(Preassure_reset_PIN, 1); 
     gpio_set_level(Reset_WIZ_PIN, 1);       
-    gpio_set_level(K96_EN_PIN, 0); // CS pins removed from here too
+    gpio_set_level(CS_WIZ_PIN, 1);
+    gpio_set_level(K96_EN_PIN, 0);
 }
 
 // Initialize SPI
@@ -75,7 +77,7 @@ esp_err_t init_spi()
     spi_device_interface_config_t WIZ_cfg = {};
     WIZ_cfg.clock_speed_hz = WIZ_clk_spd_hz;
     WIZ_cfg.mode = 0;                  // SPI mode 0
-    WIZ_cfg.spics_io_num = CS_WIZ_PIN; // CS pin for Ethernet
+    WIZ_cfg.spics_io_num = -1;         // ioLibrary keeps CS asserted across transactions
     WIZ_cfg.queue_size = ethernet_queue_size;
 
     err = spi_bus_add_device(SPI2_HOST, &WIZ_cfg, &WIZ_handle);

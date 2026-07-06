@@ -12,6 +12,15 @@ extern "C"
 #endif
 
     /**
+     * @brief  Register W5500 SPI callbacks and configure the chip.
+     *
+     * Must be called after init_spi() and before any W5500 register/socket access.
+     *
+     * @return ESP_OK on success, or an esp_err_t error code.
+     */
+    esp_err_t wiz_init(void);
+
+    /**
      * @brief  Open a TCP connection to a remote host.
      *
      * @param[in] remote_ip    Remote IP as 4-byte array, e.g. {192,168,1,50}

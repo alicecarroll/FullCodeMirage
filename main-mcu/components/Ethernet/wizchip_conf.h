@@ -296,6 +296,10 @@ typedef   int16_t   datasize_t;     ///< sent or received data size
 #error "Undefined _WIZCHIP_IO_MODE_. You should define it !!!"
 #endif
 
+#if (_WIZCHIP_ == W5500) && !(_WIZCHIP_IO_MODE_ & _WIZCHIP_IO_MODE_SPI_)
+#error "W5500 on ESP32-C5 is SPI-only in this project; BUS mode is not supported."
+#endif
+
 /**
     @brief Define I/O base address when BUS IF mode.
     @todo Should re-define it to fit your system when BUS IF Mode (@ref \_WIZCHIP_IO_MODE_BUS_,

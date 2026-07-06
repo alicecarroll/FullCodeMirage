@@ -167,6 +167,47 @@ static void wiz_hw_reset(void)
 // Application-facing functions
 // ---------------------------------------------------------------------------
 
+esp_err_t wiz_init(void)
+{
+    if (WIZ_handle == NULL)
+    {
+        ESP_LOGE(TAG, "W5500 SPI device is not registered");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    wiz_hw_reset();
+
+    reg_wizchip_cs_cbfunc(wiz_cs_select, wiz_cs_deselect);
+    reg_wizchip_spi_cbfunc(wiz_spi_read_byte, wiz_spi_write_byte);
+    reg_wizchip_spiburst_cbfunc(wiz_spi_read_burst, wiz_spi_write_burst);
+
+    uint8_t tx_size[_WIZCHIP_SOCK_NUM_] = {14, 2};
+    uint8_t rx_size[_WIZCHIP_SOCK_NUM_] = {14, 2};
+
+    if (wizchip_init(tx_size, rx_size) != 0)
+    {
+        ESP_LOGE(TAG, "wizchip_init failed");
+        return ESP_FAIL;
+    }
+
+    wiz_NetInfo net_info = {
+        WIZ_MAC,
+        WIZ_IP,
+        WIZ_SUBNET,
+        WIZ_GATEWAY,
+        WIZ_DNS,
+        NETINFO_STATIC
+    };
+
+    if (ctlnetwork(CN_SET_NETINFO, &net_info) != 0)
+    {
+        ESP_LOGE(TAG, "W5500 network configuration failed");
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
 esp_err_t wiz_send(const uint8_t *data, size_t length)
 {
     if (!data || length == 0)

@@ -92,6 +92,17 @@ extern "C" void app_main()
     }
     printf("SPI initialized\n");
 
+    esp_err_t wiz_err = wiz_init();
+    if (wiz_err != ESP_OK)
+    {
+        printf("W5500 init failed: %s\n", esp_err_to_name(wiz_err));
+        con_lost = true;
+    }
+    else
+    {
+        printf("W5500 initialized\n");
+    }
+
     esp_err_t i2c_err = init_i2c();
     if (i2c_err != ESP_OK)
     {
@@ -117,8 +128,7 @@ extern "C" void app_main()
     }
 
     //wiz_connect(*target_ip, 10);
-    wiz_ensure_connected(main_ip, WIZ_SOCKET);
-    if(wiz_ensure_connected(main_ip, port) == ESP_OK)
+    if(!con_lost && wiz_ensure_connected(main_ip, port) == ESP_OK)
     {
         con_lost=false;
     }
@@ -183,4 +193,3 @@ void loop()
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
