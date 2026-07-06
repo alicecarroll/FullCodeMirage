@@ -114,13 +114,56 @@ static void read_tmp117(float *temperature)
     }
 }
 
-// Continuous periodic mode
-static void read_sht45(float *temperature,
-                       float *humidity)
+/**
+ * Helper function to calculate the Sensirion SHT45 CRC-8 checksum.
+ * Polynomial: 0x31 (x^8 + x^5 + x^4 + 1), Initialization: 0xFF
+ */
+static uint8_t sensirion_crc8(const uint8_t *data, size_t len)
 {
+    uint8_t crc = 0xFF;
+    for (size_t i = 0; i < len; i++)
+    {
+        crc ^= data[i];
+        for (uint8_t bit = 8; bit > 0; --bit)
+        {
+            if (crc & 0x80)
+            {
+                crc = (crc << 1) ^ 0x31;
+            }
+            else
+            {
+                crc = (crc << 1);
+            }
+        }
+    }
+    return crc;
+}
+
+// SHT45 is single-shot only. Must trigger conversion, wait, then read.
+static void read_sht45(float *temperature, float *humidity)
+{
+    uint8_t cmd = 0xFD; // High precision measurement command
     uint8_t data[6];
 
-    esp_err_t err = i2c_master_read_from_device(
+    // 1. Send the command to wake the sensor up and trigger a measurement
+    esp_err_t err = i2c_master_write_to_device(
+        I2C_master,
+        SHT45_addr,
+        &cmd,
+        1,
+        pdMS_TO_TICKS(20));
+
+    if (err != ESP_OK)
+    {
+        printf("SHT45 measurement trigger failed: %s\n", esp_err_to_name(err));
+        return;
+    }
+
+    // 2. Wait for the sensor to finish measuring (High-precision takes max 8.3ms)
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // 3. Read the 6-byte result (Temp MSB/LSB/CRC + Humidity MSB/LSB/CRC)
+    err = i2c_master_read_from_device(
         I2C_master,
         SHT45_addr,
         data,
@@ -129,32 +172,38 @@ static void read_sht45(float *temperature,
 
     if (err != ESP_OK)
     {
-        printf("SHT45 read failed: %s\n", esp_err_to_name(err));
+        printf("SHT45 data read failed: %s\n", esp_err_to_name(err));
         return;
     }
 
-    // Temperature
-    if (temperature != nullptr)
+    // 4. Validate Temperature Checksum
+    // data[0]=MSB, data[1]=LSB, data[2]=CRC
+    if (sensirion_crc8(&data[0], 2) != data[2])
     {
-        uint16_t raw_temp =
-            (data[0] << 8) | data[1];
-
-        *temperature =
-            -45.0f +
-            175.0f *
-                ((float)raw_temp / 65535.0f);
+        printf("SHT45 Temperature CRC Check Failed! Data corrupted on I2C bus.\n");
+        return; // Reject corrupted data
     }
 
-    // Humidity
-    if (humidity != nullptr)
+    // 5. Validate Humidity Checksum
+    // data[3]=MSB, data[4]=LSB, data[5]=CRC
+    if (sensirion_crc8(&data[3], 2) != data[5])
     {
-        uint16_t raw_humidity =
-            (data[3] << 8) | data[4];
+        printf("SHT45 Humidity CRC Check Failed! Data corrupted on I2C bus.\n");
+        return; // Reject corrupted data
+    }
 
-        *humidity =
-            -6.0f +
-            125.0f *
-                ((float)raw_humidity / 65535.0f);
+    // Temperature parsing (Executes only if CRC passed)
+    if (temperature != NULL) // Replaced C++ nullptr with C compatible NULL
+    {
+        uint16_t raw_temp = (data[0] << 8) | data[1];
+        *temperature = -45.0f + 175.0f * ((float)raw_temp / 65535.0f);
+    }
+
+    // Humidity parsing (Executes only if CRC passed)
+    if (humidity != NULL)
+    {
+        uint16_t raw_humidity = (data[3] << 8) | data[4];
+        *humidity = -6.0f + 125.0f * ((float)raw_humidity / 65535.0f);
     }
 }
 
@@ -320,10 +369,14 @@ void read_sensors()
     // Channel 0: Tp1
     sel_mux_channel(multiplex_Tp1_devT);
 
+    vTaskDelay(pdMS_TO_TICKS(20));
+
     read_tmp1075(&sensor_data.Tp1);
 
     // Channel 1: RTC + Tp2
     sel_mux_channel(multiplex_RTC_Tp2);
+
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     read_ds3231(
         &sensor_data.hours,
@@ -335,29 +388,35 @@ void read_sensors()
     // Channel 2: Ambient sensors (temperature, humidity, preassure)
     sel_mux_channel(multiplex_Ambient);
 
-    read_ms5803(
-        &pa1_cal,
-        &sensor_data.Pa1);
-
-    read_tmp117(
-        &sensor_data.Ta1);
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     read_sht45(
         &sensor_data.Ta2,
         &sensor_data.Ha1);
 
+    read_ms5803(
+        &pa1_cal,
+        &sensor_data.Pa1);
+
+
+    read_tmp117(
+        &sensor_data.Ta1);
+
+
     // Channel 3: Tp4 + Pp1 + Tp5 + Pp2
     sel_mux_channel(multiplex_Tp4_Pp1_Tp5_Pp2);
+
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     // ABP2 pipe pressure + temperature
     read_abp2(
         &sensor_data.Pp1,
         &sensor_data.Tp4);
 
-    // Chamber temperature
-    read_sht45(
-        &sensor_data.Tp5,
-        nullptr);
+    // Chamber temperature, but currently not connected to anything
+    //read_sht45(
+    //    &sensor_data.Tp5,
+    //    nullptr);
 
     // Chamber pressure
     read_ms5803(
@@ -367,20 +426,25 @@ void read_sensors()
     // Channel 4: Tp3
     sel_mux_channel(multiplex_Tp3);
 
+    vTaskDelay(pdMS_TO_TICKS(20));
     read_tmp1075(&sensor_data.Tp3);
 
     // Channel 5: Tt1 + Tt2
-    sel_mux_channel(multiplex_Outlet_SD);
+    sel_mux_channel(multiplex_Outlet);
+
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     read_sht45(
         &sensor_data.Tt1,
         nullptr);
-
-    read_tmp1075(&sensor_data.Tt2);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    read_tmp1075(&sensor_data.Tt2); // The tt2 port seems to give weird readings, independent on which tmp1075 is connected.
 
     // Channel 6: Tp6 + Pp3
     sel_mux_channel(multiplex_Tp6_Pp3);
 
+    vTaskDelay(pdMS_TO_TICKS(20));
+    
     read_abp2(
         &sensor_data.Pp3,
         &sensor_data.Tp6);
@@ -388,7 +452,8 @@ void read_sensors()
     // Channel 7: Tt3
     sel_mux_channel(multiplex_Tt3_devP);
 
-    read_sht45(
-        &sensor_data.Tt3,
-        nullptr);
+    vTaskDelay(pdMS_TO_TICKS(20));
+
+    read_tmp117(
+        &sensor_data.Tt3);
 }

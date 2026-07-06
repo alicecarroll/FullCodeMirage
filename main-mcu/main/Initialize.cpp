@@ -22,26 +22,18 @@ void init_gpio_pins()
         (1ULL << Thermal_reset_PIN) |
         (1ULL << Preassure_reset_PIN) |
         (1ULL << K96_EN_PIN) |
-        (1ULL << Reset_WIZ_PIN) |
-        (1ULL << CS_SD_PIN) |
-        (1ULL << CS_WIZ_PIN);
+        (1ULL << Reset_WIZ_PIN); // CS_SD_PIN and CS_WIZ_PIN removed from here!
 
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-
     gpio_config(&io_conf);
 
     // Safe startup states
-    gpio_set_level(Watchdog_PIN, 0); // Pulse to start
-
-    gpio_set_level(Thermal_reset_PIN, 1);   // High for normal operations
-    gpio_set_level(Preassure_reset_PIN, 1); // High for normal operations
-    gpio_set_level(Reset_WIZ_PIN, 1);       // High for normal operations
-
-    gpio_set_level(K96_EN_PIN, 0); // Starts as passive, set to 1 to activate
-
-    gpio_set_level(CS_SD_PIN, 1);  // Low to listen/respond, High to ignore
-    gpio_set_level(CS_WIZ_PIN, 1); // Low to listen/respond, High to ignore
+    gpio_set_level(Watchdog_PIN, 0); 
+    gpio_set_level(Thermal_reset_PIN, 1);   
+    gpio_set_level(Preassure_reset_PIN, 1); 
+    gpio_set_level(Reset_WIZ_PIN, 1);       
+    gpio_set_level(K96_EN_PIN, 0); // CS pins removed from here too
 }
 
 // Initialize SPI
@@ -162,18 +154,20 @@ static void init_sht45_sensor(uint8_t channel)
 {
     sel_mux_channel(channel);
 
-    uint8_t cmd[2] = {0x27, 0x37};
+    uint8_t cmd = 0xFD; // High precision measurement command
 
+    // 1. Send the command to wake the sensor up and trigger a measurement
     esp_err_t err = i2c_master_write_to_device(
         I2C_master,
         SHT45_addr,
-        cmd,
-        2,
+        &cmd,
+        1,
         pdMS_TO_TICKS(20));
 
     if (err != ESP_OK)
     {
-        ESP_LOGW("Init", "SHT45 init failed on channel 0x%02x: %s", channel, esp_err_to_name(err));
+        ESP_LOGW("Init", "SHT45 init failed on MUX Ch %d (Mask: 0x%02x): %s", 
+                 channel, (1 << channel), esp_err_to_name(err));
     }
 }
 
@@ -211,9 +205,8 @@ static void init_ms5803(uint8_t channel, MS5803_Calibration *cal)
 void init_sensors()
 {
     init_sht45_sensor(multiplex_Ambient);
-    init_sht45_sensor(multiplex_Tp4_Pp1_Tp5_Pp2);
-    init_sht45_sensor(multiplex_Outlet_SD);
-    init_sht45_sensor(multiplex_Tt3_devP);
+    //init_sht45_sensor(multiplex_Tp4_Pp1_Tp5_Pp2); There is no SHT45 connected on the K96 board
+    init_sht45_sensor(multiplex_Outlet);
     init_ms5803(multiplex_Ambient, &pa1_cal);
     init_ms5803(multiplex_Tp4_Pp1_Tp5_Pp2, &pp2_cal);
 }

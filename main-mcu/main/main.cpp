@@ -90,6 +90,9 @@ extern "C" void app_main()
     printf("Sensors initialized\n");
 
     //esp_err_t sd_err = sd_mount();
+    //spi_device_interface_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT(); 
+    //slot_config.spics_io_num = CS_SD_PIN; 
+    esp_err_t sd_err = sd_mount(); //sd_mount(&slot_config)
     if (sd_err != ESP_OK)
     {
         printf("SD card mount failed: %s\n", esp_err_to_name(sd_err));

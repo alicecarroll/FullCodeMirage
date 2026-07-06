@@ -9,6 +9,7 @@
 //#include "spi_common.h"
 //#include "ledc.h"
 #include "driver/spi_master.h"
+//#include "driver/sdspi_host.h" // in main.cpp I am configuring the SD card using sdspi_device_config_t, so I need to include this header for that struct
 
 // PINS definition
 #define Watchdog_PIN GPIO_NUM_2
@@ -22,7 +23,7 @@
 #define CS_SD_PIN GPIO_NUM_9
 #define CS_WIZ_PIN GPIO_NUM_10
 #define SPI_MOSI_PIN GPIO_NUM_5
-#define SPI_MISO_PIN GPIO_NUM_19
+#define SPI_MISO_PIN GPIO_NUM_15
 #define SPI_clk_PIN GPIO_NUM_4
 #define I2C_SDA GPIO_NUM_25
 #define I2C_SCL GPIO_NUM_26
@@ -62,7 +63,7 @@
 #define multiplex_Ambient 2//0x04         // Channel 2 on multiplexer for ambient sensors (temperature and humidity, preassure)
 #define multiplex_Tp4_Pp1_Tp5_Pp2 3//0x08 // Channel 3 on multiplexer for temperature and preassure in pipe going into compressor and meassurment chamber
 #define multiplex_Tp3 4//0x10             // Channel 4 on multiplexer for temperature in compressor
-#define multiplex_Outlet_SD 5//0x20       // Channel 5 on multiplexer for temperature in outlet air and SD-card
+#define multiplex_Outlet 5//0x20       // Channel 5 on multiplexer for temperature in outlet air
 #define multiplex_Tp6_Pp3 6//0x40         // Channel 6 on multiplexer for SHT45 that is unsure what it will be used for
 #define multiplex_Tt3_devP 7//0x80        // Channel 7 on multiplexer for temperature in inlet air and preassure MCU
 
@@ -112,7 +113,6 @@ extern spi_device_handle_t WIZ_handle;
 // Conneciton lost timer
 //  30 min in microseconds (esp_timer runs on us)
 #define TERMINATION_TIMEOUT (30LL * 60LL * 1000000LL)
-
 // Neopixel
 //extern led_strip_handle_t s_strip;
 #define NEOPIXEL_COUNT 3 // 3 Neopixels available
