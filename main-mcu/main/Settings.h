@@ -1,8 +1,13 @@
 #pragma once
 #include "driver/gpio.h"
 #include <stdint.h>
-#include "driver/i2c.h"
+//#include "driver/i2c.h"
 #include "driver/uart.h"
+#include "driver/i2c.h"
+//#include "uart.h"
+//#include "gpio.h" 
+//#include "spi_common.h"
+//#include "ledc.h"
 #include "driver/spi_master.h"
 //#include "driver/sdspi_host.h" // in main.cpp I am configuring the SD card using sdspi_device_config_t, so I need to include this header for that struct
 
@@ -66,9 +71,6 @@
 extern spi_device_handle_t SD_handle;
 extern spi_device_handle_t WIZ_handle;
 
-#define SD_queue_size 7
-#define SD_clk_spd_hz 1000000 // 1MHz
-
 #define ethernet_queue_size 7
 #define WIZ_clk_spd_hz 1000000 // 1MHz
 
@@ -83,10 +85,13 @@ extern spi_device_handle_t WIZ_handle;
 
 // Ethernet Network configuration
 #define WIZ_MAC {0x00, 0x08, 0xDC, 0x01, 0x02, 0x03}
-#define WIZ_IP {192, 168, 1, 100}
+#define WIZ_IP {192, 168, 0, 2}
 #define WIZ_GATEWAY {192, 168, 1, 1}
 #define WIZ_SUBNET {255, 255, 255, 0}
 #define WIZ_DNS {8, 8, 8, 8}
+
+#define SD_queue_size 7
+#define SD_clk_spd_hz 1000000 // 1MHz
 
 // SD Card settings
 #define SD_MOUNT_POINT "/sdcard" // Used to build path name

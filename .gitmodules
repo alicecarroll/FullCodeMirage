@@ -1,3 +1,6 @@
 [submodule "Groundstation"]
 	path = Groundstation
 	url = https://github.com/Abdullah-Alsakka/BX39_MIRAGE_GroundStation
+[submodule "main-mcu/components/ioLibrary_Driver"]
+	path = main-mcu/components/ioLibrary_Driver
+	url = https://github.com/Wiznet/ioLibrary_Driver.git

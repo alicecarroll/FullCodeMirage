@@ -1,9 +1,10 @@
 #pragma once
-
+//#include "freertos/FreeRTOS.h"
 #include <stdint.h>
 #include <stddef.h>
 #include "esp_err.h"
-#include "socket.h"
+#include "wizchip_conf.h"
+#include "wizsocket.h"
 
 #ifdef __cplusplus
 extern "C"
