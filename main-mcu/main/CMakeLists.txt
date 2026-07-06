@@ -41,5 +41,6 @@ idf_component_register(
 
         # WIZnet ioLibrary_Driver — clone into components/ and name the folder ioLibrary_Driver.
         # Add the folder name here exactly as it appears on disk.
-        ioLibrary_Driver
+        #ioLibrary_Driver
+        Ethernet
 )

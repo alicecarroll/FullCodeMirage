@@ -30,13 +30,16 @@
  *   SPDX-License-Identifier: BSD-3-Clause
  */
 
-#include "EthernetCom.h"
+
 
 // ioLibrary headers (from WIZnet ioLibrary_Driver component)
+#include "EthernetCom.h"
+
 #include "wizchip_conf.h"
-#include "socket.h"
+#include "wizsocket.h"
 
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "Settings.h"
 
@@ -171,7 +174,7 @@ esp_err_t wiz_send(const uint8_t *data, size_t length)
 
     // send() writes data into the W5500's internal TX buffer.
     // The chip's hardwired TCP/IP stack handles segmentation and transmission.
-    int32_t sent = send(WIZ_SOCKET, (uint8_t *)data, (uint16_t)length, 0);
+    int32_t sent = wizsend(WIZ_SOCKET, (uint8_t *)data, (uint16_t)length);
     if (sent != (int32_t)length)
     {
         ESP_LOGE(TAG, "send() failed, returned %ld", (long)sent);
@@ -197,10 +200,10 @@ esp_err_t wiz_receive(uint8_t *buf, size_t buf_size, size_t *bytes_read)
 
     uint16_t to_read = (available < buf_size) ? available : (uint16_t)buf_size;
 
-    int32_t result = recv(WIZ_SOCKET, buf, to_read, 0);
+    int32_t result = wizrecv(WIZ_SOCKET, buf, to_read);
     if (result <= 0)
     {
-        ESP_LOGE(TAG, "recv() failed, returned %ld", (long)result);
+        ESP_LOGE(TAG, "wizrecv() failed, returned %ld", (long)result);
         return ESP_FAIL;
     }
 
@@ -240,7 +243,7 @@ esp_err_t wiz_ping(uint8_t *target_ip, const char *message)
     static uint16_t s_seq = 0;
     const uint16_t ID = 0xABCD;
 
-    if (socket(WIZ_PING_SOCKET, Sn_MR_IPRAW, 0) != WIZ_PING_SOCKET)
+    if (wizsocket(WIZ_PING_SOCKET, Sn_MR_TCP, Sn_MR_IPRAW, 0) != WIZ_PING_SOCKET)
     {
         ESP_LOGE(TAG, "ping: socket() failed");
         return ESP_FAIL;
@@ -251,17 +254,17 @@ esp_err_t wiz_ping(uint8_t *target_ip, const char *message)
     icmp_packet_t request;
     build_icmp_request(&request, ID, ++s_seq, message);
 
-//    int32_t sent = sendto_W5x00(WIZ_PING_SOCKET, (uint8_t *)&request,
-//                          sizeof(request), (uint8_t)target_ip, (int)0);
+    int32_t sent = wizsendto(WIZ_PING_SOCKET, (uint8_t *)&request,
+                          sizeof(request), target_ip, (uint8_t)0);
 
     // Close immediately — do not wait for any reply
-    close(WIZ_PING_SOCKET);
+    wizclose(WIZ_PING_SOCKET);
 
-//    if (sent != sizeof(request))
-//    {
-//        ESP_LOGE(TAG, "ping: sendto() failed");
-//        return ESP_FAIL;
-//    }
+    if (sent != sizeof(request))
+    {
+        ESP_LOGE(TAG, "ping: wizsendto() failed");
+        return ESP_FAIL;
+    }
 
     ESP_LOGI(TAG, "ping sent to %d.%d.%d.%d",
              target_ip[0], target_ip[1], target_ip[2], target_ip[3]);
@@ -279,19 +282,19 @@ esp_err_t wiz_ping(uint8_t *target_ip, const char *message)
 esp_err_t wiz_connect(uint8_t *remote_ip, uint16_t remote_port)
 {
     // Open socket 0 in TCP mode, using local port 5000 (arbitrary)
-    if (socket(WIZ_SOCKET, Sn_MR_TCP, 5000) != WIZ_SOCKET)
+    if (wizsocket(WIZ_SOCKET, Sn_MR_TCP, 5000, 0) != WIZ_SOCKET)
     {
         ESP_LOGE(TAG, "socket() failed");
         return ESP_FAIL;
     }
 
     // Connect to remote host — W5500 handles the TCP handshake internally
-    //if (connect(WIZ_SOCKET, remote_ip, remote_port) != SOCK_OK)
-    //{
-    //    ESP_LOGE(TAG, "connect() failed");
-    //    close(WIZ_SOCKET);
-    //    return ESP_FAIL;
-    //}
+    if (wizconnect(WIZ_SOCKET, remote_ip, remote_port) != SOCK_OK)
+    {
+        ESP_LOGE(TAG, "connect() failed");
+        wizclose(WIZ_SOCKET);
+        return ESP_FAIL;
+    }
 
     ESP_LOGI(TAG, "Connected to %d.%d.%d.%d:%d",
              remote_ip[0], remote_ip[1], remote_ip[2], remote_ip[3],
@@ -300,9 +303,9 @@ esp_err_t wiz_connect(uint8_t *remote_ip, uint16_t remote_port)
     return ESP_OK;
 }
 
-//void wiz_disconnect(void)
-//{
-//    disconnect(WIZ_SOCKET);
-//    close(WIZ_SOCKET);
-//    ESP_LOGI(TAG, "Disconnected");
-//}
+void wiz_disconnect(void)
+{
+    wizdisconnect(WIZ_SOCKET);
+    wizclose(WIZ_SOCKET);
+    ESP_LOGI(TAG, "Disconnected");
+}
