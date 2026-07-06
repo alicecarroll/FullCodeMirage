@@ -368,6 +368,7 @@ void read_sensors()
 {
     // Channel 0: Tp1
     sel_mux_channel(multiplex_Tp1_devT);
+    printf("Switching to MUX channel: %i\n", multiplex_Tp1_devT);
 
     vTaskDelay(pdMS_TO_TICKS(20));
 
@@ -375,6 +376,7 @@ void read_sensors()
 
     // Channel 1: RTC + Tp2
     sel_mux_channel(multiplex_RTC_Tp2);
+    printf("Switching to MUX channel: %i\n", multiplex_RTC_Tp2);
 
     vTaskDelay(pdMS_TO_TICKS(20));
 
@@ -387,6 +389,7 @@ void read_sensors()
 
     // Channel 2: Ambient sensors (temperature, humidity, preassure)
     sel_mux_channel(multiplex_Ambient);
+    printf("Switching to MUX channel: %i\n", multiplex_Ambient);
 
     vTaskDelay(pdMS_TO_TICKS(20));
 
@@ -405,6 +408,7 @@ void read_sensors()
 
     // Channel 3: Tp4 + Pp1 + Tp5 + Pp2
     sel_mux_channel(multiplex_Tp4_Pp1_Tp5_Pp2);
+    printf("Switching to MUX channel: %i\n", multiplex_Tp4_Pp1_Tp5_Pp2);
 
     vTaskDelay(pdMS_TO_TICKS(20));
 
@@ -425,12 +429,14 @@ void read_sensors()
 
     // Channel 4: Tp3
     sel_mux_channel(multiplex_Tp3);
+    printf("Switching to MUX channel: %i\n", multiplex_Tp3);
 
     vTaskDelay(pdMS_TO_TICKS(20));
     read_tmp1075(&sensor_data.Tp3);
 
     // Channel 5: Tt1 + Tt2
     sel_mux_channel(multiplex_Outlet);
+    printf("Switching to MUX channel: %i\n", multiplex_Outlet);
 
     vTaskDelay(pdMS_TO_TICKS(20));
 
@@ -442,6 +448,7 @@ void read_sensors()
 
     // Channel 6: Tp6 + Pp3
     sel_mux_channel(multiplex_Tp6_Pp3);
+    printf("Switching to MUX channel: %i\n", multiplex_Tp6_Pp3);
 
     vTaskDelay(pdMS_TO_TICKS(20));
     
@@ -451,6 +458,7 @@ void read_sensors()
 
     // Channel 7: Tt3
     sel_mux_channel(multiplex_Tt3_devP);
+    printf("Switching to MUX channel: %i\n", multiplex_Tt3_devP);
 
     vTaskDelay(pdMS_TO_TICKS(20));
 
