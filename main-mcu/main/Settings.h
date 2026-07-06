@@ -12,21 +12,21 @@
 //#include "driver/sdspi_host.h" // in main.cpp I am configuring the SD card using sdspi_device_config_t, so I need to include this header for that struct
 
 // PINS definition
-#define Watchdog_PIN GPIO_NUM_2
-#define Thermal_reset_PIN GPIO_NUM_3
-#define Preassure_reset_PIN GPIO_NUM_27
-#define K96_TX_PIN GPIO_NUM_0
-#define K96_RX_PIN GPIO_NUM_1
-#define K96_EN_PIN GPIO_NUM_6
-#define Neo_PIN GPIO_NUM_7
-#define Reset_WIZ_PIN GPIO_NUM_8
-#define CS_SD_PIN GPIO_NUM_9
-#define CS_WIZ_PIN GPIO_NUM_10
-#define SPI_MOSI_PIN GPIO_NUM_5
-#define SPI_MISO_PIN GPIO_NUM_15
-#define SPI_clk_PIN GPIO_NUM_4
-#define I2C_SDA GPIO_NUM_25
-#define I2C_SCL GPIO_NUM_26
+#define Watchdog_PIN         GPIO_NUM_2
+#define Thermal_reset_PIN    GPIO_NUM_3
+#define Preassure_reset_PIN  GPIO_NUM_27
+#define K96_TX_PIN           GPIO_NUM_0
+#define K96_RX_PIN           GPIO_NUM_1
+#define K96_EN_PIN           GPIO_NUM_6
+#define Neo_PIN              GPIO_NUM_7
+#define Reset_WIZ_PIN        GPIO_NUM_8
+#define CS_SD_PIN            GPIO_NUM_9
+#define CS_WIZ_PIN           GPIO_NUM_10
+#define SPI_MOSI_PIN         GPIO_NUM_5
+#define SPI_MISO_PIN         GPIO_NUM_15
+#define SPI_clk_PIN          GPIO_NUM_4
+#define I2C_SDA              GPIO_NUM_25
+#define I2C_SCL              GPIO_NUM_26
 
 // Uart K96 channel
 #define UART_K96 UART_NUM_1

@@ -106,26 +106,26 @@ extern "C" void app_main()
 
     //spi_device_interface_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT(); 
     //slot_config.spics_io_num = CS_SD_PIN; 
-    esp_err_t sd_err = sd_mount(); //sd_mount(&slot_config)
-    if (sd_err != ESP_OK)
-    {
-        printf("SD card mount failed: %s\n", esp_err_to_name(sd_err));
-    }
-    else
-    {
-        printf("SD card mounted\n");
-    }
+    //esp_err_t sd_err = sd_mount(); //sd_mount(&slot_config)
+    //if (sd_err != ESP_OK)
+    //{
+    //    printf("SD card mount failed: %s\n", esp_err_to_name(sd_err));
+    //}
+    //else
+    //{
+    //    printf("SD card mounted\n");
+    //}
 
     //wiz_connect(*target_ip, 10);
-    wiz_ensure_connected(main_ip, WIZ_SOCKET);
-    if(wiz_ensure_connected(main_ip, port) == ESP_OK)
-    {
-        con_lost=false;
-    }
-    else
-    {
-        con_lost=true;
-    }
+    //wiz_ensure_connected(main_ip, WIZ_SOCKET);
+    //if(wiz_ensure_connected(main_ip, port) == ESP_OK)
+    //{
+    //    con_lost=false;
+    //}
+    //else
+    //{
+    //    con_lost=true;
+    //}
 
     while (loop_exp == true)
     {
@@ -138,8 +138,8 @@ void loop()
 {
     // Common actions
     //feed_watchdog(system_ok);
-    //printf("Hello!\n");
-    printf("Connection lost: %d\n", con_lost ? 1 : 0);
+    printf("Hello!\n");
+    //printf("Connection lost: %d\n", con_lost ? 1 : 0);
     vTaskDelay(1000 / portTICK_PERIOD_MS);
     // Check for commands
     //loops_since_connection++; //Will be reset in handle_ethernet_data if connection is ok
