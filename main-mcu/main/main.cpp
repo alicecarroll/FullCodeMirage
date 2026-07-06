@@ -112,7 +112,7 @@ extern "C" void app_main()
     {
         con_lost=true;
     }
-
+    
     while (loop_exp == true)
     {
         loop();
@@ -125,6 +125,7 @@ void loop()
     // Common actions
     //feed_watchdog(system_ok);
     //printf("Hello!\n");
+    printf("Connection lost: %d\n", con_lost ? 1 : 0);
     vTaskDelay(1000 / portTICK_PERIOD_MS);
     // Check for commands
     //loops_since_connection++; //Will be reset in handle_ethernet_data if connection is ok
@@ -138,7 +139,7 @@ void loop()
         printf("Reading sensors...\n");
         read_sensors();
         print_sensor_data(&sensor_data);
-        printf("Connection lost: %B\n", con_lost);
+        printf("Connection lost: %B\n", con_lost ? 1 : 0);
         
         // buffer_SD_data_csv(&sensor_data);
         vTaskDelay(1000 / portTICK_PERIOD_MS);
