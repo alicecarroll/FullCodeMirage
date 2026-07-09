@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <cstdio>
+
 #include "driver/i2c.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -464,4 +466,49 @@ void read_sensors()
 
     read_tmp117(
         &sensor_data.Tt3);
+}
+
+void write_csv_header(FILE *f)
+{
+    fprintf(f, "hours,minutes,seconds,"
+               "Tp1,Tp2,Tp3,Tp6,Pp3,Tp4,Pp1,Pa1,Ta1,Ta2,Ha1,Tp5,Pp2,"
+               "Tt1,Tt2,Tt3,"
+               "K96_CO2,K96_pressure,K96_temperature,K96_humidity,K96_error\n");
+}
+
+void write_csv_row(FILE *f, const SensorData *data)
+{
+    if (data == nullptr) return;
+
+    fprintf(f, "%02u,%02u,%02u,"
+               "%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,"
+               "%.2f,%.2f,%.2f,"
+               "%.2f,%.2f,%.2f,%.2f,%u\n",
+            data->hours, data->minutes, data->seconds,
+            data->Tp1, data->Tp2, data->Tp3, data->Tp6, data->Pp3, data->Tp4,
+            data->Pp1, data->Pa1, data->Ta1, data->Ta2, data->Ha1, data->Tp5, data->Pp2,
+            data->Tt1, data->Tt2, data->Tt3,
+            data->K96_CO2, data->K96_pressure, data->K96_temperature,
+            data->K96_humidity, data->K96_error);
+}
+
+void log_sensor_data(const SensorData *data, const char *filepath)
+{
+    // Check if file exists to decide whether to write the header
+    FILE *check = fopen(filepath, "r");
+    bool need_header = (check == nullptr);
+    if (check) fclose(check);
+
+    FILE *f = fopen(filepath, "a"); // append mode
+    if (f == nullptr) {
+        //ESP_LOGE(TAG, "Failed to open %s for writing", filepath);
+        return;
+    }
+
+    if (need_header) {
+        write_csv_header(f);
+    }
+    write_csv_row(f, data);
+
+    fclose(f);
 }

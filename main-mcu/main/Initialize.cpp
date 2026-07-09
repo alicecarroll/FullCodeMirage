@@ -23,7 +23,8 @@ void init_gpio_pins()
         (1ULL << Preassure_reset_PIN) |
         (1ULL << K96_EN_PIN) |
         (1ULL << Reset_WIZ_PIN) |
-        (1ULL << CS_WIZ_PIN);
+        (1ULL << CS_WIZ_PIN)|
+        (1ULL << CS_SD_PIN);
 
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
@@ -35,6 +36,7 @@ void init_gpio_pins()
     gpio_set_level(Preassure_reset_PIN, 1); 
     gpio_set_level(Reset_WIZ_PIN, 1);       
     gpio_set_level(CS_WIZ_PIN, 1);
+    gpio_set_level(CS_SD_PIN, 1);   // deselect SD card by default
     gpio_set_level(K96_EN_PIN, 0);
 }
 
@@ -60,18 +62,18 @@ esp_err_t init_spi()
     }
 
     // Add SD-card
-    spi_device_interface_config_t SD_cfg = {};
-    SD_cfg.clock_speed_hz = SD_clk_spd_hz;
-    SD_cfg.mode = 0;                 // SPI mode 0
-    SD_cfg.spics_io_num = CS_SD_PIN; // CS pin for SD card
-    SD_cfg.queue_size = SD_queue_size;
+    //spi_device_interface_config_t SD_cfg = {};
+    //SD_cfg.clock_speed_hz = SD_clk_spd_hz;
+    //SD_cfg.mode = 0;                 // SPI mode 0
+    //SD_cfg.spics_io_num = CS_SD_PIN; // CS pin for SD card
+    //SD_cfg.queue_size = SD_queue_size;
 
-    err = spi_bus_add_device(SPI2_HOST, &SD_cfg, &SD_handle);
-    if (err != ESP_OK)
-    {
-        ESP_LOGE("Init", "spi_bus_add_device(SD) failed: %s", esp_err_to_name(err));
-        return err;
-    }
+    //err = spi_bus_add_device(SPI2_HOST, &SD_cfg, &SD_handle);
+    //if (err != ESP_OK)
+    //{
+    //    ESP_LOGE("Init", "spi_bus_add_device(SD) failed: %s", esp_err_to_name(err));
+    //    return err;
+    //}
 
     // Add Ethernet
     spi_device_interface_config_t WIZ_cfg = {};

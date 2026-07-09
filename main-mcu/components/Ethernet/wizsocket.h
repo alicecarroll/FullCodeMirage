@@ -286,7 +286,7 @@ int8_t  wizclose(uint8_t sn);
            @b Fail    :\n @ref SOCKERR_SOCKINIT   - Socket is not initialized \n
                           @ref SOCKERR_SOCKCLOSED - Socket closed unexpectedly.
 */
-int8_t  listen(uint8_t sn);
+int8_t  wizlisten(uint8_t sn);
 
 //teddy 240122
 /**

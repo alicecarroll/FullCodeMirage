@@ -4,7 +4,7 @@
 //Should we go back to main and then call in again instead?
 
 //us = microseconds
-
+#include "ConnectionLoss.h"
 #include "esp_log.h"
 #include "Settings.h"
 

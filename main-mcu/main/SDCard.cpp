@@ -128,7 +128,7 @@ void buffer_SD_data_binary(const SensorData *sensor_data)
     }
 }
 
-void buffer_SD_data_csv(const SensorData *sensor_data)
+void buffer_SD_data_csv(SensorData *sensor_data)
 {
     //Create temp CSV line to store
     char line[512];
