@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <cstdio>
+#include "esp_err.h"
+
 
 #include "driver/i2c.h"
 #include "freertos/FreeRTOS.h"
@@ -10,6 +12,7 @@
 
 SensorData sensor_data;
 
+static const char *TAG = "read_sensors";
 // continous sensor
 static void read_tmp1075(float *temperature)
 {
@@ -501,7 +504,7 @@ void log_sensor_data(const SensorData *data, const char *filepath)
 
     FILE *f = fopen(filepath, "a"); // append mode
     if (f == nullptr) {
-        //ESP_LOGE(TAG, "Failed to open %s for writing", filepath);
+        ESP_LOGE(TAG, "Failed to open %s for writing", filepath);
         return;
     }
 

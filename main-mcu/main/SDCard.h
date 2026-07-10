@@ -38,8 +38,9 @@ extern "C"
 
     esp_err_t sd_mount(void);
     void sd_unmount(void);
-    void buffer_SD_data_csv(const SensorData *sensor_data);
+    void buffer_SD_data_csv(SensorData *sensor_data);
     void buffer_SD_data_flush(void);
+
 
     /**
      * @brief Deleate all files form the SD card. Keep formating and dirs.

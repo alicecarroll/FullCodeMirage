@@ -195,6 +195,7 @@ void buffer_SD_data_csv(SensorData *sensor_data)
         }
         SD_buffer_offset = 0;  // Reset for next batch
     }
+    ESP_LOGI(TAG, "Flushed %zu bytes CSV to SD", SD_buffer_offset);
 }
 // Flush remaining data (call before shutdown)
 void buffer_SD_data_flush()

@@ -7,12 +7,13 @@
 #include "Settings.h"
 #include "ConnectionLoss.h"
 #include "EthernetCom.h"
+#include "SDCard.h"
 //#include "Humidity.h"
 #include "Initialize.h"
 #include "Multiplexer.h"
 #include "Neopixel.h"
 #include "read_sensors.h"
-#include "SDCard.h"
+
 #include "Uart.h"
 #include "watchdog.h"
 #include "main.h"
@@ -70,6 +71,7 @@ extern "C" void app_main()
     init_uart();
     init_sensors();
     wiz_init();
+    sd_mount();
     printf("Initialization done\n");
 
 
@@ -110,7 +112,7 @@ void loop()
         //buffer_SD_data_binary_single(); //est time: 1.5 ms
         //buffer_SD_data_csv_single();      //est time: 3 ms
         //buffer_SD_data_binary(sensor_data); //4k - est time: 1.5 ms every 8th loop
-        //buffer_SD_data_csv(sensor_data);      //4k - est time: 3 ms every 8th loop
+        buffer_SD_data_csv(&sensor_data);      //4k - est time: 3 ms every 8th loop
         print_sensor_data(&sensor_data);
 
     }
@@ -207,43 +209,34 @@ void loop()
     }
 
     //Transmit data over E-Link
-    uint8_t ethernet_send_buf[sizeof(sensor_data)];
+    //uint8_t ethernet_send_buf[sizeof(sensor_data)];
     printf("ethernet1\n");
-    char msg[] = "Hello from ESP32!";
-    wizsend(WIZ_SOCKET, (uint8_t*)msg, strlen(msg));
+    //char msg[] = "Hello from ESP32!";
+    //wizsend(WIZ_SOCKET, (uint8_t*)msg, strlen(msg));
     //wizsend(WIZ_SOCKET, (uint8_t*)sensorout, strlen(msg));
     read_sensors();
+    buffer_SD_data_csv(&sensor_data);
 
-    char status_message[100]; 
-    int len = snprintf(status_message, sizeof(status_message),
-                    "Status: %d. Command received: %d. Mode: %d.",
-                    status_ok, command_received, mode);
-
-    if (len > 0 && len < (int)sizeof(status_message)) {
-        memcpy(ethernet_send_buf, status_message, len); // copy only the real message length
-        wiz_send(ethernet_send_buf, len);                // send only that many bytes
-    } else {
-        // formatting error or truncation — handle appropriately
-    }
-    print_sensor_data(&sensor_data);
     //char status_message[100]; 
     //int len = snprintf(status_message, sizeof(status_message),
     //                "Status: %d. Command received: %d. Mode: %d.",
     //                status_ok, command_received, mode);
-    //log_sensor_data(&sensor_data, "/sdcard/log.csv");
-    //snprintf(status_message, 100, "Status: %d. Command recieved: %d. Mode: %d.",status_ok, command_received, mode);
-    char buf[300];
-    int len2 = snprintf(buf, sizeof(buf), "Time: %02u:%02u:%02u, Pa1=%.2f \n", sensor_data.hours, sensor_data.minutes, sensor_data.seconds, sensor_data.Pa1);
-    wiz_send((uint8_t*)buf, len2);
-    //memset(ethernet_send_buf, 0, sizeof(ethernet_send_buf)); // clear old data first
-    //memcpy(ethernet_send_buf, &sensor_data.Pa1, sizeof(sensor_data.Pa1));
-    //memcpy(ethernet_send_buf, &status_message, sizeof(ethernet_send_buf));
-    //printf("ethernet2\n");
-    //printf("sock num %d\n", _WIZCHIP_SOCK_NUM_);
-    //printf("size ethernet buf %d\n", sizeof(ethernet_send_buf));
-    //wiz_send(ethernet_send_buf, sizeof(ethernet_send_buf));
+//
+    //if (len > 0 && len < (int)sizeof(status_message)) {
+    //    memcpy(ethernet_send_buf, status_message, len); // copy only the real message length
+    //    wiz_send(ethernet_send_buf, len);                // send only that many bytes
+    //} else {
+    //    // formatting error or truncation — handle appropriately
+    //}
+    print_sensor_data(&sensor_data);
+    
+    //char buf[300];
+    //int len2 = snprintf(buf, sizeof(buf), "Time: %02u:%02u:%02u, Pa1=%.2f \n", sensor_data.hours, sensor_data.minutes, sensor_data.seconds, sensor_data.Pa1);
+    //wiz_send((uint8_t*)buf, len2);
 
     printf("ethernet3\n");
+
+    wiz_send((uint8_t*)&sensor_data, sizeof(sensor_data)+16);
 
     // Wait until loop has taken 100 ms.
     TickType_t current_time_stop = xTaskGetTickCount();

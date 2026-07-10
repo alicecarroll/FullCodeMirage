@@ -1,6 +1,8 @@
 #pragma once
 #include <stdint.h>
+#include "esp_err.h"
 
+#pragma pack(push, 1)
 struct SensorData 
 {
     uint8_t seconds;
@@ -27,11 +29,15 @@ struct SensorData
     float Tt3;           // Temperature in inlet air
 
     float K96_CO2;           // CO2 concentration [ppm]
+    float K96_CH4;           // CO2 concentration [ppm]
+    float K96_H2O;           // CO2 concentration [ppm]
+
     float K96_pressure;      // Internal pressure [hPa]
     float K96_temperature;   // Internal temperature [°C]
     float K96_humidity;      // Internal humidity [%RH]
     uint16_t K96_error;      // K96 error/status flags
 };
+#pragma pack(pop)
 
 extern SensorData sensor_data;
 
@@ -45,8 +51,35 @@ extern MS5803_Calibration pp2_cal;
 
 static void read_ms5803(MS5803_Calibration* cal, float* pressure);
 
+
 void read_sensors();
 
+
+    /**
+ * @brief  Creating a csv file header
+ *
+ * @param[in] file name   
+ *
+ * @return void
+ */
 void write_csv_header(FILE *f);
+
+    /**
+ * @brief  writing sensor data into line of file
+ *
+ * @param[in] file name    
+ * @param[in] sensor data
+ *
+ * @return void
+ */
 void write_csv_row(FILE *f, const SensorData *data);
+
+    /**
+ * @brief  logging sensor data into file
+ *
+ * @param[in] sensor data    
+ * @param[in] file path
+ *
+ * @return void
+ */
 void log_sensor_data(const SensorData *data, const char *filepath);
