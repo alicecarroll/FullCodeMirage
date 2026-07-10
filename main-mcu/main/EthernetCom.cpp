@@ -106,11 +106,13 @@ static void build_icmp_request(icmp_packet_t *pkt, uint16_t id, uint16_t seq, co
 static void wiz_cs_select(void)
 {
     gpio_set_level((gpio_num_t)CS_WIZ_PIN, 0); // CS low = selected
+    ESP_LOGD(TAG, "CS asserted on pin %d", CS_WIZ_PIN);
 }
 
 static void wiz_cs_deselect(void)
 {
     gpio_set_level((gpio_num_t)CS_WIZ_PIN, 1); // CS high = deselected
+    ESP_LOGD(TAG, "CS deasserted on pin %d", CS_WIZ_PIN);
 }
 
 static uint8_t wiz_spi_read_byte(void)
@@ -118,7 +120,12 @@ static uint8_t wiz_spi_read_byte(void)
     spi_transaction_t t = {};
     t.length = 8; // 8 bits
     t.flags = SPI_TRANS_USE_RXDATA;
-    spi_device_transmit(WIZ_handle, &t);
+    esp_err_t err = spi_device_transmit(WIZ_handle, &t);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "SPI read transaction failed: %s", esp_err_to_name(err));
+    }
+    ESP_LOGD(TAG, "SPI read byte returned: 0x%02X", t.rx_data[0]);
     return t.rx_data[0];
 }
 
@@ -128,7 +135,11 @@ static void wiz_spi_write_byte(uint8_t byte)
     t.length = 8;
     t.flags = SPI_TRANS_USE_TXDATA;
     t.tx_data[0] = byte;
-    spi_device_transmit(WIZ_handle, &t);
+    esp_err_t err = spi_device_transmit(WIZ_handle, &t);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "SPI write transaction failed: %s", esp_err_to_name(err));
+    }
 }
 
 // Burst read — much faster than byte-by-byte for large buffer reads
@@ -181,8 +192,8 @@ esp_err_t wiz_init(void)
     reg_wizchip_spi_cbfunc(wiz_spi_read_byte, wiz_spi_write_byte);
     reg_wizchip_spiburst_cbfunc(wiz_spi_read_burst, wiz_spi_write_burst);
 
-    uint8_t tx_size[_WIZCHIP_SOCK_NUM_] = {14, 2};
-    uint8_t rx_size[_WIZCHIP_SOCK_NUM_] = {14, 2};
+    uint8_t tx_size[_WIZCHIP_SOCK_NUM_] = {8, 8, 0, 0, 0, 0, 0, 0};
+    uint8_t rx_size[_WIZCHIP_SOCK_NUM_] = {8, 8, 0, 0, 0, 0, 0, 0};
 
     if (wizchip_init(tx_size, rx_size) != 0)
     {
@@ -216,6 +227,25 @@ esp_err_t wiz_send(const uint8_t *data, size_t length)
     // send() writes data into the W5500's internal TX buffer.
     // The chip's hardwired TCP/IP stack handles segmentation and transmission.
     int32_t sent = wizsend(WIZ_SOCKET, (uint8_t *)data, (uint16_t)length);
+    if (sent != (int32_t)length)
+    {
+        ESP_LOGE(TAG, "send() failed, returned %ld", (long)sent);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Sent %zu bytes", length);
+    return ESP_OK;
+}
+
+esp_err_t wiz_sendto(uint8_t *target_ip, uint8_t *data, uint8_t length)
+{
+    if (!data || length == 0)
+        return ESP_ERR_INVALID_ARG;
+
+    // send() writes data into the W5500's internal TX buffer.
+    // The chip's hardwired TCP/IP stack handles segmentation and transmission.
+    //uint8_t sn, uint8_t * buf, uint16_t len, uint8_t * addr, uint16_t port
+    int32_t sent = wizsendto(WIZ_SOCKET, (uint8_t *)data, (uint16_t)length, data, REMOTE_PORT);
     if (sent != (int32_t)length)
     {
         ESP_LOGE(TAG, "send() failed, returned %ld", (long)sent);
@@ -278,28 +308,34 @@ esp_err_t wiz_ensure_connected(uint8_t *ip, uint16_t port)
 // ---------------------------------------------------------------------------
 // wiz_ping — fire and forget: send and return IMMEDIATELY, no reply checked
 // ---------------------------------------------------------------------------
-
 esp_err_t wiz_ping(uint8_t *target_ip, const char *message)
 {
     static uint16_t s_seq = 0;
     const uint16_t ID = 0xABCD;
 
-    if (wizsocket(WIZ_PING_SOCKET, Sn_MR_TCP, Sn_MR_IPRAW, 0) != WIZ_PING_SOCKET)
+    if (!target_ip || !message)
+        return ESP_ERR_INVALID_ARG;
+    ESP_LOGI(TAG, "Test ping to %d.%d.%d.%d",
+             target_ip[0], target_ip[1], target_ip[2], target_ip[3]);
+
+    if (wizsocket(WIZ_PING_SOCKET, Sn_MR_IPRAW, LOCAL_PORT, 0) != WIZ_PING_SOCKET)
     {
         ESP_LOGE(TAG, "ping: socket() failed");
         return ESP_FAIL;
     }
 
-    //setSn_PROTO(WIZ_PING_SOCKET, 0x01);
-
     icmp_packet_t request;
     build_icmp_request(&request, ID, ++s_seq, message);
 
-    int32_t sent = wizsendto(WIZ_PING_SOCKET, (uint8_t *)&request,
-                          sizeof(request), target_ip, (uint8_t)0);
+    int32_t sent = wizsendto(
+        WIZ_PING_SOCKET,
+        (uint8_t *)&request,
+        sizeof(request),
+        target_ip,
+        REMOTE_PORT);
 
-    // Close immediately — do not wait for any reply
     wizclose(WIZ_PING_SOCKET);
+    //printf("%d\n", sent);
 
     if (sent != sizeof(request))
     {
@@ -307,10 +343,43 @@ esp_err_t wiz_ping(uint8_t *target_ip, const char *message)
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "ping sent to %d.%d.%d.%d",
+    ESP_LOGI(TAG, "ICMP echo sent to %d.%d.%d.%d",
              target_ip[0], target_ip[1], target_ip[2], target_ip[3]);
     return ESP_OK;
 }
+
+//esp_err_t wiz_ping(uint8_t *target_ip, const char *message)
+//{
+//    static uint16_t s_seq = 0;
+//    const uint16_t ID = 0xABCD; //What is this ID?
+//
+//    if (wizsocket(WIZ_PING_SOCKET, Sn_MR_TCP, Sn_MR_IPRAW, 0) != WIZ_PING_SOCKET)
+//    {
+//        ESP_LOGE(TAG, "ping: socket() failed");
+//        return ESP_FAIL;
+//    }
+//
+//    //setSn_PROTO(WIZ_PING_SOCKET, 0x01);
+//
+//    icmp_packet_t request;
+//    build_icmp_request(&request, ID, ++s_seq, message);
+//
+//    int32_t sent = wizsendto(WIZ_PING_SOCKET, (uint8_t *)&request,
+//                          sizeof(request), target_ip, 5000);
+//
+//    // Close immediately — do not wait for any reply
+//    wizclose(WIZ_PING_SOCKET);
+//
+//    if (sent != sizeof(request))
+//    {
+//        ESP_LOGE(TAG, "ping: wizsendto() failed");
+//        return ESP_FAIL;
+//    }
+//
+//    ESP_LOGI(TAG, "ping sent to %d.%d.%d.%d",
+//             target_ip[0], target_ip[1], target_ip[2], target_ip[3]);
+//    return ESP_OK;
+//}
 
 // Wait with this til we know if we or ground takes the initiative.
 // Remember to update the .h file when decided.
@@ -335,6 +404,27 @@ esp_err_t wiz_connect(uint8_t *remote_ip, uint16_t remote_port)
         ESP_LOGE(TAG, "connect() failed");
         wizclose(WIZ_SOCKET);
         return ESP_FAIL;
+    }
+
+    TickType_t start = xTaskGetTickCount();
+    while (getSn_SR(WIZ_SOCKET) != SOCK_ESTABLISHED)
+    {
+        if (getSn_IR(WIZ_SOCKET) & Sn_IR_TIMEOUT)
+        {
+            setSn_IR(WIZ_SOCKET, Sn_IR_TIMEOUT);
+            wizclose(WIZ_SOCKET);
+            ESP_LOGE(TAG, "TCP connect timed out");
+            return ESP_ERR_TIMEOUT;
+        }
+
+        if ((xTaskGetTickCount() - start) > pdMS_TO_TICKS(3000))
+        {
+            wizclose(WIZ_SOCKET);
+            ESP_LOGE(TAG, "TCP connect did not establish in time");
+            return ESP_ERR_TIMEOUT;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     ESP_LOGI(TAG, "Connected to %d.%d.%d.%d:%d",

@@ -36,6 +36,7 @@ extern "C"
      * Records the loss timestamp and sets con_lost = true.
      */
     esp_err_t connection_lost(bool *con_lost, int64_t *loss_timestamp_us);
+    //esp_err_t connection_lost(bool *con_lost, int64_t *loss_timestamp_us);
 
     /*
      * Call when the Ethernet connection is restored.

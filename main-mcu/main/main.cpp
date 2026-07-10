@@ -1,10 +1,13 @@
 #include <stdio.h>
 #include <string.h>
+#include <format>
+#include <string>
+#include <cstdio>
 
 #include "Settings.h"
 #include "ConnectionLoss.h"
 #include "EthernetCom.h"
-#include "Humidity.h"
+//#include "Humidity.h"
 #include "Initialize.h"
 #include "Multiplexer.h"
 #include "Neopixel.h"
@@ -13,27 +16,11 @@
 #include "Uart.h"
 #include "watchdog.h"
 #include "main.h"
+#include "w5500.h"
+
 
 bool loop_exp = true;
-
-static void print_sensor_data(const SensorData *data)
-{
-    if (data == nullptr)
-    {
-        return;
-    }
-
-    printf("Time: %02u:%02u:%02u\n", data->hours, data->minutes, data->seconds);
-    printf("Temps: Tp1=%.2f C Tp2=%.2f C Tp3=%.2f C Tp4=%.2f C Tp5=%.2f C Tp6=%.2f C Tt1=%.2f C Tt2=%.2f C Tt3=%.2f C Ta1=%.2f C Ta2=%.2f C\n",
-           data->Tp1, data->Tp2, data->Tp3, data->Tp4, data->Tp5, data->Tp6,
-           data->Tt1, data->Tt2, data->Tt3, data->Ta1, data->Ta2);
-    printf("Pressures: Pa1=%.2f Pp1=%.2f Pp2=%.2f Pp3=%.2f\n",
-           data->Pa1, data->Pp1, data->Pp2, data->Pp3);
-    printf("Ambient: Ha1=%.2f %% RH\n", data->Ha1);
-    printf("K96: CO2=%.2f ppm pressure=%.2f hPa temp=%.2f C humidity=%.2f RH error=%u\n",
-           data->K96_CO2, data->K96_pressure, data->K96_temperature,
-           data->K96_humidity, data->K96_error);
-}
+uint16_t time_loop;
 
 /* Modes
  * 1: Test Loop
@@ -41,25 +28,25 @@ static void print_sensor_data(const SensorData *data)
  * 3: Meassurement
  * 4: Humidity
  */
-int mode = 2;
+int mode = 1;//DEFAULT_MODE; // 1
 
 // Watchdog
-bool system_ok = true;
+bool system_ok;
 
 // Ethernet
 uint8_t ethernet_recieve_buf[ETHERNET_BUF_SIZE] = {0};
 size_t ethernet_recieve_buf_size = ETHERNET_BUF_SIZE;
 size_t ethernet_recieve_buf_bytes_read = 0;
-uint8_t main_ip[] = WIZ_IP;
-int port = WIZ_SOCKET;
-uint8_t targetip[4] = {192, 168, 0, 1};
+uint8_t main_ip[4] = WIZ_IP;
+uint16_t portw = WIZ_SOCKET;
+uint8_t targetip[4] = {192, 168, 0, 3};
 
-//bool command_received = false;
+bool command_received = false;
 
 bool con_lost = false; // To track connection status
-//bool connection_lost = false; // To track connection status
-//int64_t loss_timestamp_us = -1; // To track when connection was lost for termination
-//int loops_since_connection = 0; // To buffer short con losses for stable running
+bool status_ok = true;
+int64_t loss_timestamp_us = -1; // To track when connection was lost for termination
+int loops_since_connection = 0; // To buffer short con losses for stable running
 
 //Pressure
 bool shutters_open = false; // To track if shutters are open
@@ -76,95 +63,56 @@ static const char *TAG = "main";
 // ESP-IDF expects main in C
 extern "C" void app_main()
 {
-    esp_log_level_set("*", ESP_LOG_WARN);
-
-    printf("Starting application\n");
-
     // This should be one func in Initialize instead?
     init_gpio_pins();
-    printf("GPIO initialized\n");
-
-    esp_err_t spi_err = init_spi();
-    if (spi_err != ESP_OK)
-    {
-        printf("SPI init failed: %s\n", esp_err_to_name(spi_err));
-        return;
-    }
-    printf("SPI initialized\n");
-
-    esp_err_t wiz_err = wiz_init();
-    if (wiz_err != ESP_OK)
-    {
-        printf("W5500 init failed: %s\n", esp_err_to_name(wiz_err));
-        con_lost = true;
-    }
-    else
-    {
-        printf("W5500 initialized\n");
-    }
-
-    esp_err_t i2c_err = init_i2c();
-    if (i2c_err != ESP_OK)
-    {
-        printf("I2C init failed: %s\n", esp_err_to_name(i2c_err));
-        return;
-    }
-    printf("I2C initialized\n");
-
-    //init_uart_k96();
+    init_spi();
+    init_i2c();
+    init_uart();
     init_sensors();
-    printf("Sensors initialized\n");
+    wiz_init();
+    printf("Initialization done\n");
 
-    //spi_device_interface_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT(); 
-    //slot_config.spics_io_num = CS_SD_PIN; 
-    //esp_err_t sd_err = sd_mount(); //sd_mount(&slot_config)
-    //if (sd_err != ESP_OK)
-    //{
-    //    printf("SD card mount failed: %s\n", esp_err_to_name(sd_err));
-    //}
-    //else
-    //{
-    //    printf("SD card mounted\n");
-    //}
 
-    //wiz_connect(*target_ip, 10);
-    if(!con_lost && wiz_ensure_connected(main_ip, port) == ESP_OK)
-    {
-        con_lost=false;
-    }
-    else
-    {
-        con_lost=true;
-    }
+    int8_t s = wizsocket(WIZ_SOCKET, Sn_MR_TCP, LOCAL_PORT, 0);
+    printf("after socket s=%d\n", s);
+
+    wiz_connect(targetip, REMOTE_PORT);
+    setSn_IR(WIZ_SOCKET, Sn_IR_CON);
+
+    wiz_ensure_connected(targetip, REMOTE_PORT);
+
+    wiz_ping(targetip, "h\n");
 
     while (loop_exp == true)
     {
         loop();
     }
-    
 }
 
 void loop()
 {
     // Common actions
+    TickType_t current_time_start = xTaskGetTickCount();
     //feed_watchdog(system_ok);
-    printf("Hello!\n");
-    //printf("Connection lost: %d\n", con_lost ? 1 : 0);
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    wiz_connect(targetip, REMOTE_PORT);
+
+
     // Check for commands
-    //loops_since_connection++; //Will be reset in handle_ethernet_data if connection is ok
-    //esp_err_status = wiz_receive(ethernet_recieve_buf, ethernet_recieve_buf_size, &ethernet_recieve_buf_bytes_read);
-    //handle_ethernet_data(esp_err_status);
+    loops_since_connection++; //Will be reset in handle_ethernet_data if connection is ok
+    esp_err_t esp_err_status = wiz_receive(ethernet_recieve_buf, ethernet_recieve_buf_size, &ethernet_recieve_buf_bytes_read);
+    handle_ethernet_data(esp_err_status);
 
-
+    printf("check for commands done\n");
     // Collect I2C data
     if (mode != 1)
     {
-        printf("Reading sensors...\n");
         read_sensors();
+        //buffer_SD_data_binary_single(); //est time: 1.5 ms
+        //buffer_SD_data_csv_single();      //est time: 3 ms
+        //buffer_SD_data_binary(sensor_data); //4k - est time: 1.5 ms every 8th loop
+        //buffer_SD_data_csv(sensor_data);      //4k - est time: 3 ms every 8th loop
         print_sensor_data(&sensor_data);
-        // buffer_SD_data_csv(&sensor_data);
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+
     }
 
 
@@ -174,22 +122,184 @@ void loop()
     {
     // Test loop
     case 1:
-        //read_sensors();
-        
-        printf("Hello!\n");
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+
         // Bark at subsystems
         //!!!!!!!!!!
 
         //!!!!!
-        // Enter IP when given by SSC Space
+        // Enter IP when given by ESA
         // Ping ground that status is OK.
-        //esp_err_status = wiz_ping(uint8_t *target_ip, "No command recieved. Status: OK.");
+        esp_err_status = wiz_ping(targetip, "No command received. Status: OK.");
 
         break;
-    
+
+    // Standby
+    case 2:
+        //Reset overrides
+
+        //Pressure communication
+        
+        //Thermal communication
+
+        break;
+
+    // Measurement
+    case 3:
+        // Humidity check here if any 
+
+        // Elevation check in terms of pressure
+        if (sensor_data.Pa1 < P_STRATOSPHERE)
+        {
+            if (loops_since_connection > LOOP_WO_CONNECTION) // If connection lost for more than 10 loops, enter safe mode
+            {
+                mode = 2; // Standby
+                con_lost = true;
+                connection_lost(&con_lost, &loss_timestamp_us);
+                
+                wiz_ping(targetip, "Connection lost. Entering safe mode.");
+                break;
+            }
+            //else: high altidude but have connection.
+        }
+        //Check if pressure in chamber is below threshold, if so, increase pressure first.
+        if (sensor_data.Pp2 < CHAMBER_P_SHUTTER_THRESHOLD)
+        {
+            //Pressure communication: increase p in chamber.
+            break;
+        } 
+        //Open shutters if close
+        //Skip data collection to ensure proper pressure in chamber.
+        if (shutters_open == false)
+        {
+            //Pressure communication: open shutters
+            shutters_open = true;
+            break;
+        }
+        //Check if pressure in chamber is above threshold, if so, take meassurements.
+        if (sensor_data.Pp2 < CHAMBER_P_CHAMBER_THRESHOLD)
+        {
+            //Pressure communication: increase p in chamber.
+            break;
+        }
+        // Check if inlet temperature is above threshold, if so, take meassurements. If not, decrease inlet temperature.
+        //if (sensor_data.Tt3 < INLET_TEMPERATURE_THRESHOLD)
+        //{
+        //    //Thermal communication: increase inlet temperature
+        //    break;
+        //}
+        // Take meassurements!!!
+        read_k96();
+        //buffer_SD_data_csv(sensor_data); 
+        break;
+
+    // Leave for now as stated by Anna
+    // Humidity
+    case 4:
+        
+        ESP_LOGI(TAG, "Humidity loop not implemented");
+        break;
+
+    default:
+        mode = 1;
+        //std::string msg = "Unknown mode. Returning to test loop.";
+        //wiz_send(msg, sizeof(msg));
+        break;
     }
+
+    //Transmit data over E-Link
+    uint8_t ethernet_send_buf[sizeof(sensor_data)];
+    printf("ethernet1\n");
+    char msg[] = "Hello from ESP32!";
+    wizsend(WIZ_SOCKET, (uint8_t*)msg, strlen(msg));
+    //wizsend(WIZ_SOCKET, (uint8_t*)sensorout, strlen(msg));
+    read_sensors();
+
+    char status_message[100]; 
+    int len = snprintf(status_message, sizeof(status_message),
+                    "Status: %d. Command received: %d. Mode: %d.",
+                    status_ok, command_received, mode);
+
+    if (len > 0 && len < (int)sizeof(status_message)) {
+        memcpy(ethernet_send_buf, status_message, len); // copy only the real message length
+        wiz_send(ethernet_send_buf, len);                // send only that many bytes
+    } else {
+        // formatting error or truncation — handle appropriately
+    }
+    print_sensor_data(&sensor_data);
+    //char status_message[100]; 
+    //int len = snprintf(status_message, sizeof(status_message),
+    //                "Status: %d. Command received: %d. Mode: %d.",
+    //                status_ok, command_received, mode);
+    //log_sensor_data(&sensor_data, "/sdcard/log.csv");
+    //snprintf(status_message, 100, "Status: %d. Command recieved: %d. Mode: %d.",status_ok, command_received, mode);
+    char buf[300];
+    int len2 = snprintf(buf, sizeof(buf), "Time: %02u:%02u:%02u, Pa1=%.2f \n", sensor_data.hours, sensor_data.minutes, sensor_data.seconds, sensor_data.Pa1);
+    wiz_send((uint8_t*)buf, len2);
+    //memset(ethernet_send_buf, 0, sizeof(ethernet_send_buf)); // clear old data first
+    //memcpy(ethernet_send_buf, &sensor_data.Pa1, sizeof(sensor_data.Pa1));
+    //memcpy(ethernet_send_buf, &status_message, sizeof(ethernet_send_buf));
+    //printf("ethernet2\n");
+    //printf("sock num %d\n", _WIZCHIP_SOCK_NUM_);
+    //printf("size ethernet buf %d\n", sizeof(ethernet_send_buf));
+    //wiz_send(ethernet_send_buf, sizeof(ethernet_send_buf));
+
+    printf("ethernet3\n");
+
+    // Wait until loop has taken 100 ms.
+    TickType_t current_time_stop = xTaskGetTickCount();
+    printf("ethernet4\n");
+    time_loop = pdMS_TO_TICKS(1000); //- (current_time_stop - current_time_start);
+    printf("time_loop %d\n", time_loop);
+    if (time_loop > 0)
+    {
+        printf("wait\n");
+        vTaskDelay(time_loop);
+    }
+    printf("loop end\n");
 }
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+void handle_ethernet_data(esp_err_t esp_err_status)
+{
+    switch (esp_err_status)
+    {
+    case ESP_ERR_NOT_FOUND:
+        // No data in buffer = no command from ground
+        command_received = false;
+        break;
+    
+    case ESP_OK:
+        // Command recieved
+        if (mode == 1)
+        {
+            mode = 2;
+        }
+        handle_command(); 
+        command_received = true;
+        con_lost = false;
+        status_ok = true;
+        loops_since_connection = 0; // Reset connection loss buffer
+        connection_reestablished(&con_lost, &loss_timestamp_us); 
+        break;
+
+    case ESP_FAIL:
+        // Error when receiving data
+        // What to do here?
+         break;
+    
+    default:
+        //Unexpected return
+        ESP_LOGI(TAG, "Unexpected return from wiz_receive: %d", esp_err_status);
+        break;
+    }
+}
+
+void handle_command()
+{
+    // Interpret command in ethernet_recieve_buf and act accordingly
+    // For now, just log the received command
+    ESP_LOGI(TAG, "Received command: %.*s", (int)ethernet_recieve_buf_bytes_read, ethernet_recieve_buf);
+}

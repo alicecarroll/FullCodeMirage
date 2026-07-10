@@ -42,6 +42,18 @@ extern "C"
      */
     esp_err_t wiz_send(const uint8_t *data, size_t length);
 
+        /**
+     * @brief  Send data over the open TCP connection.
+     *         Data is written into the W5500's internal TX buffer and
+     *         transmitted by the chip's hardwired TCP/IP stack.
+     *
+     * @param[in] data    Pointer to the buffer to send.
+     * @param[in] length  Number of bytes to send.
+     *
+     * @return ESP_OK on success, or an esp_err_t error code.
+     */
+    esp_err_t wiz_sendto(uint8_t *target_ip, const uint8_t *data, uint8_t length);
+
     /**
      * @brief  Receive data from the W5500's internal RX buffer.
      *

@@ -264,21 +264,21 @@ _WIZCHIP  WIZCHIP = {
         wizchip_cs_select,
         wizchip_cs_deselect
     },
-    {
-        {
-            //M20150601 : Rename the function
-            wizchip_spi_readbyte,
-            wizchip_spi_writebyte,
-            wizchip_spi_readburst,
-            wizchip_spi_writeburst
-            
-            //wizchip_bus_readdata,
-            //wizchip_bus_writedata,
-            //0,
-            //0
-        },
-
+#if (_WIZCHIP_IO_MODE_ & _WIZCHIP_IO_MODE_SPI_)
+    .IF.SPI = {
+        wizchip_spi_readbyte,
+        wizchip_spi_writebyte,
+        wizchip_spi_readburst,
+        wizchip_spi_writeburst
     }
+#elif (_WIZCHIP_IO_MODE_ & _WIZCHIP_IO_MODE_BUS_)
+    .IF.BUS = {
+        wizchip_bus_readdata,
+        wizchip_bus_writedata,
+        0,
+        0
+    }
+#endif
 };
 
 

@@ -46,3 +46,7 @@ extern MS5803_Calibration pp2_cal;
 static void read_ms5803(MS5803_Calibration* cal, float* pressure);
 
 void read_sensors();
+
+void write_csv_header(FILE *f);
+void write_csv_row(FILE *f, const SensorData *data);
+void log_sensor_data(const SensorData *data, const char *filepath);

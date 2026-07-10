@@ -14,7 +14,7 @@
 // PINS definition
 #define Watchdog_PIN         GPIO_NUM_2
 #define Thermal_reset_PIN    GPIO_NUM_3
-#define Preassure_reset_PIN  GPIO_NUM_27
+#define Preassure_reset_PIN  GPIO_NUM_24 //27
 #define K96_TX_PIN           GPIO_NUM_0
 #define K96_RX_PIN           GPIO_NUM_1
 #define K96_EN_PIN           GPIO_NUM_6
@@ -23,7 +23,7 @@
 #define CS_SD_PIN            GPIO_NUM_9
 #define CS_WIZ_PIN           GPIO_NUM_10
 #define SPI_MOSI_PIN         GPIO_NUM_5
-#define SPI_MISO_PIN         GPIO_NUM_15
+#define SPI_MISO_PIN         GPIO_NUM_23 //15
 #define SPI_clk_PIN          GPIO_NUM_4
 #define I2C_SDA              GPIO_NUM_25
 #define I2C_SCL              GPIO_NUM_26
@@ -77,6 +77,8 @@ extern spi_device_handle_t WIZ_handle;
 // Ethernet (WIZ)
 #define WIZ_SOCKET 0      // TCP
 #define WIZ_PING_SOCKET 1 // ICMP uses socket 1, independent of TCP
+#define LOCAL_PORT 6000
+#define REMOTE_PORT 5000 //port to  listen from pc
 // Socket 0 14KB TX + 14KB RX internal buffer
 // Socket 1  2KB TX +  2KB RX internal buffer
 
@@ -86,9 +88,10 @@ extern spi_device_handle_t WIZ_handle;
 // Ethernet Network configuration
 #define WIZ_MAC {0x00, 0x08, 0xDC, 0x01, 0x02, 0x03}
 #define WIZ_IP {192, 168, 0, 2}
-#define WIZ_GATEWAY {192, 168, 1, 1}
+#define WIZ_GATEWAY {192, 168, 0, 1}
 #define WIZ_SUBNET {255, 255, 255, 0}
 #define WIZ_DNS {8, 8, 8, 8}
+#define USE_DHCP  0
 
 #define SD_queue_size 7
 #define SD_clk_spd_hz 1000000 // 1MHz
@@ -120,6 +123,6 @@ extern spi_device_handle_t WIZ_handle;
 
 // Sensor value thresholds
 #define P_STRATOSPHERE 40 // Stratosphere limit, TBD
-#define CHAMBER_P_SHUTTER_THRESHOLD // Pressure threshold for opening shutter to meassurment chamber, TBD
-#define CHAMBER_P_CHAMBER_THRESHOLD // Pressure threshold for taking measurements,TBD
-#define INLET_TEMPERATURE_THRESHOLD // Temperature threshold for taking measurements, TBD
+#define CHAMBER_P_SHUTTER_THRESHOLD 3200// Pressure threshold for opening shutter to meassurment chamber, TBD
+#define CHAMBER_P_CHAMBER_THRESHOLD 2800// Pressure threshold for taking measurements,TBD
+//#define INLET_TEMPERATURE_THRESHOLD // Temperature threshold for taking measurements, TBD
