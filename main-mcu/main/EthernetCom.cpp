@@ -192,7 +192,7 @@ esp_err_t wiz_init(void)
     reg_wizchip_spi_cbfunc(wiz_spi_read_byte, wiz_spi_write_byte);
     reg_wizchip_spiburst_cbfunc(wiz_spi_read_burst, wiz_spi_write_burst);
 
-    uint8_t tx_size[_WIZCHIP_SOCK_NUM_] = {8, 8, 0, 0, 0, 0, 0, 0};
+    uint8_t tx_size[_WIZCHIP_SOCK_NUM_] = {8, 8, 0, 0, 0, 0, 0, 0}; //only takes 1, 2, 4, 8 or 16 kb
     uint8_t rx_size[_WIZCHIP_SOCK_NUM_] = {8, 8, 0, 0, 0, 0, 0, 0};
 
     if (wizchip_init(tx_size, rx_size) != 0)
