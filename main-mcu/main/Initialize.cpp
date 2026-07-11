@@ -176,11 +176,35 @@ static void init_sht45_sensor(uint8_t channel)
 }
 
 // initioalize MS5803 sensors
-static void init_ms5803(uint8_t channel, MS5803_Calibration *cal)
+
+static void ms5803_reset()
+{
+    uint8_t cmd = 0x1E;
+
+    esp_err_t err = i2c_master_write_to_device(
+        I2C_master,
+        MS5803_addr,
+        &cmd,
+        1,
+        pdMS_TO_TICKS(20));
+
+    if (err != ESP_OK)
+    {
+        printf("MS5803 reset failed\n");
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(10));
+}
+
+static void init_ms5803(uint8_t channel, MS5803_Calibration *cal, MS5803Model model)
 {
     sel_mux_channel(channel);
 
+    ms5803_reset();
+
     uint8_t data[2];
+
+    cal -> model = model;
 
     for (uint8_t i = 0; i < 6; i++)
     {
@@ -203,6 +227,8 @@ static void init_ms5803(uint8_t channel, MS5803_Calibration *cal)
 
         cal->C[i + 1] =
             (data[0] << 8) | data[1];
+
+        printf("PROM[%d] = %u\n", i, cal->C[i + 1]);
     }
 }
 
@@ -211,8 +237,8 @@ void init_sensors()
     init_sht45_sensor(multiplex_Ambient);
     //init_sht45_sensor(multiplex_Tp4_Pp1_Tp5_Pp2); There is no SHT45 connected on the K96 board
     init_sht45_sensor(multiplex_Outlet);
-    init_ms5803(multiplex_Ambient, &pa1_cal);
-    init_ms5803(multiplex_Tp4_Pp1_Tp5_Pp2, &pp2_cal);
+    init_ms5803(multiplex_Ambient, &pa1_cal, MS5803Model::MS5803_01BA);
+    init_ms5803(multiplex_Tp4_Pp1_Tp5_Pp2, &pp2_cal, MS5803Model::MS5803_14BA);
 }
 
 // Initialize neopixel

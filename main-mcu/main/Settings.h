@@ -78,7 +78,7 @@ extern spi_device_handle_t WIZ_handle;
 #define WIZ_SOCKET 0      // TCP
 #define WIZ_PING_SOCKET 1 // ICMP uses socket 1, independent of TCP
 #define LOCAL_PORT 6000
-#define REMOTE_PORT 5000 //port to  listen from pc
+#define REMOTE_PORT 5001 //port to  listen from pc
 // Socket 0 14KB TX + 14KB RX internal buffer
 // Socket 1  2KB TX +  2KB RX internal buffer
 

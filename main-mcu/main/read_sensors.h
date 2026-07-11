@@ -20,7 +20,8 @@ struct SensorData
     float Pp1;           // Pipe pump/compressor preassure
     float Pa1;           // Pressure in MS580314BA01
     float Ta1;           // Temperature in ambient
-    float Ta2;           // Temperature in ambient from SHT45
+    float Ta2;           // Temperature in ambient from MS580314BA01
+    float Ta3;           // Temperature in ambient from SHT45
     float Ha1;           // Humidity in ambient
     float Tp5;           // Temperature in meassurment chamber
     float Pp2;           // Pressure in meassurment chamber
@@ -41,15 +42,23 @@ struct SensorData
 
 extern SensorData sensor_data;
 
+enum class MS5803Model : uint8_t {
+    MS5803_01BA,
+    MS5803_14BA,
+};
 struct MS5803_Calibration
 {
     uint16_t C[7];
+    MS5803Model model;
 };
 
 extern MS5803_Calibration pa1_cal;
 extern MS5803_Calibration pp2_cal;
 
-static void read_ms5803(MS5803_Calibration* cal, float* pressure);
+void read_ms5803(
+    MS5803_Calibration *cal,
+    float *pressure,
+    float *temperature);
 
 
 void read_sensors();

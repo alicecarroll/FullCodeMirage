@@ -46,45 +46,73 @@ static void read_tmp1075(float *temperature)
     }
 }
 
-// Continuous pressure + temperature
+// ABP2 is single-shot only. Must trigger conversion, wait, then read.
 static void read_abp2(float *pressure,
                       float *temperature)
 {
-    uint8_t data[4];
+    uint8_t data[7];
+    uint8_t cmd[3] = {0xAA, 0x00, 0x00}; // High precision measurement command
 
-    esp_err_t err = i2c_master_read_from_device(
+    // 1. Send the command to wake the sensor up and trigger a measurement
+    esp_err_t err_write = i2c_master_write_to_device(
+        I2C_master,
+        ABP2_addr,
+        cmd,
+        sizeof(cmd),
+        pdMS_TO_TICKS(20));
+
+    if (err_write != ESP_OK)
+    {
+        printf("ABP2 measurement trigger failed: %s\n", esp_err_to_name(err_write));
+        return;
+    }
+
+    // 2. Wait for the sensor to finish measuring (High-precision takes max 8.3ms)
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    esp_err_t err_read = i2c_master_read_from_device(
         I2C_master,
         ABP2_addr,
         data,
-        4,
+        7,
         pdMS_TO_TICKS(20));
 
-    if (err != ESP_OK)
+    if (err_read != ESP_OK)
     {
-        printf("ABP2 read failed: %s\n", esp_err_to_name(err));
+        printf("ABP2 read failed: %s\n", esp_err_to_name(err_read));
         return;
     }
 
     // Pressure
-    if (pressure != nullptr)
-    {
-        uint16_t raw_pressure =
-            ((data[0] & 0x3F) << 8) | data[1];
+    if (pressure != nullptr) {
+        const float OUTPUT_MIN = 1677722.0f;
+        const float OUTPUT_MAX = 15099494.0f;
+
+        printf("ABP2 raw: %02X %02X %02X %02X %02X %02X %02X\n", data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
+
+        uint32_t pressure_counts =
+        ((uint32_t)data[1] << 16) |
+        ((uint32_t)data[2] << 8) |
+        data[3];
 
         *pressure =
-            ((float)(raw_pressure - 1638) * 150.0f) /
-            (14745.0f - 1638.0f);
+            ((pressure_counts - OUTPUT_MIN) *
+            30.0f) /
+            (OUTPUT_MAX - OUTPUT_MIN);
+
+        *pressure *= 0.0689476f;  // psi -> bar
+
     }
 
     // Temperature
     if (temperature != nullptr)
     {
-        uint16_t raw_temperature =
-            (data[2] << 3) |
-            ((data[3] & 0xE0) >> 5);
+        uint32_t temperature_counts =
+        ((uint32_t)data[4] << 16) |
+        ((uint32_t)data[5] << 8) |
+        data[6];
 
-        *temperature =
-            ((float)raw_temperature * 200.0f / 2047.0f) - 50.0f;
+        *temperature = temperature_counts * 200.0f / 16777215.0f - 50.0f;
     }
 }
 
@@ -216,7 +244,7 @@ static void read_sht45(float *temperature, float *humidity)
 MS5803_Calibration pa1_cal;
 MS5803_Calibration pp2_cal;
 
-static void read_ms5803(MS5803_Calibration *cal, float *pressure)
+void read_ms5803(MS5803_Calibration *cal, float *pressure, float *temperature)
 {
     uint8_t cmd;
     uint8_t data[3];
@@ -303,18 +331,104 @@ static void read_ms5803(MS5803_Calibration *cal, float *pressure)
         ((uint32_t)data[1] << 8) |
         data[2];
 
-    // Compensation calculations
-    int32_t dT = D2 - ((uint32_t)cal->C[5] << 8);
+    // First-order compensation
+    int32_t dT = (int32_t)D2 - ((int32_t)cal->C[5] << 8);
 
-    int64_t OFF = ((int64_t)cal->C[2] << 16) + (((int64_t)cal->C[4] * dT) >> 7);
+    int64_t TEMP =
+        2000 + (((int64_t)dT * cal->C[6]) >> 23);
 
-    int64_t SENS = ((int64_t)cal->C[1] << 15) + (((int64_t)cal->C[3] * dT) >> 8);
+    int64_t OFF =
+        ((int64_t)cal->C[2] << 16) +
+        (((int64_t)cal->C[4] * dT) >> 7);
 
-    int32_t P = ((((int64_t)D1 * SENS) >> 21) - OFF) >> 15;
+    int64_t SENS =
+        ((int64_t)cal->C[1] << 15) +
+        (((int64_t)cal->C[3] * dT) >> 8);
+
+
+    // Second-order compensation
+    int64_t T2 = 0;
+    int64_t OFF2 = 0;
+    int64_t SENS2 = 0;
+
+    // The different sensor models have different second-order compensation requirements
+    if (cal->model == MS5803Model::MS5803_01BA)
+    {
+
+        if (TEMP < 2000)
+        {
+            T2 = ((int64_t)dT * dT) >> 31;
+
+            OFF2 = 3 * ((TEMP - 2000) * (TEMP - 2000));
+
+            SENS2 =
+                7 * ((TEMP - 2000) * (TEMP - 2000)) >> 3;
+
+            if (TEMP < -1500)
+            {
+                SENS2 +=
+                    2 * ((TEMP + 1500) * (TEMP + 1500));
+            }
+        }
+        else if (TEMP >= 4500)
+        {
+            SENS2 =
+                ((TEMP - 4500) * (TEMP - 4500)) >> 3;
+        }
+    } 
+
+    else if (cal->model == MS5803Model::MS5803_14BA)
+    {
+        if (TEMP < 2000)
+        {
+            T2 = 3* ((int64_t)dT * dT) >> 33;
+
+            OFF2 = 3 * ((TEMP - 2000) * (TEMP - 2000)) >> 1;
+
+            SENS2 =
+                5 * ((TEMP - 2000) * (TEMP - 2000)) >> 3;
+
+            if (TEMP < -1500)
+            {
+                OFF2 += 7 * ((TEMP + 1500) * (TEMP + 1500));
+                SENS2 +=
+                    4 * ((TEMP + 1500) * (TEMP + 1500));
+            }
+        }
+        else
+        {
+            T2 = 7 * ((int64_t)dT * dT) >> 37;
+            OFF2 = 1* ((TEMP - 2000) * (TEMP - 2000)) >> 4;
+        }
+    }
+
+    TEMP -= T2;
+    OFF -= OFF2;
+    SENS -= SENS2;
+
+
+    int64_t P =
+        ((((int64_t)D1 * SENS) >> 21) - OFF) >> 15;
+
+    
+    // The sensors need different scaling factors to convert the raw pressure value to bar
+    if (cal->model == MS5803Model::MS5803_01BA)
+    {
+        P /= 100000; // Convert to bar
+    }
+    else if (cal->model == MS5803Model::MS5803_14BA)
+    {
+        P /= 10000; // Convert to bar
+    }
 
     if (pressure != nullptr)
     {
-        *pressure = (float)P; // Pressure in pas
+        *pressure = (float)P;
+    }
+
+    if (temperature != nullptr)
+    {
+        *temperature = (float)TEMP / 100.0f;
     }
 }
 
@@ -398,17 +512,16 @@ void read_sensors()
 
     vTaskDelay(pdMS_TO_TICKS(20));
 
+    read_tmp117(&sensor_data.Ta1);
+
     read_sht45(
-        &sensor_data.Ta2,
+        &sensor_data.Ta3,
         &sensor_data.Ha1);
 
     read_ms5803(
         &pa1_cal,
-        &sensor_data.Pa1);
-
-
-    read_tmp117(
-        &sensor_data.Ta1);
+        &sensor_data.Pa1,
+        &sensor_data.Ta2);
 
 
     // Channel 3: Tp4 + Pp1 + Tp5 + Pp2
@@ -430,7 +543,8 @@ void read_sensors()
     // Chamber pressure
     read_ms5803(
         &pp2_cal,
-        &sensor_data.Pp2);
+        &sensor_data.Pp2,
+        &sensor_data.Tp5);
 
     // Channel 4: Tp3
     sel_mux_channel(multiplex_Tp3);
@@ -484,12 +598,12 @@ void write_csv_row(FILE *f, const SensorData *data)
     if (data == nullptr) return;
 
     fprintf(f, "%02u,%02u,%02u,"
-               "%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,"
+               "%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,"
                "%.2f,%.2f,%.2f,"
                "%.2f,%.2f,%.2f,%.2f,%u\n",
             data->hours, data->minutes, data->seconds,
             data->Tp1, data->Tp2, data->Tp3, data->Tp6, data->Pp3, data->Tp4,
-            data->Pp1, data->Pa1, data->Ta1, data->Ta2, data->Ha1, data->Tp5, data->Pp2,
+            data->Pp1, data->Pa1, data->Ta1, data->Ta2, data->Ta3, data->Ha1, data->Tp5, data->Pp2,
             data->Tt1, data->Tt2, data->Tt3,
             data->K96_CO2, data->K96_pressure, data->K96_temperature,
             data->K96_humidity, data->K96_error);

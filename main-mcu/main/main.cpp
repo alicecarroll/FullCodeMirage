@@ -96,7 +96,7 @@ void loop()
     // Common actions
     TickType_t current_time_start = xTaskGetTickCount();
     //feed_watchdog(system_ok);
-    wiz_connect(targetip, REMOTE_PORT);
+    //wiz_connect(targetip, REMOTE_PORT);
 
 
     // Check for commands
@@ -152,7 +152,7 @@ void loop()
         // Elevation check in terms of pressure
         if (sensor_data.Pa1 < P_STRATOSPHERE)
         {
-            if (loops_since_connection > LOOP_WO_CONNECTION) // If connection lost for more than 10 loops, enter safe mode
+            if (loops_since_connection > LOOP_WO_CONNECTION) // If connection lost for more than LOOP_WO_CONNECTION loops, enter safe mode
             {
                 mode = 2; // Standby
                 con_lost = true;
