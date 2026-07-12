@@ -5,19 +5,13 @@
 #include "driver/gpio.h"
 #include "Settings.h"
 #include "Multiplexer.h"
+#include "Initialize.h"
 //#include "communication.h"
 #include "Slaves.h"
 #include "read_sensors.h"
 
 // Shared slave address
 #define Slave_MCU_addr  0x42
-
-// Watchdog tracking metrics
-#define WATCHDOG_TIMEOUT_MS 5000
-static uint32_t last_thermal_ping = 0;
-static uint32_t last_pressure_ping = 0;
-static uint8_t last_thermal_ping_val = 0;
-static uint8_t last_pressure_ping_val = 0;
 
 // Internal helper
 static bool select_slave(
@@ -28,12 +22,12 @@ static bool select_slave(
     switch(slave)
     {
         case thermal_mcu:
-            *mux_channel = multiplex_Tp1_devT;
+            *mux_channel = multiplex_Tt3_devP;
             *reset_pin = Thermal_reset_PIN;
             return true;
 
         case pressure_mcu:
-            *mux_channel = multiplex_Tt3_devP;
+            *mux_channel = multiplex_Tp1_devT;
             *reset_pin = Preassure_reset_PIN;
             return true;
     }
@@ -181,6 +175,19 @@ bool slave_update_setting(
     return (err == ESP_OK);
 }
 
+void recover_i2c_driver() {
+    ESP_LOGW("I2C_DEBUG", "Hard resetting I2C peripheral...");
+    
+    // 1. Delete the current driver instance
+    i2c_driver_delete(I2C_master);
+    
+    // 2. Wait for pending operations to clear
+    vTaskDelay(pdMS_TO_TICKS(50));
+    
+    // 3. Re-install the driver using your existing initialization
+    init_i2c(); 
+}
+
 // Read slave status (Modified to capture the ping counter byte)
 bool slave_read_status(
     SlaveDevice slave,
@@ -207,43 +214,28 @@ bool slave_read_status(
         100 / portTICK_PERIOD_MS
     );
 
-    uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
-
     if (err != ESP_OK)
     {
         status->online = false;
-        return false;
+        if (err != ESP_OK) {
+            ESP_LOGE("I2C_DEBUG", "I2C Transaction Failed: 0x%02X", err);
+            if (err==0xFFFFFFFF) {
+                ESP_LOGE("I2C_DEBUG", "I2C bus may be stuck. Attempting recovery...");
+                recover_i2c_driver();
+            }
+        }
+        return false; // Main loop will catch this false and eventually trigger reset
     }
 
     status->online = true;
     status->state = data[0];
     status->error = data[1];
-
-    // Read the rolling ping index byte to reset the local watchdog clocks
-    uint8_t received_ping = data[2];
-    if (slave == thermal_mcu)
-    {
-        if (received_ping != last_thermal_ping_val)
-        {
-            last_thermal_ping = current_time;
-            last_thermal_ping_val = received_ping;
-        }
-    }
-    else if (slave == pressure_mcu)
-    {
-        if (received_ping != last_pressure_ping_val)
-        {
-            last_pressure_ping = current_time;
-            last_pressure_ping_val = received_ping;
-        }
-    }
-
+    
     return true;
 }
 
 // Reset slave MCU
-void slave_reset(
-    SlaveDevice slave)
+void slave_reset(SlaveDevice slave)
 {
     uint8_t mux_channel;
     gpio_num_t reset_pin;
@@ -253,60 +245,10 @@ void slave_reset(
         return;
     }
 
-    // Configure pin explicitly to guarantee output state
-    gpio_config_t io_conf = {};
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = (1ULL << reset_pin);
-    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-    gpio_config(&io_conf);
-
-    // Pulse BOOT0 Low to trigger restart
-    gpio_set_level(reset_pin, 0);
+    // REMOVED: gpio_config() calls that were causing the conflict.
+    // Instead, just perform the pulse on the existing, pre-configured pin.
+    
+    gpio_set_level(reset_pin, 0); // Pulse low
     vTaskDelay(pdMS_TO_TICKS(100));
-    
-    // Release back to high/input mode so it enters execution mode naturally
-    gpio_set_level(reset_pin, 1);
-    vTaskDelay(pdMS_TO_TICKS(10));
-    gpio_set_direction(reset_pin, GPIO_MODE_INPUT);
-}
-
-/**
- * FreeRTOS Background Watchdog Task.
- * Spun up in application initialization to verify both MCUs are responsive.
- */
-void slave_watchdog_task(void *pvParameters)
-{
-    SlaveStatus temp_status;
-    uint32_t current_time;
-    
-    // Initialize the timestamps
-    last_thermal_ping = xTaskGetTickCount() * portTICK_PERIOD_MS;
-    last_pressure_ping = last_thermal_ping;
-
-    while (1)
-    {
-        current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
-
-        // Check Thermal Slave
-        slave_read_status(thermal_mcu, &temp_status);
-        if ((current_time - last_thermal_ping) > WATCHDOG_TIMEOUT_MS)
-        {
-            slave_reset(thermal_mcu);
-            last_thermal_ping = xTaskGetTickCount() * portTICK_PERIOD_MS; // Give time to boot
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(200)); // Stagger multiplexer readings
-
-        // Check Pressure Slave
-        slave_read_status(pressure_mcu, &temp_status);
-        if ((current_time - last_pressure_ping) > WATCHDOG_TIMEOUT_MS)
-        {
-            slave_reset(pressure_mcu);
-            last_pressure_ping = xTaskGetTickCount() * portTICK_PERIOD_MS;
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(1000)); // Poll once per second
-    }
+    gpio_set_level(reset_pin, 1); // Release
 }

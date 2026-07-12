@@ -14,8 +14,8 @@
 // PDB relay signals — connector pins 1, 4, 5, 28 -> these GPIOs.
 // Plain on/off to MOSFETs on the power distribution board, no
 // sequencing/timing logic.
-#define PDB_RELAY1_PIN   GPIO_NUM_48  // pin 1
-#define PDB_RELAY2_PIN   GPIO_NUM_1   // pin 4
+#define PDB_RELAY1_PIN   GPIO_NUM_48  // pin 1, 
+#define PDB_RELAY2_PIN   GPIO_NUM_1   // pin 4, 
 #define PDB_RELAY3_PIN   GPIO_NUM_2   // pin 5
 #define PDB_RELAY4_PIN   GPIO_NUM_21  // pin 28
 
@@ -365,4 +365,8 @@ void pdb_relay4_off() { pdb_relay4_set(0); }
 extern "C" void app_main(void)
 {
     printf("Hello\n");
+    pdb_relay1_off();
+    pdb_relay2_off();
+    pdb_relay3_off();
+    pdb_relay4_off();
 }

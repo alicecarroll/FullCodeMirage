@@ -12,6 +12,8 @@
 #include "esp_log.h"
 #include <stdio.h>
 
+
+
 // Initialize pins
 void init_gpio_pins()
 {
@@ -38,6 +40,14 @@ void init_gpio_pins()
     gpio_set_level(CS_WIZ_PIN, 1);
     gpio_set_level(CS_SD_PIN, 1);   // deselect SD card by default
     gpio_set_level(K96_EN_PIN, 0);
+
+    gpio_reset_pin(Thermal_reset_PIN);
+    gpio_set_direction(Thermal_reset_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(Thermal_reset_PIN, 1); 
+
+    gpio_reset_pin(Preassure_reset_PIN);
+    gpio_set_direction(Preassure_reset_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(Preassure_reset_PIN, 1);
 }
 
 // Initialize SPI

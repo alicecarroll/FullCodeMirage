@@ -1,0 +1,6 @@
+# this should allow the use of the esp-idf platform for uploading and monitoring the arduino nano
+CONFIG_ESP_CONSOLE_UART_DEFAULT=
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_SYSTEM_HARDWARE_RESET_USB_SERIAL_JTAG=y
+CONFIG_ESPTOOLPY_BEFORE="usb_reset"
+CONFIG_ESPTOOLPY_AFTER="hard-reset"

@@ -88,8 +88,6 @@ static void read_abp2(float *pressure,
         const float OUTPUT_MIN = 1677722.0f;
         const float OUTPUT_MAX = 15099494.0f;
 
-        printf("ABP2 raw: %02X %02X %02X %02X %02X %02X %02X\n", data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
-
         uint32_t pressure_counts =
         ((uint32_t)data[1] << 16) |
         ((uint32_t)data[2] << 8) |
@@ -485,17 +483,10 @@ static void read_ds3231(uint8_t *hours, uint8_t *minutes, uint8_t *seconds)
 // Collect all sensor data
 void read_sensors()
 {
-    // Channel 0: Tp1
-    sel_mux_channel(multiplex_Tp1_devT);
-    printf("Switching to MUX channel: %i\n", multiplex_Tp1_devT);
 
-    vTaskDelay(pdMS_TO_TICKS(20));
-
-    read_tmp1075(&sensor_data.Tp1);
-
-    // Channel 1: RTC + Tp2
+    // Channel 0: RTC + Tp2
     sel_mux_channel(multiplex_RTC_Tp2);
-    printf("Switching to MUX channel: %i\n", multiplex_RTC_Tp2);
+    //printf("Switching to MUX channel: %i\n", multiplex_RTC_Tp2);
 
     vTaskDelay(pdMS_TO_TICKS(20));
 
@@ -506,11 +497,19 @@ void read_sensors()
 
     read_tmp1075(&sensor_data.Tp2);
 
+    // Channel 1: Tp1
+    sel_mux_channel(multiplex_Tp1_devT);
+    //printf("Switching to MUX channel: %i\n", multiplex_Tp1_devT);
+
+    //vTaskDelay(pdMS_TO_TICKS(20));
+
+    read_tmp1075(&sensor_data.Tp1);
+
     // Channel 2: Ambient sensors (temperature, humidity, preassure)
     sel_mux_channel(multiplex_Ambient);
-    printf("Switching to MUX channel: %i\n", multiplex_Ambient);
+    //printf("Switching to MUX channel: %i\n", multiplex_Ambient);
 
-    vTaskDelay(pdMS_TO_TICKS(20));
+    //vTaskDelay(pdMS_TO_TICKS(20));
 
     read_tmp117(&sensor_data.Ta1);
 
@@ -526,9 +525,9 @@ void read_sensors()
 
     // Channel 3: Tp4 + Pp1 + Tp5 + Pp2
     sel_mux_channel(multiplex_Tp4_Pp1_Tp5_Pp2);
-    printf("Switching to MUX channel: %i\n", multiplex_Tp4_Pp1_Tp5_Pp2);
+    //printf("Switching to MUX channel: %i\n", multiplex_Tp4_Pp1_Tp5_Pp2);
 
-    vTaskDelay(pdMS_TO_TICKS(20));
+    //vTaskDelay(pdMS_TO_TICKS(20));
 
     // ABP2 pipe pressure + temperature
     read_abp2(
@@ -548,28 +547,28 @@ void read_sensors()
 
     // Channel 4: Tp3
     sel_mux_channel(multiplex_Tp3);
-    printf("Switching to MUX channel: %i\n", multiplex_Tp3);
+    //printf("Switching to MUX channel: %i\n", multiplex_Tp3);
 
-    vTaskDelay(pdMS_TO_TICKS(20));
+    //vTaskDelay(pdMS_TO_TICKS(20));
     read_tmp1075(&sensor_data.Tp3);
 
     // Channel 5: Tt1 + Tt2
     sel_mux_channel(multiplex_Outlet);
-    printf("Switching to MUX channel: %i\n", multiplex_Outlet);
+    //printf("Switching to MUX channel: %i\n", multiplex_Outlet);
 
-    vTaskDelay(pdMS_TO_TICKS(20));
+    //vTaskDelay(pdMS_TO_TICKS(20));
 
     read_sht45(
         &sensor_data.Tt1,
         nullptr);
-    vTaskDelay(pdMS_TO_TICKS(20));
-    read_tmp1075(&sensor_data.Tt2); // The tt2 port seems to give weird readings, independent on which tmp1075 is connected.
+    //vTaskDelay(pdMS_TO_TICKS(20));
+    read_tmp1075(&sensor_data.Tt2); 
 
     // Channel 6: Tp6 + Pp3
     sel_mux_channel(multiplex_Tp6_Pp3);
-    printf("Switching to MUX channel: %i\n", multiplex_Tp6_Pp3);
+    //printf("Switching to MUX channel: %i\n", multiplex_Tp6_Pp3);
 
-    vTaskDelay(pdMS_TO_TICKS(20));
+    //vTaskDelay(pdMS_TO_TICKS(20));
     
     read_abp2(
         &sensor_data.Pp3,
@@ -577,9 +576,9 @@ void read_sensors()
 
     // Channel 7: Tt3
     sel_mux_channel(multiplex_Tt3_devP);
-    printf("Switching to MUX channel: %i\n", multiplex_Tt3_devP);
+    //printf("Switching to MUX channel: %i\n", multiplex_Tt3_devP);
 
-    vTaskDelay(pdMS_TO_TICKS(20));
+    //vTaskDelay(pdMS_TO_TICKS(20));
 
     read_tmp117(
         &sensor_data.Tt3);
