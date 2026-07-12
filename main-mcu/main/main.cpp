@@ -18,7 +18,7 @@
 #include "watchdog.h"
 #include "main.h"
 #include "w5500.h"
-
+#include "Slaves.h" 
 
 bool loop_exp = true;
 uint16_t time_loop;
@@ -52,6 +52,11 @@ int loops_since_connection = 0; // To buffer short con losses for stable running
 //Pressure
 bool shutters_open = false; // To track if shutters are open
 
+// Watchdog variables for tracking slave pings locally inside the loop
+#define SLAVE_WATCHDOG_TIMEOUT_MS 5000
+uint32_t last_thermal_ping_time = 0;
+uint32_t last_pressure_ping_time = 0;
+
 static const char *TAG = "main";
 
 /*  Put somewhere. For ConnectionLoss
@@ -74,6 +79,10 @@ extern "C" void app_main()
     sd_mount();
     printf("Initialization done\n");
 
+    // Initialize the slave watchdog timestamps at bootup
+    uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    last_thermal_ping_time = current_time;
+    last_pressure_ping_time = current_time;
 
     int8_t s = wizsocket(WIZ_SOCKET, Sn_MR_TCP, LOCAL_PORT, 0);
     printf("after socket s=%d\n", s);
@@ -95,6 +104,7 @@ void loop()
 {
     // Common actions
     TickType_t current_time_start = xTaskGetTickCount();
+    uint32_t current_time_ms = current_time_start * portTICK_PERIOD_MS;
     //feed_watchdog(system_ok);
     //wiz_connect(targetip, REMOTE_PORT);
 
@@ -114,25 +124,58 @@ void loop()
         //buffer_SD_data_binary(sensor_data); //4k - est time: 1.5 ms every 8th loop
         buffer_SD_data_csv(&sensor_data);      //4k - est time: 3 ms every 8th loop
         print_sensor_data(&sensor_data);
-
     }
 
-
-
     // Mode dependent actions
+    printf("mode %d\n", mode);
     switch (mode)
     {
     // Test loop
     case 1:
+        {
+            // --- SLAVE CONTROL AND TESTING LOGIC ---
+            
+            // 1. Send test control packet to Thermal MCU 
+            // Fake Command parameters: emergency=false, autonomous=false (manual), pressure=true, heater mask=0x01 (Heater 1 active)
+            bool thermal_tx_ok = slave_send_complex_state(thermal_mcu, false, false, true, 0x01);
+            if (!thermal_tx_ok) {
+                ESP_LOGE(TAG, "I2C Write transmission failed to Thermal MCU");
+            }
 
-        // Bark at subsystems
-        //!!!!!!!!!!
+            // 2. Query structural health data from Thermal MCU (this updates the ping timer automatically inside slaves.cpp)
+            SlaveStatus thermal_status;
+            if (slave_read_status(thermal_mcu, &thermal_status)) {
+                ESP_LOGI(TAG, "Thermal MCU Response -> State: %d, Error: %d", thermal_status.state, thermal_status.error);
+                // Reset watchdog timer on a valid ping change inside slave_read_status
+                last_thermal_ping_time = current_time_ms; 
+            } else {
+                ESP_LOGW(TAG, "Thermal MCU failed to respond to state read status query");
+            }
 
-        //!!!!!
-        // Enter IP when given by ESA
-        // Ping ground that status is OK.
-        esp_err_status = wiz_ping(targetip, "No command received. Status: OK.");
+            // 3. Evaluate Software Watchdog for Thermal MCU
+            if ((current_time_ms - last_thermal_ping_time) > SLAVE_WATCHDOG_TIMEOUT_MS) {
+                ESP_LOGE(TAG, "!!! Watchdog Triggered: Thermal MCU timed out. Resetting device via Pin %d !!!", Thermal_reset_PIN);
+                slave_reset(thermal_mcu);
+                last_thermal_ping_time = xTaskGetTickCount() * portTICK_PERIOD_MS; // Reset window to allow bootup
+            }
 
+            // 4. Repeated workflow for Pressure MCU (Keeping lines cleanly separated)
+            slave_send_complex_state(pressure_mcu, false, false, true, 0x00);
+            SlaveStatus pressure_status;
+            if (slave_read_status(pressure_mcu, &pressure_status)) {
+                last_pressure_ping_time = current_time_ms;
+            }
+            if ((current_time_ms - last_pressure_ping_time) > SLAVE_WATCHDOG_TIMEOUT_MS) {
+                ESP_LOGE(TAG, "!!! Watchdog Triggered: Pressure MCU timed out. Resetting device via Pin %d !!!", Preassure_reset_PIN);
+                slave_reset(pressure_mcu);
+                last_pressure_ping_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
+            }
+
+            // Bark at subsystems
+            // Enter IP when given by ESA
+            // Ping ground that status is OK.
+            esp_err_status = wiz_ping(targetip, "No command received. Status: OK."); 
+        }
         break;
 
     // Standby
@@ -207,10 +250,11 @@ void loop()
         //wiz_send(msg, sizeof(msg));
         break;
     }
+    printf("mode %d\n", mode);
 
     //Transmit data over E-Link
     //uint8_t ethernet_send_buf[sizeof(sensor_data)];
-    printf("ethernet1\n");
+    //printf("ethernet1\n");
     //char msg[] = "Hello from ESP32!";
     //wizsend(WIZ_SOCKET, (uint8_t*)msg, strlen(msg));
     //wizsend(WIZ_SOCKET, (uint8_t*)sensorout, strlen(msg));
@@ -234,21 +278,21 @@ void loop()
     //int len2 = snprintf(buf, sizeof(buf), "Time: %02u:%02u:%02u, Pa1=%.2f \n", sensor_data.hours, sensor_data.minutes, sensor_data.seconds, sensor_data.Pa1);
     //wiz_send((uint8_t*)buf, len2);
 
-    printf("ethernet3\n");
+    //printf("ethernet3\n");
 
     wiz_send((uint8_t*)&sensor_data, sizeof(sensor_data)+16);
 
     // Wait until loop has taken 100 ms.
     TickType_t current_time_stop = xTaskGetTickCount();
-    printf("ethernet4\n");
+    //printf("ethernet4\n");
     time_loop = pdMS_TO_TICKS(1000); //- (current_time_stop - current_time_start);
-    printf("time_loop %d\n", time_loop);
+    //printf("time_loop %d\n", time_loop);
     if (time_loop > 0)
     {
-        printf("wait\n");
+        //printf("wait\n");
         vTaskDelay(time_loop);
     }
-    printf("loop end\n");
+    //printf("loop end\n");
 }
 
 // ---------------------------------------------------------------------------

@@ -99,6 +99,16 @@ bool slave_send_command(
     SlaveCommand command
 );
 
+// Combined structural state command for full system synchronization
+bool slave_send_complex_state(
+    SlaveDevice slave,
+    bool emergency_stop,
+    bool autonomous_mode,
+    bool pressure_system_on,
+    uint8_t heater_mask
+);
+
+// Fixed: Unified with enum signature from implementation
 bool slave_update_setting(
     SlaveDevice slave,
     SlaveSetting setting,
@@ -113,3 +123,6 @@ bool slave_read_status(
 void slave_reset(
     SlaveDevice slave
 );
+
+// Watchdog background worker task loop declaration
+void slave_watchdog_task(void *pvParameters);

@@ -9,7 +9,7 @@ idf_component_register(
         "Neopixel.cpp"
         "read_sensors.cpp"
         "SDCard.cpp"
-        # "Slaves.cpp"
+        "Slaves.cpp"
         "Uart.cpp"
         "watchdog.cpp"
         

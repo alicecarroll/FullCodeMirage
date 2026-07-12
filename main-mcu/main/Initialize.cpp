@@ -227,8 +227,6 @@ static void init_ms5803(uint8_t channel, MS5803_Calibration *cal, MS5803Model mo
 
         cal->C[i + 1] =
             (data[0] << 8) | data[1];
-
-        printf("PROM[%d] = %u\n", i, cal->C[i + 1]);
     }
 }
 
