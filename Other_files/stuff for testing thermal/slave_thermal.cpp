@@ -289,3 +289,68 @@ bool thermal_test_send_package(
     return (err == ESP_OK); 
 
 }
+
+bool thermal_test_recieve_package(
+    SlaveDevice slave,
+    uint8_t* channel_id, 
+    uint8_t* mode,
+    uint8_t* power,
+    uint16_t* target,
+    uint8_t* status,
+    uint8_t* error)
+{
+    int dataLength=8;
+    *error=0; 
+
+    uint8_t mux_channel; //multiplexer channel, defined in select_slave
+    gpio_num_t reset_pin;//reset pin, defined in select_slave
+
+    //Purpose is to run selectskave "if" is just to handle error
+    if (!select_slave(
+            slave,
+            &mux_channel,
+            &reset_pin))
+        {
+            return false;
+        }
+
+    //Purpose is to run selectmuxchannel "if" is just to handle errors
+    if (select_mux_channel(mux_channel) != ESP_OK)
+    {
+        return false;
+    }
+    
+    
+    
+
+    //Size of incoming data
+    uint8_t data[dataLength];
+
+    esp_err_t err =
+        i2c_master_read_from_device(
+            I2C_master,
+            Slave_MCU_addr,
+            data,
+            sizeof(data),
+            100 / portTICK_PERIOD_MS
+        );
+
+    if (err != ESP_OK)
+    {
+        *error=1; //esp error
+        return false;
+    }
+
+    if(data[7]!=computeCRC8(data, dataLength-1)){  //Verifies packet integrity start value for crc is 0 so crc should return 0
+        *error=2; //crc error packet has been corrupted
+        return false; 
+    }
+
+    *channel_id=data[0];
+    *mode=data[1];
+    *power=data[2];
+    *target=(static_cast<uint16_t>(data[3]) <<8 | static_cast<uint16_t>(data[4])); //takes two int8 and combines into int16
+    *status=data[5];
+
+    return true;
+}
