@@ -174,6 +174,13 @@ static void wiz_hw_reset(void)
     vTaskDelay(pdMS_TO_TICKS(150)); // Wait for W5500 to come up (datasheet: min 50ms)
 }
 
+void wait_socket_command(uint8_t sn)
+{
+    while(getSn_CR(sn) != 0)
+    {
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+}
 // ---------------------------------------------------------------------------
 // Application-facing functions
 // ---------------------------------------------------------------------------
@@ -187,6 +194,11 @@ esp_err_t wiz_init(void)
     }
 
     wiz_hw_reset();
+        uint8_t version = getVERSIONR();
+
+    ESP_LOGI(TAG,
+            "W5500 version: 0x%02X",
+            version);
 
     reg_wizchip_cs_cbfunc(wiz_cs_select, wiz_cs_deselect);
     reg_wizchip_spi_cbfunc(wiz_spi_read_byte, wiz_spi_write_byte);
@@ -287,23 +299,24 @@ esp_err_t wiz_receive(uint8_t *buf, size_t buf_size, size_t *bytes_read)
 // For reconnection also
 esp_err_t wiz_ensure_connected(uint8_t *ip, uint16_t port)
 {
-    // Check W5500 socket status before attempting anything
     if (getSn_SR(WIZ_SOCKET) == SOCK_ESTABLISHED)
     {
-        return ESP_OK; // Already connected, nothing to do
+        return ESP_OK;
     }
-
-    wiz_disconnect(); // Clean up any half-open socket first
 
     for (int attempt = 1; attempt <= 3; attempt++)
     {
         ESP_LOGI(TAG, "Connect attempt %d/3", attempt);
+
         if (wiz_connect(ip, port) == ESP_OK)
+        {
             return ESP_OK;
+        }
+
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
-    return ESP_FAIL; // Caller decides what to do after 3 failures
+    return ESP_FAIL;
 }
 // ---------------------------------------------------------------------------
 // wiz_ping — fire and forget: send and return IMMEDIATELY, no reply checked
@@ -323,18 +336,20 @@ esp_err_t wiz_ping(uint8_t *target_ip, const char *message)
         ESP_LOGE(TAG, "ping: socket() failed");
         return ESP_FAIL;
     }
+    wait_socket_command(WIZ_SOCKET);
 
     icmp_packet_t request;
     build_icmp_request(&request, ID, ++s_seq, message);
 
     int32_t sent = wizsendto(
-        WIZ_PING_SOCKET,
-        (uint8_t *)&request,
-        sizeof(request),
-        target_ip,
-        REMOTE_PORT);
+            WIZ_PING_SOCKET,
+            (uint8_t *)&request,
+            sizeof(request),
+            target_ip,
+            REMOTE_PORT);
 
     wizclose(WIZ_PING_SOCKET);
+    wait_socket_command(WIZ_SOCKET);
     //printf("%d\n", sent);
 
     if (sent != sizeof(request))
@@ -391,52 +406,125 @@ esp_err_t wiz_ping(uint8_t *target_ip, const char *message)
 // ---------------------------------------------------------------------------
 esp_err_t wiz_connect(uint8_t *remote_ip, uint16_t remote_port)
 {
-    // Open socket 0 in TCP mode, using local port 5000 (arbitrary)
-    if (wizsocket(WIZ_SOCKET, Sn_MR_TCP, 5000, 0) != WIZ_SOCKET)
+    ESP_LOGI(TAG, "Opening TCP socket");
+
+    // Ensure socket is closed before reuse
+    wizclose(WIZ_SOCKET);
+    wait_socket_command(WIZ_SOCKET);
+
+
+    while(getSn_SR(WIZ_SOCKET) != SOCK_CLOSED)
     {
-        ESP_LOGE(TAG, "socket() failed");
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    ESP_LOGI(TAG, "Socket state before open: 0x%02X",
+             getSn_SR(WIZ_SOCKET));
+
+    // Open TCP socket
+    int8_t s = wizsocket(WIZ_SOCKET, Sn_MR_TCP, 5000, 0);
+    wait_socket_command(WIZ_SOCKET);
+    // Clear all pending socket interrupts
+    setSn_IR(WIZ_SOCKET, 0xFF);
+
+    if (s != WIZ_SOCKET)
+    {
+        ESP_LOGE(TAG, "socket() failed, returned %d", s);
         return ESP_FAIL;
     }
 
-    // Connect to remote host — W5500 handles the TCP handshake internally
-    if (wizconnect(WIZ_SOCKET, remote_ip, remote_port) != SOCK_OK)
+    // Allow W5500 state machine to update
+    while(getSn_SR(WIZ_SOCKET) != SOCK_INIT)
     {
-        ESP_LOGE(TAG, "connect() failed");
-        wizclose(WIZ_SOCKET);
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+
+    wait_socket_command(WIZ_SOCKET);
+
+    ESP_LOGI(TAG, "Socket state after open: 0x%02X",
+             getSn_SR(WIZ_SOCKET));
+
+    // Initiate TCP connection
+    ESP_LOGI(TAG,
+"Before connect: SR=0x%02X CR=0x%02X IR=0x%02X",
+getSn_SR(WIZ_SOCKET),
+getSn_CR(WIZ_SOCKET),
+getSn_IR(WIZ_SOCKET));
+    int8_t ret = wizconnect(WIZ_SOCKET, remote_ip, remote_port);
+    ESP_LOGI(TAG,
+"After connect: SR=0x%02X CR=0x%02X IR=0x%02X",
+getSn_SR(WIZ_SOCKET),
+getSn_CR(WIZ_SOCKET),
+getSn_IR(WIZ_SOCKET));
+    wait_socket_command(WIZ_SOCKET);
+
+    ESP_LOGI(TAG,
+             "connect() returned %d, state=0x%02X IR=0x%02X",
+             ret,
+             getSn_SR(WIZ_SOCKET),
+             getSn_IR(WIZ_SOCKET));
+
+    if (ret < 0)
+    {
+        ESP_LOGE(TAG, "connect() command failed");
+
+        setSn_IR(WIZ_SOCKET, 0xFF);
+        //wizclose(WIZ_SOCKET);
+        wait_socket_command(WIZ_SOCKET);
+
         return ESP_FAIL;
     }
+
 
     TickType_t start = xTaskGetTickCount();
+
     while (getSn_SR(WIZ_SOCKET) != SOCK_ESTABLISHED)
     {
-        if (getSn_IR(WIZ_SOCKET) & Sn_IR_TIMEOUT)
+        uint8_t state = getSn_SR(WIZ_SOCKET);
+        uint8_t ir = getSn_IR(WIZ_SOCKET);
+
+        // Timeout reported by W5500
+        if (ir & Sn_IR_TIMEOUT)
         {
+            ESP_LOGE(TAG,
+                     "TCP timeout. State=0x%02X IR=0x%02X",
+                     state, ir);
+
+            // Clear timeout interrupt
             setSn_IR(WIZ_SOCKET, Sn_IR_TIMEOUT);
-            wizclose(WIZ_SOCKET);
-            ESP_LOGE(TAG, "TCP connect timed out");
+
+            //wizclose(WIZ_SOCKET);
+            wait_socket_command(WIZ_SOCKET);
             return ESP_ERR_TIMEOUT;
         }
 
+
+        // Software timeout
         if ((xTaskGetTickCount() - start) > pdMS_TO_TICKS(3000))
         {
-            wizclose(WIZ_SOCKET);
-            ESP_LOGE(TAG, "TCP connect did not establish in time");
+            ESP_LOGE(TAG,
+                     "TCP connection timeout. State=0x%02X IR=0x%02X",
+                     state, ir);
+
+            setSn_IR(WIZ_SOCKET, 0xFF);
+            //wizclose(WIZ_SOCKET);
+            wait_socket_command(WIZ_SOCKET);
+
             return ESP_ERR_TIMEOUT;
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 
-    ESP_LOGI(TAG, "Connected to %d.%d.%d.%d:%d",
-             remote_ip[0], remote_ip[1], remote_ip[2], remote_ip[3],
+
+    ESP_LOGI(TAG,
+             "Connected to %d.%d.%d.%d:%d",
+             remote_ip[0],
+             remote_ip[1],
+             remote_ip[2],
+             remote_ip[3],
              remote_port);
 
     return ESP_OK;
-}
-
-void wiz_disconnect(void)
-{
-    wizdisconnect(WIZ_SOCKET);
-    wizclose(WIZ_SOCKET);
-    ESP_LOGI(TAG, "Disconnected");
 }

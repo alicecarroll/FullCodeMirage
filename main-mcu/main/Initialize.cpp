@@ -25,8 +25,8 @@ void init_gpio_pins()
         (1ULL << Preassure_reset_PIN) |
         (1ULL << K96_EN_PIN) |
         (1ULL << Reset_WIZ_PIN) |
-        (1ULL << CS_WIZ_PIN)|
-        (1ULL << CS_SD_PIN);
+        (1ULL << CS_WIZ_PIN);
+        //(1ULL << CS_SD_PIN); // SD card CS pin is managed by the SD card driver, so we don't configure it here
 
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
@@ -38,7 +38,7 @@ void init_gpio_pins()
     gpio_set_level(Preassure_reset_PIN, 1); 
     gpio_set_level(Reset_WIZ_PIN, 1);       
     gpio_set_level(CS_WIZ_PIN, 1);
-    gpio_set_level(CS_SD_PIN, 1);   // deselect SD card by default
+    //gpio_set_level(CS_SD_PIN, 1);   // deselect SD card by default; not needed since SD card driver manages this pin
     gpio_set_level(K96_EN_PIN, 0);
 
     gpio_reset_pin(Thermal_reset_PIN);

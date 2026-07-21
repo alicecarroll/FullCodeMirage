@@ -105,11 +105,12 @@ while True:  # outer loop: always wait for a (new) connection
                 print(f"Time: {hours:02}:{minutes:02}:{seconds:02}")
                 print(f"Ambient: Ta1(Tmp117)= {Ta1:.2}, Pa1(MS5803)={Pa1:.6f}, Ta2(MS5803)={Ta2:.6f}, Ha1={Ha1:.2f}, Ta3(SHT45)={Ta3:.2f}") 
                 print(f"Temperatures of the pumps: Tp1={Tp1:.2f}, Tp2={Tp2:.2f}, Tp3={Tp3:.2f}")
-                print(f"Temperatures and pressures between the pumps: \n Pipe2: Tp6={Tp6:.2f}, Pp3={Pp3:.6f}, Pipe3: Tp4={Tp4:.2f}, Pp1={Pp1:.6f}")
+                print(f"Temperatures and pressures between the pumps: \nPipe2: Tp6={Tp6:.2f}, Pp3={Pp3:.6f}, Pipe3: Tp4={Tp4:.2f}, Pp1={Pp1:.6f}")
                 print(f"Temperature and pressure in the chamber Tp5={Tp5:.2f}, Pp2={Pp2:.6f}")
                 print(f"Temperatures of outlet and inlet: Tt1={Tt1:.2f}, Tt3={Tt3:.2f}")
                 print(f"SD card temperature: Tt2={Tt2:.2f}")
                 print(f"K96_CO2={K96_CO2:.2f}, K96_CH4={K96_CH4:.2f}, K96_H2O={K96_H2O:.2f}")
+                print ("#"*80)
 
     except ConnectionResetError:
         # Peer closed the connection abruptly (RST packet) — e.g. ESP32 rebooted/crashed

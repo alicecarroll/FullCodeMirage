@@ -122,17 +122,24 @@ extern "C" void app_main()
 {
     init_gpio_pins();
     init_spi();
+    wiz_init();
+    while(!wizphy_getphylink())
+    {
+        ESP_LOGI(TAG,"Waiting for Ethernet link...");
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    ESP_LOGI(TAG,"Ethernet link up");
     init_i2c();
     init_uart();
     init_sensors();
-    wiz_init();
     sd_mount();
     printf("Initialization done\n");
 
-    int8_t s = wizsocket(WIZ_SOCKET, Sn_MR_TCP, LOCAL_PORT, 0);
-    printf("after socket s=%d\n", s);
+    //int8_t s = wizsocket(WIZ_SOCKET, Sn_MR_TCP, LOCAL_PORT, 0);
+    //printf("after socket s=%d\n", s);
 
-    wiz_connect(targetip, REMOTE_PORT);
+    //wiz_connect(targetip, REMOTE_PORT);
     setSn_IR(WIZ_SOCKET, Sn_IR_CON);
 
     wiz_ensure_connected(targetip, REMOTE_PORT);
