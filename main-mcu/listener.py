@@ -8,18 +8,20 @@ PORT = 5001
 
 
 def recv_exact(conn, size):
-    chunks = []
-    remaining = size
+    data = b""
 
-    while remaining > 0:
-        chunk = conn.recv(remaining)
+    while len(data) < size:
+        try:
+            chunk = conn.recv(size-len(data))
+        except socket.timeout:
+            raise
+
         if not chunk:
-            return b""
-        chunks.append(chunk)
-        remaining -= len(chunk)
+            return None
 
-    return b"".join(chunks)
+        data += chunk
 
+    return data
 
 def describe_heaters(mask):
     names = [f"H{index + 1}" for index in range(8) if mask & (1 << index)]
@@ -62,12 +64,13 @@ def command_sender(conn, stop_event):
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server.bind((HOST, PORT))
-server.listen(1)
+server.listen(5)
 print(f"Listening on {HOST}:{PORT}...")
 
 while True:  # outer loop: always wait for a (new) connection
     print("Waiting for connection...")
     conn, addr = server.accept()
+    conn.settimeout(5.0)
     print("Connected by", addr)
     stop_event = threading.Event()
     sender_thread = threading.Thread(target=command_sender, args=(conn, stop_event), daemon=True)
@@ -115,11 +118,12 @@ while True:  # outer loop: always wait for a (new) connection
     except ConnectionResetError:
         # Peer closed the connection abruptly (RST packet) — e.g. ESP32 rebooted/crashed
         print("Connection was reset by peer.")
-
+    except socket.timeout:
+            print("No data received for 5 seconds")
+            break
     except OSError as e:
         # Catch other socket-related errors so the whole program doesn't crash
         print(f"Socket error: {e}")
-
     finally:
         stop_event.set()
         conn.close()
