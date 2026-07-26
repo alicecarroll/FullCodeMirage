@@ -24,7 +24,7 @@ extern "C"
      *
      * @param[in] esp_err_status  ESP-IDF error status returned by wiz_receive().
      */
-    void handle_ethernet_data(esp_err_t esp_err_status);
+    void handle_ethernet_status(esp_err_t esp_err_status);
 
     /**
      * @brief  Interpret and execute a received command from the Ethernet buffer.

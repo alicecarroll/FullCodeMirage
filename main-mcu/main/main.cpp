@@ -48,11 +48,15 @@ bool command_received = false;
 
 bool con_lost = false; // To track connection status
 bool status_ok = true;
+int32_t LOOP_RETRY_CONNECTION = 10; // Number of loops to wait before retrying connection
 int64_t loss_timestamp_us = -1; // To track when connection was lost for termination
 int loops_since_connection = 0; // To buffer short con losses for stable running
 static SlaveStatus thermal_status = {};
 static uint8_t active_heater_mask = 0x00;
 static bool pressure_system_active = false;
+static bool status_update_requested = false;
+static bool status_packet_sent_this_loop = false;
+static const char *TAG = "main";
 
 static std::string ethernet_command_text;
 
@@ -100,6 +104,93 @@ static void trim_in_place(std::string &text)
     }
 }
 
+static esp_err_t send_system_status_packet()
+{
+    MainSystemStatusPacket system_status_packet = {};
+    system_status_packet.sensor_data = sensor_data;
+    system_status_packet.operating_mode = static_cast<uint8_t>(mode);
+    system_status_packet.command_received = command_received ? 1 : 0;
+    system_status_packet.connection_lost = con_lost ? 1 : 0;
+    system_status_packet.status_ok = status_ok ? 1 : 0;
+    system_status_packet.pressure_system_on = pressure_system_active ? 1 : 0;
+    system_status_packet.heater_mask = active_heater_mask;
+    system_status_packet.thermal_online = thermal_status.online ? 1 : 0;
+    system_status_packet.thermal_state = thermal_status.state;
+    system_status_packet.thermal_error = thermal_status.error;
+
+    return wiz_send((uint8_t *)&system_status_packet, sizeof(system_status_packet));
+}
+
+static void handle_ethernet_send_status(esp_err_t esp_err_status)
+{
+    switch (esp_err_status)
+    {
+    case ESP_OK:
+        break;
+
+    case ESP_FAIL:
+        status_ok = false;
+        con_lost = true;
+        connection_lost(&con_lost, &loss_timestamp_us);
+        break;
+
+    default:
+        ESP_LOGI(TAG, "Unexpected return from wiz_send: %d", esp_err_status);
+        break;
+    }
+}
+
+static void handle_ethernet_receive_status(esp_err_t esp_err_status)
+{
+    switch (esp_err_status)
+    {
+    case ESP_ERR_NOT_FOUND:
+        // No data in buffer = no command from ground
+        command_received = false;
+        break;
+
+    case ESP_OK:
+        // Command received from the gateway / ground GUI.
+        if (mode == 1)
+        {
+            mode = 2;
+        }
+
+        handle_command();
+        command_received = true;
+        con_lost = false;
+        status_ok = true;
+        loops_since_connection = 0; // Reset connection loss buffer
+        connection_reestablished(&con_lost, &loss_timestamp_us);
+
+        if (status_update_requested)
+        {
+            read_sensors();
+            buffer_SD_data_csv(&sensor_data);
+            print_sensor_data(&sensor_data);
+
+            esp_err_t esp_err_status_send = send_system_status_packet();
+            handle_ethernet_send_status(esp_err_status_send);
+            status_packet_sent_this_loop = (esp_err_status_send == ESP_OK);
+            status_update_requested = false;
+        }
+        break;
+
+    case ESP_FAIL:
+        // Error when receiving data
+        command_received = false;
+        con_lost = true;
+        status_ok = false;
+        connection_lost(&con_lost, &loss_timestamp_us);
+        break;
+
+    default:
+        //Unexpected return
+        ESP_LOGI(TAG, "Unexpected return from wiz_receive: %d", esp_err_status);
+        break;
+    }
+}
+
 //Pressure
 bool shutters_open = false; // To track if shutters are open
 
@@ -107,8 +198,6 @@ bool shutters_open = false; // To track if shutters are open
 #define SLAVE_WATCHDOG_TIMEOUT_MS 5000
 uint32_t last_thermal_ping_time = 0;
 uint32_t last_pressure_ping_time = 0;
-
-static const char *TAG = "main";
 
 /*  Put somewhere. For ConnectionLoss
  *   volatile int64_t loss_timestamp_us = -1;
@@ -162,13 +251,20 @@ void loop()
     // Common actions
     TickType_t current_time_start = xTaskGetTickCount();
     uint32_t current_time_ms = current_time_start * portTICK_PERIOD_MS;
+    status_packet_sent_this_loop = false;
     //feed_watchdog(system_ok);
     //wiz_connect(targetip, REMOTE_PORT);
 
+    // Try to reestablish connection if lost every LOOP_RETRY_CONNECTION loops
+    if (con_lost && loops_since_connection % LOOP_RETRY_CONNECTION == 0)
+    {
+        wiz_connect(targetip, REMOTE_PORT);
+    }
+
     // Check for commands
-    loops_since_connection++; //Will be reset in handle_ethernet_data if connection is ok
-    esp_err_t esp_err_status = wiz_receive(ethernet_recieve_buf, ethernet_recieve_buf_size, &ethernet_recieve_buf_bytes_read);
-    handle_ethernet_data(esp_err_status);
+    loops_since_connection++; //Will be reset in handle_ethernet_receive_status if connection is ok.
+    esp_err_t esp_err_status_receive = wiz_receive(ethernet_recieve_buf, ethernet_recieve_buf_size, &ethernet_recieve_buf_bytes_read);
+    handle_ethernet_receive_status(esp_err_status_receive);
 
     printf("check for commands done\n");
     // Collect I2C data
@@ -237,7 +333,7 @@ void loop()
             // Bark at subsystems
             // Enter IP when given by ESA
             // Ping ground that status is OK.
-            esp_err_status = wiz_ping(targetip, "No command received. Status: OK."); 
+            esp_err_t esp_err_status_ping = wiz_ping(targetip, "No command received. Status: OK.");
         }
         break;
 
@@ -343,19 +439,11 @@ void loop()
 
     //printf("ethernet3\n");
 
-    MainSystemStatusPacket system_status_packet = {};
-    system_status_packet.sensor_data = sensor_data;
-    system_status_packet.operating_mode = static_cast<uint8_t>(mode);
-    system_status_packet.command_received = command_received ? 1 : 0;
-    system_status_packet.connection_lost = con_lost ? 1 : 0;
-    system_status_packet.status_ok = status_ok ? 1 : 0;
-    system_status_packet.pressure_system_on = pressure_system_active ? 1 : 0;
-    system_status_packet.heater_mask = active_heater_mask;
-    system_status_packet.thermal_online = thermal_status.online ? 1 : 0;
-    system_status_packet.thermal_state = thermal_status.state;
-    system_status_packet.thermal_error = thermal_status.error;
-
-    wiz_send((uint8_t *)&system_status_packet, sizeof(system_status_packet));
+    if (!status_packet_sent_this_loop)
+    {
+        esp_err_t esp_err_status_send = send_system_status_packet();
+        handle_ethernet_send_status(esp_err_status_send);
+    }
 
     // Wait until loop has taken 100 ms.
     TickType_t current_time_stop = xTaskGetTickCount();
@@ -374,41 +462,6 @@ void loop()
 // Helpers
 // ---------------------------------------------------------------------------
 
-void handle_ethernet_data(esp_err_t esp_err_status)
-{
-    switch (esp_err_status)
-    {
-    case ESP_ERR_NOT_FOUND:
-        // No data in buffer = no command from ground
-        command_received = false;
-        break;
-    
-    case ESP_OK:
-        // Command recieved
-        if (mode == 1)
-        {
-            mode = 2;
-        }
-        handle_command(); 
-        command_received = true;
-        con_lost = false;
-        status_ok = true;
-        loops_since_connection = 0; // Reset connection loss buffer
-        connection_reestablished(&con_lost, &loss_timestamp_us); 
-        break;
-
-    case ESP_FAIL:
-        // Error when receiving data
-        // What to do here?
-         break;
-    
-    default:
-        //Unexpected return
-        ESP_LOGI(TAG, "Unexpected return from wiz_receive: %d", esp_err_status);
-        break;
-    }
-}
-
 void handle_command()
 {
     ethernet_command_text = to_upper_copy(ethernet_recieve_buf, ethernet_recieve_buf_bytes_read);
@@ -422,6 +475,13 @@ void handle_command()
     trim_in_place(ethernet_command_text);
 
     int heater_index = 0;
+
+    if (ethernet_command_text == "STATUS" || ethernet_command_text == "REQUEST STATUS" || ethernet_command_text == "REQUEST STATUS UPDATE")
+    {
+        status_update_requested = true;
+        ESP_LOGI(TAG, "Status update requested");
+        return;
+    }
 
     if (ethernet_command_text == "HEATER ON")
     {
