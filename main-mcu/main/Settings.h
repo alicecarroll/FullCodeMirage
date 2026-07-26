@@ -14,7 +14,7 @@
 // PINS definition
 #define Watchdog_PIN         GPIO_NUM_2
 #define Thermal_reset_PIN    GPIO_NUM_3
-#define Preassure_reset_PIN  GPIO_NUM_24 //27
+#define Preassure_reset_PIN  GPIO_NUM_27 //It was 24 but sixten got builderrors so it was changed it to 27
 #define K96_TX_PIN           GPIO_NUM_0
 #define K96_RX_PIN           GPIO_NUM_1
 #define K96_EN_PIN           GPIO_NUM_6

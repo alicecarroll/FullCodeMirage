@@ -28,13 +28,24 @@ uint16_t time_loop;
 /* Modes
  * 1: Test Loop
  * 2: Standby
- * 3: Meassurement
+ * 3: Measurement
  * 4: Humidity
  */
 int mode = 1;//DEFAULT_MODE; // 1
 
 // Watchdog
 bool system_ok;
+
+// Watchdog variables for tracking slave pings locally inside the loop
+#define SLAVE_WATCHDOG_TIMEOUT_MS 5000
+uint32_t last_thermal_ping_time = 0;
+uint32_t last_pressure_ping_time = 0;
+int16_t thermal_watchdog_count = 0; // Count of subsequent times the thermal slave is reset
+int16_t pressure_watchdog_count = 0; // Count of subsequent times the pressure slave is reset
+
+int32_t flightphase = 0; // To track flight phase: 0 = ascend, 1 = float, 2 = descend
+
+static const char *TAG = "main";
 
 // Ethernet
 uint8_t ethernet_recieve_buf[ETHERNET_BUF_SIZE] = {0};
@@ -43,9 +54,7 @@ size_t ethernet_recieve_buf_bytes_read = 0;
 uint8_t main_ip[4] = WIZ_IP;
 uint16_t portw = WIZ_SOCKET;
 uint8_t targetip[4] = {192, 168, 0, 3};
-
 bool command_received = false;
-
 bool con_lost = false; // To track connection status
 bool status_ok = true;
 int32_t LOOP_RETRY_CONNECTION = 10; // Number of loops to wait before retrying connection
@@ -56,53 +65,7 @@ static uint8_t active_heater_mask = 0x00;
 static bool pressure_system_active = false;
 static bool status_update_requested = false;
 static bool status_packet_sent_this_loop = false;
-static const char *TAG = "main";
-
 static std::string ethernet_command_text;
-
-static void set_heater_bit(uint8_t heater_index, bool enabled)
-{
-    if (heater_index >= 8)
-    {
-        return;
-    }
-
-    uint8_t mask = static_cast<uint8_t>(1U << heater_index);
-    if (enabled)
-    {
-        active_heater_mask |= mask;
-    }
-    else
-    {
-        active_heater_mask &= static_cast<uint8_t>(~mask);
-    }
-}
-
-static std::string to_upper_copy(const uint8_t *data, size_t length)
-{
-    std::string text;
-    text.reserve(length);
-
-    for (size_t index = 0; index < length; ++index)
-    {
-        text.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(data[index]))));
-    }
-
-    return text;
-}
-
-static void trim_in_place(std::string &text)
-{
-    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())))
-    {
-        text.erase(text.begin());
-    }
-
-    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())))
-    {
-        text.pop_back();
-    }
-}
 
 static esp_err_t send_system_status_packet()
 {
@@ -182,6 +145,12 @@ static void handle_ethernet_receive_status(esp_err_t esp_err_status)
         con_lost = true;
         status_ok = false;
         connection_lost(&con_lost, &loss_timestamp_us);
+        /*  Put somewhere. For ConnectionLoss. I (Jonathan) do not know where this comes from and what mode 0 should do. I will leave it here for now.
+        *   volatile int64_t loss_timestamp_us = -1;
+        *   volatile bool    con_lost          = false;
+        *   int              mode              = 0;
+        *   bool             terminated        = false;
+        */
         break;
 
     default:
@@ -191,20 +160,144 @@ static void handle_ethernet_receive_status(esp_err_t esp_err_status)
     }
 }
 
+static std::string to_upper_copy(const uint8_t *data, size_t length)
+{
+    std::string text;
+    text.reserve(length);
+
+    for (size_t index = 0; index < length; ++index)
+    {
+        text.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(data[index]))));
+    }
+
+    return text;
+}
+
+static void trim_in_place(std::string &text)
+{
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())))
+    {
+        text.erase(text.begin());
+    }
+
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())))
+    {
+        text.pop_back();
+    }
+}
+
+//Values for thermal slave
+uint8_t chosen_channel_id_thermal=0x00; //0x00- 0x07
+uint8_t number_channels_thermal=8;  //0-8 depending on the number of switches used
+//Variables for thermal under this comment will need to have value assigned in loop. Currently using placeholders (Remove comment when this has changed)
+uint8_t thermal_mode=1; //0 bang bang 1 PID 155-255 D_cycle
+int16_t thermal_currentTemp=2000; // 5000 = 50,0C  
+int16_t thermal_target=5000;
+int16_t thermal_watchdog_tolerance=5; // 1 according to SEDv3. Number of subsequent times where the thermal slave is reset. If reset more than this number of times, the thermal MCU will be considered lost.
+bool thermal_mcu_lost=false; // To track if the thermal slave is lost.
+//Data recieved from thermal
+uint8_t received_channel_id_thermal; //Reason i seperate recieved and sent is to be able to compare later if data packet made it
+uint8_t received_mode_thermal;
+uint8_t received_power_thermal;
+uint16_t received_target_thermal;
+uint8_t status_thermal;
+uint8_t error_thermal;
+uint16_t thermal_current_temperatures[8];
+int32_t OUTLET_TEMPERATURE_THRESHOLD = 50; // Threshold for outlet temperature in Celsius
+
+static void set_heater_bit(uint8_t heater_index, bool enabled)
+// Currently, this function is not used to pass information to the thermal mcu. This should be added (Jonathan, 26.7.)
+{
+    if (heater_index >= 8)
+    {
+        return;
+    }
+
+    uint8_t mask = static_cast<uint8_t>(1U << heater_index);
+    if (enabled)
+    {
+        active_heater_mask |= mask;
+    }
+    else
+    {
+        active_heater_mask &= static_cast<uint8_t>(~mask);
+    }
+}
+
+static void comms_thermal(SensorData &sensor_data, uint32_t current_time_ms){
+    //temperature array used for temperature data for thermal
+    thermal_current_temperatures[0]=static_cast<uint16_t> (sensor_data.Tt2*100); //thermal expect temp values where 5000=50.00 C
+    thermal_current_temperatures[1]=static_cast<uint16_t>(sensor_data.Tp2*100);
+    thermal_current_temperatures[2]=static_cast<uint16_t>(sensor_data.Tp3*100);
+    thermal_current_temperatures[3]=static_cast<uint16_t>(sensor_data.Tp4*100);
+    thermal_current_temperatures[4]=static_cast<uint16_t>(sensor_data.Tp5*100);
+    thermal_current_temperatures[5]=static_cast<uint16_t>(sensor_data.Tp6*100);
+    thermal_current_temperatures[6]=static_cast<uint16_t>(sensor_data.Tt1*100);
+    thermal_current_temperatures[7]=static_cast<uint16_t>(sensor_data.Tt2*100);
+
+    bool thermal_tx_ok = thermal_test_send_package(
+    thermal_mcu, 
+    chosen_channel_id_thermal, //0x00- 0x07
+    thermal_mode, //0 bang bang 1 PID 155-255 D_cycle
+    thermal_current_temperatures[chosen_channel_id_thermal], // 5000 = 50,0C 
+thermal_target);
+
+    if(chosen_channel_id_thermal!=(number_channels_thermal-1)){
+        chosen_channel_id_thermal++;
+    }
+    else{
+        chosen_channel_id_thermal=0;
+    }
+    if (thermal_tx_ok)
+    {
+        if (thermal_test_receive_package(  //when passing variable to this one remember to pass as &channel_id for all pointer
+    thermal_mcu,
+    &received_channel_id_thermal,
+    &received_mode_thermal,
+    &received_power_thermal,
+    &received_target_thermal,
+    &status_thermal,
+    &error_thermal))
+        {
+            //Info recieved from thermal Used for trouble-shooting
+            last_thermal_ping_time = current_time_ms;
+            ESP_LOGI(TAG, "Feedback from thermal slave - Channel: %u, Mode: %u, Power: %u, Target: %u, Status: %u, Error: %u",
+            received_channel_id_thermal, 
+            received_mode_thermal,
+            received_power_thermal,
+            received_target_thermal,
+            status_thermal,
+            error_thermal);
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Thermal MCU failed to respond to state read status query");
+        }
+    }
+    else
+    {
+        ESP_LOGE(TAG, "I2C Write transmission failed to Thermal MCU");
+    }
+
+    //Watchdog reset for thermal
+    if ((current_time_ms - last_thermal_ping_time) > SLAVE_WATCHDOG_TIMEOUT_MS)
+    {
+        ESP_LOGW(TAG, "!!! Watchdog Triggered: Thermal MCU timed out. Resetting device via Pin %d !!!", Thermal_reset_PIN);
+        slave_reset(thermal_mcu);
+        last_thermal_ping_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
+        thermal_watchdog_count++;
+        if (thermal_watchdog_count >= thermal_watchdog_tolerance)
+        {
+            thermal_mcu_lost = true;
+            ESP_LOGE(TAG, "!!! Thermal MCU considered lost after %d resets. Manual intervention required. !!!", thermal_watchdog_count);
+        }
+    }
+}
+
+
 //Pressure
 bool shutters_open = false; // To track if shutters are open
 
-// Watchdog variables for tracking slave pings locally inside the loop
-#define SLAVE_WATCHDOG_TIMEOUT_MS 5000
-uint32_t last_thermal_ping_time = 0;
-uint32_t last_pressure_ping_time = 0;
-
-/*  Put somewhere. For ConnectionLoss
- *   volatile int64_t loss_timestamp_us = -1;
- *   volatile bool    con_lost          = false;
- *   int              mode              = 0;
- *   bool             terminated        = false;
- */
 
 // ESP-IDF expects main in C
 extern "C" void app_main()
@@ -255,61 +348,66 @@ void loop()
     //feed_watchdog(system_ok);
     //wiz_connect(targetip, REMOTE_PORT);
 
-    // Try to reestablish connection if lost every LOOP_RETRY_CONNECTION loops
-    if (con_lost && loops_since_connection % LOOP_RETRY_CONNECTION == 0)
-    {
-        wiz_connect(targetip, REMOTE_PORT);
-    }
 
+    // Ethernet Receive Block
+    if (con_lost && loops_since_connection % LOOP_RETRY_CONNECTION == 0)
+    // Try to reestablish connection if lost every LOOP_RETRY_CONNECTION loops
+    {
+        if (wiz_connect(targetip, REMOTE_PORT)== ESP_OK)
+        {
+            status_ok = true;
+            connection_reestablished(&con_lost, &loss_timestamp_us);
+        }
+        else
+        {
+            con_lost = true;
+            status_ok = false;
+            connection_lost(&con_lost, &loss_timestamp_us);
+        }
+    }
     // Check for commands
     loops_since_connection++; //Will be reset in handle_ethernet_receive_status if connection is ok.
     esp_err_t esp_err_status_receive = wiz_receive(ethernet_recieve_buf, ethernet_recieve_buf_size, &ethernet_recieve_buf_bytes_read);
     handle_ethernet_receive_status(esp_err_status_receive);
-
     printf("check for commands done\n");
-    // Collect I2C data
-    if (mode != 1)
+
+
+    // Read I2C Data Block
+    read_sensors();
+    //buffer_SD_data_binary_single(); //est time: 1.5 ms
+    //buffer_SD_data_csv_single();      //est time: 3 ms
+    //buffer_SD_data_binary(sensor_data); //4k - est time: 1.5 ms every 8th loop
+    buffer_SD_data_csv(&sensor_data);      //4k - est time: 3 ms every 8th loop
+    print_sensor_data(&sensor_data);
+
+    // Status Check Block
+    if (sensor_data.Pa1 < P_STRATOSPHERE)
     {
-        read_sensors();
-        //buffer_SD_data_binary_single(); //est time: 1.5 ms
-        //buffer_SD_data_csv_single();      //est time: 3 ms
-        //buffer_SD_data_binary(sensor_data); //4k - est time: 1.5 ms every 8th loop
-        buffer_SD_data_csv(&sensor_data);      //4k - est time: 3 ms every 8th loop
-        print_sensor_data(&sensor_data);
-    }
-
-    pressure_system_active = (mode == 1 || mode == 3);
-
-    bool thermal_autonomous_mode = (mode == 3);
-    bool thermal_tx_ok = slave_send_complex_state(
-        thermal_mcu,
-        false,
-        thermal_autonomous_mode,
-        pressure_system_active,
-        active_heater_mask);
-
-    if (thermal_tx_ok)
-    {
-        if (slave_read_status(thermal_mcu, &thermal_status))
+        if (flightphase == 0) // If flightphase was in ascent, switch it to float
         {
-            last_thermal_ping_time = current_time_ms;
+            flightphase = 1; // Update flightphase to float
+            ESP_LOGI(TAG, "Flight phase updated to Float");
         }
-        else
-        {
-            ESP_LOGW(TAG, "Thermal MCU failed to respond to state read status query");
-        }
+        mode = 2; // Enter standby mode if pressure is below threshold
     }
-    else
-    {
-        ESP_LOGE(TAG, "I2C Write transmission failed to Thermal MCU");
+    else {
+        if (flightphase == 1) // If flightphase was in float, switch it to descend
+        {
+            flightphase = 2; // Update flightphase to descend
+            ESP_LOGI(TAG, "Flight phase updated to Descend");
+        }
+        else if (flightphase == 0) // If flightphase is in ascend, the mode should be measurement mode
+        {
+            mode = 3; // Enter measurement mode if pressure is above threshold
+        }
     }
 
-    if ((current_time_ms - last_thermal_ping_time) > SLAVE_WATCHDOG_TIMEOUT_MS)
-    {
-        ESP_LOGE(TAG, "!!! Watchdog Triggered: Thermal MCU timed out. Resetting device via Pin %d !!!", Thermal_reset_PIN);
-        slave_reset(thermal_mcu);
-        last_thermal_ping_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
-    }
+    // I (Jonathan) skipped the thermal checks, because I do not understand why they are necessary. The thermal slave should be able to handle its own temperature regulation.
+
+    // I (Jonathan) skipped the current checks, because the current PDB has no functioning current sensor. 
+
+    // I (Jonathan) skipped the sensor checks, because I do not know what should happen if a sensor is not working. 
+    // For testing it is also good to have the system continue running even if a sensor is not working.
 
     // Mode dependent actions
     printf("mode %d\n", mode);
@@ -330,7 +428,13 @@ void loop()
             //    last_pressure_ping_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
             //}
 
-            // Bark at subsystems
+            // Bark at pressure subsystem
+
+            //Bark at thermal subsystem
+            if (not thermal_mcu_lost)
+            {  
+                comms_thermal(sensor_data, current_time_ms);
+            }
             // Enter IP when given by ESA
             // Ping ground that status is OK.
             esp_err_t esp_err_status_ping = wiz_ping(targetip, "No command received. Status: OK.");
@@ -344,27 +448,15 @@ void loop()
         //Pressure communication
         
         //Thermal communication
-
+        if (not thermal_mcu_lost)
+        {  
+        comms_thermal(sensor_data, current_time_ms);
+        }
         break;
 
     // Measurement
     case 3:
-        // Humidity check here if any 
-
-        // Elevation check in terms of pressure
-        if (sensor_data.Pa1 < P_STRATOSPHERE)
-        {
-            if (loops_since_connection > LOOP_WO_CONNECTION) // If connection lost for more than LOOP_WO_CONNECTION loops, enter safe mode
-            {
-                mode = 2; // Standby
-                con_lost = true;
-                connection_lost(&con_lost, &loss_timestamp_us);
-                
-                wiz_ping(targetip, "Connection lost. Entering safe mode.");
-                break;
-            }
-            //else: high altidude but have connection.
-        }
+        // Pressure check block to see if pressure in chamber is too high 
         //Check if pressure in chamber is below threshold, if so, increase pressure first.
         if (sensor_data.Pp2 < CHAMBER_P_SHUTTER_THRESHOLD)
         {
@@ -385,12 +477,39 @@ void loop()
             //Pressure communication: increase p in chamber.
             break;
         }
+
+        // Thermal check block to see if temperatures are out of limits 
         // Check if inlet temperature is above threshold, if so, take meassurements. If not, decrease inlet temperature.
         //if (sensor_data.Tt3 < INLET_TEMPERATURE_THRESHOLD)
         //{
         //    //Thermal communication: increase inlet temperature
         //    break;
         //}
+
+        // Pressure communication block 
+
+        // Thermal communication block
+        if (not thermal_mcu_lost)
+        {
+        comms_thermal(sensor_data, current_time_ms);
+        }
+
+        // Elevation check in terms of pressure
+        if (sensor_data.Pa1 < P_STRATOSPHERE)
+        {
+            if (loops_since_connection > LOOP_WO_CONNECTION) // If connection lost for more than LOOP_WO_CONNECTION loops, enter safe mode
+            {
+                mode = 2; // Standby
+                ESP_LOGE(TAG, "Connection lost for more than %d loops. Entering standby mode.", LOOP_WO_CONNECTION);
+                //con_lost = true;
+                //connection_lost(&con_lost, &loss_timestamp_us);
+                //wiz_ping(targetip, "Connection lost. Entering safe mode."); // Why are we pinging when the connection is lost? This seems counterintuitive. If the connection is lost, how can we ping? This might be a logic error or a misunderstanding of the system's state.
+                break;
+            }
+            //else: high altidude but have connection.
+        }
+        
+
         // Take meassurements!!!
         read_k96();
         //buffer_SD_data_csv(sensor_data); 
@@ -417,8 +536,7 @@ void loop()
     //char msg[] = "Hello from ESP32!";
     //wizsend(WIZ_SOCKET, (uint8_t*)msg, strlen(msg));
     //wizsend(WIZ_SOCKET, (uint8_t*)sensorout, strlen(msg));
-    read_sensors();
-    buffer_SD_data_csv(&sensor_data);
+    
 
     //char status_message[100]; 
     //int len = snprintf(status_message, sizeof(status_message),
@@ -447,15 +565,11 @@ void loop()
 
     // Wait until loop has taken 100 ms.
     TickType_t current_time_stop = xTaskGetTickCount();
-    //printf("ethernet4\n");
     time_loop = pdMS_TO_TICKS(1000); //- (current_time_stop - current_time_start);
-    //printf("time_loop %d\n", time_loop);
     if (time_loop > 0)
     {
-        //printf("wait\n");
         vTaskDelay(time_loop);
     }
-    //printf("loop end\n");
 }
 
 // ---------------------------------------------------------------------------

@@ -123,6 +123,26 @@ bool slave_read_status(
 void slave_reset(
     SlaveDevice slave
 );
+uint8_t computeCRC8(
+    const uint8_t *data, 
+    size_t length);
+    
+bool thermal_test_send_package(  
+    SlaveDevice slave, 
+    uint8_t channel_id, //0x00- 0x07
+    uint8_t mode, //0 bang bang 1 PID 155-255 D_cycle
+    int16_t currentTemp, // 5000 = 50,0C
+    int16_t target  
+); 
+bool thermal_test_receive_package(  //when passing variable to this one remember to pass as &channel_id for all pointer
+    SlaveDevice slave,
+    uint8_t* channel_id, 
+    uint8_t* mode,
+    uint8_t* power,
+    uint16_t* target,
+    uint8_t* status,
+    uint8_t* error);
+
 
 // Watchdog background worker task loop declaration
 void slave_watchdog_task(void *pvParameters);
