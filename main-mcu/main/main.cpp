@@ -187,7 +187,6 @@ static void trim_in_place(std::string &text)
 }
 
 //Values for thermal slave
-uint8_t chosen_channel_id_thermal=0x00; //0x00- 0x07
 uint8_t number_channels_thermal=8;  //0-8 depending on the number of switches used
 //Variables for thermal under this comment will need to have value assigned in loop. Currently using placeholders (Remove comment when this has changed)
 uint8_t thermal_mode=1; //0 bang bang 1 PID 155-255 D_cycle
@@ -224,7 +223,8 @@ static void set_heater_bit(uint8_t heater_index, bool enabled)
     }
 }
 
-static void comms_thermal(SensorData &sensor_data, uint32_t current_time_ms){
+static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_ms){
+    uint8_t chosen_channel_id_thermal=0x00; //0x00- 0x07
     //temperature array used for temperature data for thermal
     thermal_current_temperatures[0]=static_cast<uint16_t> (sensor_data.Tt2*100); //thermal expect temp values where 5000=50.00 C
     thermal_current_temperatures[1]=static_cast<uint16_t>(sensor_data.Tp2*100);
@@ -235,19 +235,19 @@ static void comms_thermal(SensorData &sensor_data, uint32_t current_time_ms){
     thermal_current_temperatures[6]=static_cast<uint16_t>(sensor_data.Tt1*100);
     thermal_current_temperatures[7]=static_cast<uint16_t>(sensor_data.Tt2*100);
 
-    bool thermal_tx_ok = thermal_test_send_package(
-    thermal_mcu, 
-    chosen_channel_id_thermal, //0x00- 0x07
-    thermal_mode, //0 bang bang 1 PID 155-255 D_cycle
-    thermal_current_temperatures[chosen_channel_id_thermal], // 5000 = 50,0C 
-thermal_target);
-
-    if(chosen_channel_id_thermal!=(number_channels_thermal-1)){
+    while (chosen_channel_id_thermal!=(number_channels_thermal-1)){
+        bool thermal_tx_ok = thermal_test_send_package(
+            thermal_mcu, 
+            chosen_channel_id_thermal, //0x00- 0x07
+            thermal_mode, //0 bang bang 1 PID 155-255 D_cycle
+            thermal_current_temperatures[chosen_channel_id_thermal], // 5000 = 50,0C 
+            thermal_target);
         chosen_channel_id_thermal++;
     }
     else{
         chosen_channel_id_thermal=0;
     }
+
     if (thermal_tx_ok)
     {
         if (thermal_test_receive_package(  //when passing variable to this one remember to pass as &channel_id for all pointer
