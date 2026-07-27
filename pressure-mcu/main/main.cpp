@@ -1,4 +1,4 @@
-#include "main.h"
+#include "PressureControl.h"
 #include "driver/gpio.h"
 
 // ------------------------------------------------------------------
@@ -8,21 +8,20 @@
 
 #define VALVE_PIN        GPIO_NUM_9   // IO9  — VALVE1
 #define COMPRESSOR_PIN   GPIO_NUM_10  // IO10 — PWM1 (digital on/off for now, real PWM later)
-#define PUMP1_PIN        GPIO_NUM_38  // IO38 — PWM3, vacuum pump 1 (label mismatch vs PWM2/3 numbering — wired per pin column)
-#define PUMP2_PIN        GPIO_NUM_47  // IO47 — PWM2, vacuum pump 2
+#define PUMP1_PIN        GPIO_NUM_47  // IO47 — PWM2, vacuum pump 1 
+#define PUMP2_PIN        GPIO_NUM_38  // IO38 — PWM3, vacuum pump 2
 
 // PDB relay signals — connector pins 1, 4, 5, 28 -> these GPIOs.
 // Plain on/off to MOSFETs on the power distribution board, no
 // sequencing/timing logic.
-#define PDB_RELAY1_PIN   GPIO_NUM_48  // pin 1, 
-#define PDB_RELAY2_PIN   GPIO_NUM_1   // pin 4, 
-#define PDB_RELAY3_PIN   GPIO_NUM_2   // pin 5
-#define PDB_RELAY4_PIN   GPIO_NUM_21  // pin 28
+#define PDB_RELAY1_PIN   GPIO_NUM_21  // pin 28
+#define PDB_RELAY2_PIN   GPIO_NUM_48   // pin 1
+#define PDB_RELAY3_PIN   GPIO_NUM_1   // pin 4
+#define PDB_RELAY4_PIN   GPIO_NUM_2  // pin 5
 
-// I2C_SDA / I2C_SCL (IO13 / IO14) intentionally not defined here yet —
-// pressure sensor wiring is still undecided. read_chamber_pressure()/
-// read_compressor_inlet_pressure() remain fake/placeholder until
-// that's settled.
+// I2C_SDA / I2C_SCL (IO13 / IO14)
+#define I2C_SCL_PIN      GPIO_NUM_14
+#define I2C_SDA_PIN      GPIO_NUM_13
 
 // ------------------------------------------------------------------
 // Internal state
@@ -357,16 +356,3 @@ void pdb_relay3_off() { pdb_relay3_set(0); }
 
 void pdb_relay4_on()  { pdb_relay4_set(1); }
 void pdb_relay4_off() { pdb_relay4_set(0); }
-
-// ------------------------------------------------------------------
-// Example ESP-IDF entry point
-// ------------------------------------------------------------------
-
-extern "C" void app_main(void)
-{
-    printf("Hello\n");
-    pdb_relay1_off();
-    pdb_relay2_off();
-    pdb_relay3_off();
-    pdb_relay4_off();
-}
