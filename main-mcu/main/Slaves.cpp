@@ -13,7 +13,6 @@
 // Shared slave address
 #define Slave_MCU_addr  0x10
 
-
 //Crc 8 table. Is a table to make algorithm more compute efficient
 uint8_t crc8_table[256] = {0, 7, 14, 9, 28, 27, 18, 21, 56, 63, 54, 49, 36, 35, 42, 45, 112, 119, 126, 121, 108, 107, 98, 101, 72, 79, 70, 65, 84, 83,
      90, 93, 224, 231, 238, 233, 252, 251, 242, 245, 216, 223, 214, 209, 196, 195, 202, 205, 144, 151, 158, 153, 140, 139, 130, 133, 168, 175,
@@ -53,7 +52,7 @@ static bool select_slave(
 
         case pressure_mcu:
             *mux_channel = multiplex_Tp1_devT;
-            *reset_pin = Preassure_reset_PIN;
+            *reset_pin = Pressure_reset_PIN;
             return true;
     }
     return false;
@@ -96,7 +95,7 @@ bool slave_send_data(
 // Send command
 bool slave_send_command(
     SlaveDevice slave,
-    SlaveCommand command
+    SlaveCommands command
 )
 {
     uint8_t mux_channel;
@@ -397,6 +396,131 @@ bool thermal_test_receive_package(  //when passing variable to this one remember
     *power=data[2];
     *target=(static_cast<uint16_t>(data[3]) <<8 | static_cast<uint16_t>(data[4])); //takes two int8 and combines into int16
     *status=data[5];
+
+    return true;
+}
+
+
+
+
+
+
+
+bool pressure_send_sensors(
+    SlaveDevice slave, 
+    const SensorData &sensor_data
+) {
+    uint8_t mux_channel; 
+    gpio_num_t reset_pin;
+
+    if (!select_slave(slave, &mux_channel, &reset_pin)) return false;
+    if (sel_mux_channel(mux_channel) != ESP_OK) return false;
+    
+    // Packet layout:
+    // [0] opcode
+    // [1] reserved for future use / channel ID
+    // [2..15] seven int16 sensor values
+    // [16] CRC8
+    const int package_length = 17;
+    uint8_t package[package_length];
+
+    package[0] = Slave_packet_data;
+    package[1] = 0x00;
+
+    int16_t sensor_ints[7] = {
+        (int16_t)(sensor_data.Pp3 * SENSOR_SCALE),
+        (int16_t)(sensor_data.Pp1 * SENSOR_SCALE),
+        (int16_t)(sensor_data.Pp2 * SENSOR_SCALE),
+        (int16_t)(sensor_data.Pa1 * SENSOR_SCALE),
+        (int16_t)(sensor_data.Tp1 * SENSOR_SCALE),
+        (int16_t)(sensor_data.Tp2 * SENSOR_SCALE),
+        (int16_t)(sensor_data.Tp3 * SENSOR_SCALE)
+    };
+
+    for(int i = 0; i < 7; i++) {
+        package[2 + (i*2)] = (sensor_ints[i] >> 8) & 0xFF; // MSB
+        package[3 + (i*2)] = sensor_ints[i] & 0xFF;        // LSB
+    }
+
+    package[package_length - 1] = computeCRC8(package, package_length - 1);
+
+    esp_err_t err = i2c_master_write_to_device(
+        I2C_master, Slave_MCU_addr, package, sizeof(package), 50 / portTICK_PERIOD_MS
+    );
+
+    return (err == ESP_OK);
+}
+
+
+
+
+bool pressure_send_command(
+    SlaveDevice slave, 
+    uint8_t channel_id,
+    const pressure_command& cmd
+) {
+    uint8_t mux_channel; 
+    gpio_num_t reset_pin;
+
+    if (!select_slave(slave, &mux_channel, &reset_pin)) return false;
+    if (sel_mux_channel(mux_channel) != ESP_OK) return false;
+    
+    const int package_length = 8;
+    uint8_t package[package_length];
+
+    package[0] = Slave_packet_command;
+    package[1] = channel_id;
+    package[2] = cmd.mode;
+    
+    package[3] = (cmd.valve_state ? 0x01 : 0) |
+                 (cmd.pdb1 ? 0x02 : 0) |
+                 (cmd.pdb2 ? 0x04 : 0) |
+                 (cmd.pdb3 ? 0x08 : 0) |
+                 (cmd.pdb4 ? 0x10 : 0);
+
+    package[4] = cmd.pump1_pwm;
+    package[5] = cmd.pump2_pwm;
+    package[6] = cmd.compressor_pwm;
+
+    package[package_length - 1] = computeCRC8(package, package_length - 1);
+
+    esp_err_t err = i2c_master_write_to_device(
+        I2C_master, Slave_MCU_addr, package, sizeof(package), 100 / portTICK_PERIOD_MS
+    );
+
+    return (err == ESP_OK);
+}
+
+
+bool pressure_receive_package(
+    SlaveDevice slave,
+    PressureStatusData* status_out
+) {
+    uint8_t mux_channel; 
+    gpio_num_t reset_pin;
+
+    if (!select_slave(slave, &mux_channel, &reset_pin)) return false;
+    if (sel_mux_channel(mux_channel) != ESP_OK) return false;
+
+    const int data_length = 8;
+    uint8_t data[data_length] = {};
+
+    esp_err_t err = i2c_master_read_from_device(
+        I2C_master, Slave_MCU_addr, data, sizeof(data), 100 / portTICK_PERIOD_MS
+    );
+
+    if (err != ESP_OK)
+    {
+        return false;
+    }
+
+    if (data[data_length - 1] != computeCRC8(data, data_length - 1)) {
+        return false; // CRC mismatch
+    }
+
+    status_out->channel_id = data[0];
+    status_out->state      = data[1];
+    status_out->error_code = data[2];
 
     return true;
 }

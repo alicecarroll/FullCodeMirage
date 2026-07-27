@@ -2,6 +2,12 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+struct SensorData;
+
+// Define the scaling used to convert float values to int16_t for transmission
+#define SENSOR_SCALE 100.0f
+
+
 // Slave devices
 typedef enum
 {
@@ -19,7 +25,8 @@ typedef enum
 
 } PacketType;
 
-// Telemetry/Data IDs
+
+// Telemetry/Data IDs. I am not sure that one struct for both slaves is the way to go. It is not used atm I think (Jonathan, 26.7.)
 typedef enum
 {
     // Vacuum pump temperatures
@@ -54,7 +61,21 @@ typedef enum
 
 } SlaveData;
 
+
+
 // Commands
+struct pressure_command
+{
+    uint8_t mode;          // 0 = standby, 1 = measurements
+    bool valve_state;      // true = open, false = closed
+    bool pdb1;             // true = on, false = off
+    bool pdb2;             // true = on, false = off
+    bool pdb3;             // true = on, false = off
+    bool pdb4;             // true = on, false = off
+    uint8_t pump1_pwm;     // 0-255 PWM value for pump 1
+    uint8_t pump2_pwm;     // 0-255 PWM value for pump 2
+    uint8_t compressor_pwm;// 0-255 PWM value for compressor
+};
 typedef enum
 {
     CMD_PUMPS_OFF       = 0x01,
@@ -69,7 +90,7 @@ typedef enum
     CMD_HEATER_ON       = 0x07,
     CMD_HEATER_OFF      = 0x08
 
-} SlaveCommand;
+} SlaveCommands;
 
 // Settings
 typedef enum
@@ -87,6 +108,13 @@ typedef struct
     uint8_t error;
 } SlaveStatus;
 
+// Pressure MCU status structure
+struct PressureStatusData {
+    uint8_t channel_id;
+    uint8_t state;          // Standby, Prepressurisation, etc.
+    uint8_t error_code;
+};
+
 // API
 bool slave_send_data(
     SlaveDevice slave,
@@ -96,7 +124,7 @@ bool slave_send_data(
 
 bool slave_send_command(
     SlaveDevice slave,
-    SlaveCommand command
+    SlaveCommands command
 );
 
 // Combined structural state command for full system synchronization
@@ -143,6 +171,21 @@ bool thermal_test_receive_package(  //when passing variable to this one remember
     uint8_t* status,
     uint8_t* error);
 
+bool pressure_send_sensors(
+    SlaveDevice slave,
+    const SensorData& sensor_data
+);
+
+bool pressure_receive_package(
+    SlaveDevice slave,
+    PressureStatusData* status_out
+);
+
+bool pressure_send_command(
+    SlaveDevice slave, 
+    uint8_t channel_id,
+    const pressure_command& cmd
+);
 
 // Watchdog background worker task loop declaration
 void slave_watchdog_task(void *pvParameters);

@@ -1,5 +1,11 @@
-#include "PressureControl.h"
+#include "main.h"
+#include "driver/i2c.h"
 #include "driver/gpio.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include <string.h>
+#include <stdio.h>
 
 // ------------------------------------------------------------------
 // Pin assignments — from the Pressure MCU pinout table.
@@ -23,11 +29,33 @@
 #define I2C_SCL_PIN      GPIO_NUM_14
 #define I2C_SDA_PIN      GPIO_NUM_13
 
+#define I2C_SLAVE_NUM    I2C_NUM_1
+#define I2C_SLAVE_ADDR   0x10
+
+static constexpr uint8_t OPCODE_SENSORS = 0x01;
+static constexpr uint8_t OPCODE_COMMANDS = 0x02;
+static constexpr uint8_t OPCODE_SETTINGS = 0x03;
+
+// Define the scaling factor used to convert float values to int16_t for transmission
+#define SENSOR_SCALE      100.0f
+
+// Packet types
+typedef enum
+{
+    Slave_packet_data     = 0x01,
+    Slave_packet_command  = 0x02,
+    Slave_packet_setting  = 0x03
+
+} PacketType;
+
 // ------------------------------------------------------------------
 // Internal state
 // ------------------------------------------------------------------
 
 static PressureStatus status;
+static float external_sensors[7] = {};
+static bool external_sensors_valid = false;
+static uint8_t last_channel_id = 0x00;
 
 static float target_pressure = 3.0f;       // chamber target (air exchange phase)
 
@@ -41,6 +69,65 @@ static float compressor_inlet_lower_limit = 0.2f;   // ends air exchange — PLA
 #define PRESSURE_ERR_NONE          0
 #define PRESSURE_ERR_CHAMBER_SENSOR 1
 #define PRESSURE_ERR_INLET_SENSOR   2
+
+static void pump1_on();
+static void pump1_off();
+static void pump2_on();
+static void pump2_off();
+static void pumps_on();
+static void pumps_off();
+static void compressor_on();
+static void compressor_off();
+static void valve_open();
+static void valve_close();
+
+static void pressure_update_external_sensors(const float sensors[7])
+{
+    memcpy(external_sensors, sensors, sizeof(external_sensors));
+    external_sensors_valid = true;
+
+    // Reuse received main-MCU sensor data when it is available.
+    // Pp2 is the chamber measurement and Pp1 is the inlet-side pipe
+    // pressure that best matches the compressor inlet use in this state
+    // machine.
+    status.chamber_pressure = sensors[2];
+    status.compressor_inlet_pressure = sensors[1];
+}
+
+static void pressure_set_valve_override(bool open)
+{
+    if (open)
+    {
+        valve_open();
+    }
+    else
+    {
+        valve_close();
+    }
+}
+
+static void pressure_set_pump_pwms(uint8_t pump1_pwm, uint8_t pump2_pwm, uint8_t compressor_pwm)
+{
+    // The hardware is still driven as plain digital outputs, but the
+    // packet values are now consumed instead of being dropped on the floor.
+    if (pump1_pwm || pump2_pwm)
+    {
+        pumps_on();
+    }
+    else
+    {
+        pumps_off();
+    }
+
+    if (compressor_pwm)
+    {
+        compressor_on();
+    }
+    else
+    {
+        compressor_off();
+    }
+}
 
 // ------------------------------------------------------------------
 // Internal hardware functions
@@ -126,6 +213,12 @@ static void pdb_relay4_set(int level) { gpio_set_level(PDB_RELAY4_PIN, level); }
 
 static bool read_chamber_pressure(float *out_pressure)
 {
+    if (external_sensors_valid)
+    {
+        *out_pressure = external_sensors[2];
+        return true;
+    }
+
     // TODO: replace with real sensor read (e.g. I2C/ADC driver call).
     // Placeholder: ramps up slowly each call so air-exchange has
     // something to react to during testing.
@@ -138,6 +231,12 @@ static bool read_chamber_pressure(float *out_pressure)
 
 static bool read_compressor_inlet_pressure(float *out_pressure)
 {
+    if (external_sensors_valid)
+    {
+        *out_pressure = external_sensors[1];
+        return true;
+    }
+
     // TODO: replace with real sensor read.
     // Placeholder: ramps up during prepressurisation-style testing.
     static float fake_compressor_inlet_pressure = 0.0f;
@@ -192,6 +291,100 @@ static void run_air_exchange()
 
         status.state =
             PRESSURE_PREPRESSURISATION;
+    }
+}
+
+// ------------------------------------------------------------------
+// I2C communication with the Main MCU
+// ------------------------------------------------------------------
+
+//Crc 8 table. Is a table to make algorithm more compute efficient
+uint8_t crc8_table[256] = {0, 7, 14, 9, 28, 27, 18, 21, 56, 63, 54, 49, 36, 35, 42, 45, 112, 119, 126, 121, 108, 107, 98, 101, 72, 79, 70, 65, 84, 83,
+     90, 93, 224, 231, 238, 233, 252, 251, 242, 245, 216, 223, 214, 209, 196, 195, 202, 205, 144, 151, 158, 153, 140, 139, 130, 133, 168, 175,
+     166, 161, 180, 179, 186, 189, 199, 192, 201, 206, 219, 220, 213, 210, 255, 248, 241, 246, 227, 228, 237, 234, 183, 176, 185, 190, 171, 172, 
+     165, 162, 143, 136, 129, 134, 147, 148, 157, 154, 39, 32, 41, 46, 59, 60, 53, 50, 31, 24, 17, 22, 3, 4, 13, 10, 87, 80, 89, 94, 75, 76, 69, 66, 
+     111, 104, 97, 102, 115, 116, 125, 122, 137, 142, 135, 128, 149, 146, 155, 156, 177, 182, 191, 184, 173, 170, 163, 164, 249, 254, 247, 240,
+     229, 226, 235, 236, 193, 198, 207, 200, 221, 218, 211, 212, 105, 110, 103, 96, 117, 114, 123, 124, 81, 86, 95, 88, 77, 74, 67, 68, 25, 30, 23, 
+     16, 5, 2, 11, 12, 33, 38, 47, 40, 61, 58, 51, 52, 78, 73, 64, 71, 82, 85, 92, 91, 118, 113, 120, 127, 106, 109, 100, 99, 62, 57, 48, 55, 34, 37, 44, 
+     43, 6, 1, 8, 15, 26, 29, 20, 19, 174, 169, 160, 167, 178, 181, 188, 187, 150, 145, 152, 159, 138, 141, 132, 131, 222, 217, 208, 215, 194, 197 ,
+     204, 203, 230, 225, 232, 239, 250, 253, 244, 243 };
+
+//Crc8 algorithm using table above. Uses table to make algorithm more efficient
+uint8_t computeCRC8(
+    const uint8_t *data, 
+    size_t length)
+{
+    uint8_t crc=0x00; 
+
+    for(int i=0; i<length; i++){
+        crc=crc8_table[data[i]^crc];
+    }
+    return crc;
+}
+
+void i2c_slave_task(void *pvParameters) {
+    uint8_t rx_data[24]; // Large enough to fit either packet type
+    uint8_t tx_data[8];
+
+    while (1) {
+        // Non-blocking read check
+        int rx_len = i2c_slave_read_buffer(I2C_SLAVE_NUM, rx_data, sizeof(rx_data), 10 / portTICK_PERIOD_MS);
+        
+        if (rx_len > 0) {
+            uint8_t opcode = rx_data[0];
+
+            if (opcode == OPCODE_SENSORS && rx_len == 17) {
+                // Verify CRC for sensor packet (bytes 0 to 15)
+                if (computeCRC8(rx_data, 16) == rx_data[16]) {
+                    float incoming_sensors[7];
+                    for(int i = 0; i < 7; i++) {
+                        int16_t raw_val = (static_cast<int16_t>(rx_data[2 + (i*2)]) << 8) |
+                                          static_cast<int16_t>(rx_data[3 + (i*2)]);
+                        incoming_sensors[i] = (float)raw_val / SENSOR_SCALE;
+                    }
+                    pressure_update_external_sensors(incoming_sensors);
+                }
+            } 
+            else if (opcode == OPCODE_COMMANDS && rx_len == 8) {
+                // Verify CRC for command packet (bytes 0 to 6)
+                if (computeCRC8(rx_data, 7) == rx_data[7]) {
+                    last_channel_id = rx_data[1];
+                    uint8_t mode = rx_data[2];
+                    if (mode == 1 && !pressure_system_is_on()) pressure_cmd_measurements();
+                    else if (mode == 0 && pressure_system_is_on()) pressure_cmd_standby();
+
+                    uint8_t mask = rx_data[3];
+                    pressure_set_valve_override((mask & 0x01) != 0);
+                    (mask & 0x02) ? pdb_relay1_on() : pdb_relay1_off();
+                    (mask & 0x04) ? pdb_relay2_on() : pdb_relay2_off();
+                    (mask & 0x08) ? pdb_relay3_on() : pdb_relay3_off();
+                    (mask & 0x10) ? pdb_relay4_on() : pdb_relay4_off();
+
+                    pressure_set_pump_pwms(rx_data[4], rx_data[5], rx_data[6]);
+                }
+            }
+        }
+
+        // Prepare Status Packet for Master to read anytime
+        PressureStatus current_status = pressure_get_status();
+        
+        tx_data[0] = last_channel_id; 
+        tx_data[1] = (uint8_t)current_status.state;
+        tx_data[2] = current_status.error;
+        
+        tx_data[3] = 0x00; 
+        tx_data[4] = 0x00; 
+        tx_data[5] = 0x00; 
+        tx_data[6] = 0x00; 
+        tx_data[7] = computeCRC8(tx_data, 7);
+
+        i2c_reset_tx_fifo(I2C_SLAVE_NUM);
+        i2c_slave_write_buffer(I2C_SLAVE_NUM, tx_data, sizeof(tx_data), 0);
+
+        // Run local state machine logic
+        pressure_update();
+
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -263,6 +456,7 @@ void pressure_update()
     {
         status.chamber_pressure = chamber_reading;
         status.compressor_inlet_pressure = compressor_inlet_reading;
+        status.error = PRESSURE_ERR_NONE;
     }
 
     switch(status.state)
@@ -299,6 +493,7 @@ void pressure_cmd_standby()
 {
     status.state =
         PRESSURE_STANDBY;
+    status.error = PRESSURE_ERR_NONE;
 
     pumps_off();
 
@@ -311,6 +506,7 @@ void pressure_cmd_measurements()
 {
     status.state =
         PRESSURE_PREPRESSURISATION;
+    status.error = PRESSURE_ERR_NONE;
 }
 
 void pressure_set_target_pressure(
@@ -356,3 +552,29 @@ void pdb_relay3_off() { pdb_relay3_set(0); }
 
 void pdb_relay4_on()  { pdb_relay4_set(1); }
 void pdb_relay4_off() { pdb_relay4_set(0); }
+
+
+extern "C" void app_main() {
+    // 1. Init I2C Slave
+    i2c_config_t conf_slave = {
+        .mode = I2C_MODE_SLAVE,
+        .sda_io_num = I2C_SDA_PIN, // GPIO 13
+        .scl_io_num = I2C_SCL_PIN, // GPIO 14
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .slave = {
+            .addr_10bit_en = 0,
+            .slave_addr = I2C_SLAVE_ADDR,
+            .maximum_speed = 100000
+        },
+        .clk_flags = 0,
+    };
+    i2c_param_config(I2C_SLAVE_NUM, &conf_slave);
+    i2c_driver_install(I2C_SLAVE_NUM, conf_slave.mode, 128, 128, 0);
+
+    // 2. Init Pressure Hardware
+    pressure_init();
+
+    // 3. Start I2C & State Machine Task
+    xTaskCreate(i2c_slave_task, "i2c_slave_task", 4096, NULL, 5, NULL);
+}

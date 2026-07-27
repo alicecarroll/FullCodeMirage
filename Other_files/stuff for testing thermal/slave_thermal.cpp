@@ -61,7 +61,7 @@ static bool select_slave(
                 multiplex_Tt3_devP;
 
             *reset_pin =
-                Preassure_reset_PIN;
+                Pressure_reset_PIN;
 
             return true;
     }

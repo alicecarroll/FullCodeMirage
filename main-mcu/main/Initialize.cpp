@@ -22,7 +22,7 @@ void init_gpio_pins()
     io_conf.pin_bit_mask =
         (1ULL << Watchdog_PIN) |
         (1ULL << Thermal_reset_PIN) |
-        (1ULL << Preassure_reset_PIN) |
+        (1ULL << Pressure_reset_PIN) |
         (1ULL << K96_EN_PIN) |
         (1ULL << Reset_WIZ_PIN) |
         (1ULL << CS_WIZ_PIN);
@@ -35,7 +35,7 @@ void init_gpio_pins()
     // Safe startup states
     gpio_set_level(Watchdog_PIN, 0); 
     gpio_set_level(Thermal_reset_PIN, 1);   
-    gpio_set_level(Preassure_reset_PIN, 1); 
+    gpio_set_level(Pressure_reset_PIN, 1); 
     gpio_set_level(Reset_WIZ_PIN, 1);       
     gpio_set_level(CS_WIZ_PIN, 1);
     //gpio_set_level(CS_SD_PIN, 1);   // deselect SD card by default; not needed since SD card driver manages this pin
@@ -45,9 +45,9 @@ void init_gpio_pins()
     gpio_set_direction(Thermal_reset_PIN, GPIO_MODE_OUTPUT);
     gpio_set_level(Thermal_reset_PIN, 1); 
 
-    gpio_reset_pin(Preassure_reset_PIN);
-    gpio_set_direction(Preassure_reset_PIN, GPIO_MODE_OUTPUT);
-    gpio_set_level(Preassure_reset_PIN, 1);
+    gpio_reset_pin(Pressure_reset_PIN);
+    gpio_set_direction(Pressure_reset_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(Pressure_reset_PIN, 1);
 }
 
 // Initialize SPI

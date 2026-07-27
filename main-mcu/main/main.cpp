@@ -235,8 +235,10 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
     thermal_current_temperatures[6]=static_cast<uint16_t>(sensor_data.Tt1*100);
     thermal_current_temperatures[7]=static_cast<uint16_t>(sensor_data.Tt2*100);
 
+    bool thermal_tx_ok = false;
+
     while (chosen_channel_id_thermal!=(number_channels_thermal-1)){
-        bool thermal_tx_ok = thermal_test_send_package(
+        thermal_tx_ok = thermal_test_send_package(
             thermal_mcu, 
             chosen_channel_id_thermal, //0x00- 0x07
             thermal_mode, //0 bang bang 1 PID 155-255 D_cycle
@@ -244,9 +246,8 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
             thermal_target);
         chosen_channel_id_thermal++;
     }
-    else{
-        chosen_channel_id_thermal=0;
-    }
+        
+    chosen_channel_id_thermal=0;
 
     if (thermal_tx_ok)
     {
@@ -297,7 +298,39 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
 
 //Pressure
 bool shutters_open = false; // To track if shutters are open
+int16_t pressure_watchdog_tolerance=5; // 1 according to SEDv3. Number of subsequent times where the pressure slave is reset. If reset more than this number of times, the pressure MCU will be considered lost.
+bool pressure_mcu_lost=false; // To track if the pressure slave is lost.
 
+static void comms_pressure_sensor(SensorData &sensor_data, uint32_t current_time_ms)
+{
+    PressureStatusData pressure_status;
+    pressure_send_sensors(pressure_mcu, sensor_data);
+
+    if (pressure_receive_package(pressure_mcu, &pressure_status))
+    {
+        last_pressure_ping_time = current_time_ms;
+        ESP_LOGI(TAG, "Pressure MCU responded successfully. Channel ID: %d, State: %d, Error Code: %d",
+                 pressure_status.channel_id, pressure_status.state, pressure_status.error_code);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "Pressure MCU failed to respond to sensor query");
+    }
+
+    // Watchdog reset for pressure
+    if ((current_time_ms - last_pressure_ping_time) > SLAVE_WATCHDOG_TIMEOUT_MS)
+    {
+        ESP_LOGW(TAG, "!!! Watchdog Triggered: Pressure MCU timed out. Resetting device via Pin %d !!!", Pressure_reset_PIN);
+        slave_reset(pressure_mcu);
+        last_pressure_ping_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
+        pressure_watchdog_count++;
+        if (pressure_watchdog_count >= pressure_watchdog_tolerance)
+        {
+            pressure_mcu_lost = true;
+            ESP_LOGE(TAG, "!!! Pressure MCU considered lost after %d resets. Manual intervention required. !!!", pressure_watchdog_count);
+        }
+    }
+}
 
 // ESP-IDF expects main in C
 extern "C" void app_main()
@@ -433,7 +466,7 @@ void loop()
             //Bark at thermal subsystem
             if (not thermal_mcu_lost)
             {  
-                comms_thermal(sensor_data, current_time_ms);
+                comms_thermal_sensor(sensor_data, current_time_ms);
             }
             // Enter IP when given by ESA
             // Ping ground that status is OK.
@@ -446,15 +479,19 @@ void loop()
         //Reset overrides
 
         //Pressure communication
+        if (not pressure_mcu_lost)
+        {
+            comms_pressure_sensor(sensor_data, current_time_ms);
+        }
         
         //Thermal communication
         if (not thermal_mcu_lost)
         {  
-        comms_thermal(sensor_data, current_time_ms);
+        comms_thermal_sensor(sensor_data, current_time_ms);
         }
         break;
 
-    // Measurement
+    // measurement
     case 3:
         // Pressure check block to see if pressure in chamber is too high 
         //Check if pressure in chamber is below threshold, if so, increase pressure first.
@@ -487,11 +524,15 @@ void loop()
         //}
 
         // Pressure communication block 
+        if (not pressure_mcu_lost)
+        {
+            comms_pressure_sensor(sensor_data, current_time_ms);
+        }
 
         // Thermal communication block
         if (not thermal_mcu_lost)
         {
-        comms_thermal(sensor_data, current_time_ms);
+        comms_thermal_sensor(sensor_data, current_time_ms);
         }
 
         // Elevation check in terms of pressure
