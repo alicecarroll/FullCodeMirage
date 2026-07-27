@@ -1,5 +1,6 @@
 #include <string.h> //String and memory functions
 #include <math.h> //Mathematical constants and functions
+#include "freertos/FreeRTOS.h" //FreeRTOS functionality
 #include "freertos/task.h" //FreeRTOS functionality
 #include "driver/gpio.h" //GPIO driver functions
 #include "driver/uart.h" //UART communication driver
@@ -223,94 +224,101 @@ static const K96_RAM_Item ram_items[] =
 //----- Read and print all sensor data -----
 void read_k96(void)
 {
-    // Checks the sensor's data type
-    // 32-bit = 4 bytes
-    // 16-bit = 2 bytes
-    uint8_t bytes =
-        (item->type == K96_S32 || item->type == K96_S32_16) ? 4 : 2;
+    uint8_t response[16];
+    size_t num_items = sizeof(ram_items) / sizeof(ram_items[0]);
 
-    // Reads data from the sensor
-    // Skip this variable if communication failed and continue reading the rest.
-    if (!K96_read_ram(item->address, item->bytes, response))
+    for (size_t i = 0; i < num_items; i++)
     {
-        printf("0x%04X %-25s : Read failed\n",
-                item->address,
-                item->name);
-        continue;
-    }
+        const K96_RAM_Item *item = &ram_items[i];
 
-    printf("------------------------------------------\n");
-    printf("Address : 0x%04X\n", item->address);
-    printf("Name    : %s\n", item->name);
+        // Checks the sensor's data type
+        // 32-bit = 4 bytes
+        // 16-bit = 2 bytes
+        uint8_t bytes =
+            (item->type == K96_S32 || item->type == K96_S32_16) ? 4 : 2;
 
-    // Combine 4 bytes into 32-bit value and prints the result
-    if (bytes == 4)
-    {
-        int32_t raw =
-            ((int32_t)response[3] << 24) |
-            ((int32_t)response[4] << 16) |
-            ((int32_t)response[5] << 8)  |
-            response[6];
-
-        switch(item->type)
+        // Reads data from the sensor
+        // Skip this variable if communication failed and continue reading the rest.
+        if (!K96_read_ram(item->address, bytes, response))
         {
-            case K96_S32:
-                printf("Format  : S32\n");
-                printf("Value   : %ld %s\n",
-                    (long)raw,
-                    item->unit);
-                break;
-
-            case K96_S32_16:
-                printf("Format  : S32.16\n");
-                printf("Value   : %.4f %s\n",
-                    raw / 65536.0,
-                    item->unit);
-                break;
-
-            default:
-                break;
+            printf("0x%04X %-25s : Read failed\n",
+                    item->address,
+                    item->name);
+            continue;
         }
-    }
 
-    else
-    {
-        // Combine 2 bytes into 16-bit value and prints the result
-        uint16_t raw =
-            ((uint16_t)response[3] << 8) |
-            response[4];
+        printf("------------------------------------------\n");
+        printf("Address : 0x%04X\n", item->address);
+        printf("Name    : %s\n", item->name);
 
-        switch(item->type)
+        // Combine 4 bytes into 32-bit value and prints the result
+        if (bytes == 4)
         {
-            case K96_U16:
-                printf("Format  : U16\n");
-                printf("Value   : %u %s\n",
-                    raw,
-                    item->unit);
-                break;
+            int32_t raw =
+                ((int32_t)response[3] << 24) |
+                ((int32_t)response[4] << 16) |
+                ((int32_t)response[5] << 8)  |
+                response[6];
 
-            case K96_S16:
-                printf("Format  : S16\n");
-                printf("Value   : %d %s\n",
-                    (int16_t)raw,
-                    item->unit);
-                break;
+            switch(item->type)
+            {
+                case K96_S32:
+                    printf("Format  : S32\n");
+                    printf("Value   : %ld %s\n",
+                        (long)raw,
+                        item->unit);
+                    break;
 
-            case K96_B16:
-                printf("Format  : B16\n");
-                printf("Value   : 0x%04X\n",
-                    raw);
-                break;
+                case K96_S32_16:
+                    printf("Format  : S32.16\n");
+                    printf("Value   : %.4f %s\n",
+                        raw / 65536.0,
+                        item->unit);
+                    break;
 
-            case K96_S16_8:
-                printf("Format  : S16.8\n");
-                printf("Value   : %.2f %s\n",
-                    ((int16_t)raw) / 256.0,
-                    item->unit);
-                break;
+                default:
+                    break;
+            }
+        }
+        else
+        {
+            // Combine 2 bytes into 16-bit value and prints the result
+            uint16_t raw =
+                ((uint16_t)response[3] << 8) |
+                response[4];
 
-            default:
-                break;
+            switch(item->type)
+            {
+                case K96_U16:
+                    printf("Format  : U16\n");
+                    printf("Value   : %u %s\n",
+                        raw,
+                        item->unit);
+                    break;
+
+                case K96_S16:
+                    printf("Format  : S16\n");
+                    printf("Value   : %d %s\n",
+                        (int16_t)raw,
+                        item->unit);
+                    break;
+
+                case K96_B16:
+                    printf("Format  : B16\n");
+                    printf("Value   : 0x%04X\n",
+                        raw);
+                    break;
+
+                case K96_S16_8:
+                    printf("Format  : S16.8\n");
+                    printf("Value   : %.2f %s\n",
+                        ((int16_t)raw) / 256.0,
+                        item->unit);
+                    break;
+
+                default:
+                    break;
+            }
         }
     }
 }
