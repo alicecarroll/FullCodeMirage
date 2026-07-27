@@ -331,9 +331,7 @@ void read_ms5803(MS5803_Calibration *cal, float *pressure, float *temperature)
 
     // First-order compensation
     int32_t dT = (int32_t)D2 - ((int32_t)cal->C[5] << 8);
-
-    int64_t TEMP =
-        2000 + (((int64_t)dT * cal->C[6]) >> 23);
+    int64_t TEMP = 2000 + (((int64_t)dT * cal->C[6]) >> 23);
 
     int64_t OFF =
         ((int64_t)cal->C[2] << 16) +
@@ -352,51 +350,40 @@ void read_ms5803(MS5803_Calibration *cal, float *pressure, float *temperature)
     // The different sensor models have different second-order compensation requirements
     if (cal->model == MS5803Model::MS5803_01BA)
     {
-
         if (TEMP < 2000)
         {
             T2 = ((int64_t)dT * dT) >> 31;
-
             OFF2 = 3 * ((TEMP - 2000) * (TEMP - 2000));
-
-            SENS2 =
-                7 * ((TEMP - 2000) * (TEMP - 2000)) >> 3;
+            SENS2 = 7 * ((TEMP - 2000) * (TEMP - 2000)) >> 3;
 
             if (TEMP < -1500)
             {
-                SENS2 +=
-                    2 * ((TEMP + 1500) * (TEMP + 1500));
+                SENS2 += 2 * ((TEMP + 1500) * (TEMP + 1500));
             }
         }
         else if (TEMP >= 4500)
         {
-            SENS2 =
-                ((TEMP - 4500) * (TEMP - 4500)) >> 3;
+            SENS2 = ((TEMP - 4500) * (TEMP - 4500)) >> 3;
         }
     } 
-
     else if (cal->model == MS5803Model::MS5803_14BA)
     {
         if (TEMP < 2000)
         {
-            T2 = 3* ((int64_t)dT * dT) >> 33;
-
+            T2 = 3 * ((int64_t)dT * dT) >> 33;
             OFF2 = 3 * ((TEMP - 2000) * (TEMP - 2000)) >> 1;
-
-            SENS2 =
-                5 * ((TEMP - 2000) * (TEMP - 2000)) >> 3;
+            SENS2 = 5 * ((TEMP - 2000) * (TEMP - 2000)) >> 3;
 
             if (TEMP < -1500)
             {
                 OFF2 += 7 * ((TEMP + 1500) * (TEMP + 1500));
-                SENS2 +=
-                    4 * ((TEMP + 1500) * (TEMP + 1500));
+                SENS2 += 4 * ((TEMP + 1500) * (TEMP + 1500));
             }
         }
         else
         {
             T2 = 7 * ((int64_t)dT * dT) >> 37;
-            OFF2 = 1* ((TEMP - 2000) * (TEMP - 2000)) >> 4;
+            OFF2 = 1 * ((TEMP - 2000) * (TEMP - 2000)) >> 4;
         }
     }
 
@@ -404,24 +391,19 @@ void read_ms5803(MS5803_Calibration *cal, float *pressure, float *temperature)
     OFF -= OFF2;
     SENS -= SENS2;
 
+    int64_t P = ((((int64_t)D1 * SENS) >> 21) - OFF) >> 15;
 
-    int64_t P =
-        ((((int64_t)D1 * SENS) >> 21) - OFF) >> 15;
-
-    
-    // The sensors need different scaling factors to convert the raw pressure value to bar
-    if (cal->model == MS5803Model::MS5803_01BA)
-    {
-        P /= 100000; // Convert to bar
-    }
-    else if (cal->model == MS5803Model::MS5803_14BA)
-    {
-        P /= 10000; // Convert to bar
-    }
-
+    // --- Final Pressure & Temperature Outputs ---
     if (pressure != nullptr)
     {
-        *pressure = (float)P;
+        if (cal->model == MS5803Model::MS5803_01BA)
+        {
+            *pressure = (float)P / 100000.0f; // Convert 0.01 mbar to bar
+        }
+        else if (cal->model == MS5803Model::MS5803_14BA)
+        {
+            *pressure = (float)P / 10000.0f;  // Convert 0.1 mbar to bar
+        }
     }
 
     if (temperature != nullptr)
