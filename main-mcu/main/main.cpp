@@ -4,6 +4,7 @@
 #include <string>
 #include <cstdio>
 #include <cctype>
+#include <forward_list>
 
 #include "Settings.h"
 #include "ConnectionLoss.h"
@@ -66,6 +67,162 @@ static bool pressure_system_active = false;
 static bool status_update_requested = false;
 static bool status_packet_sent_this_loop = false;
 static std::string ethernet_command_text;
+
+std::forward_list <int> pressure_slave_commands; // List of commands to send to the pressure slave in the current loop iteration
+
+
+struct CommandMapping
+{
+    const char *text;
+    SlaveCommands cmd;
+};
+
+static const CommandMapping relay_commands[] =
+{
+    {"RELAY 1 ON",  CMD_OPEN_RELAY1},
+    {"RELAY 1 OFF", CMD_CLOSE_RELAY1},
+    {"RELAY 2 ON",  CMD_OPEN_RELAY2},
+    {"RELAY 2 OFF", CMD_CLOSE_RELAY2},
+    {"RELAY 3 ON",  CMD_OPEN_RELAY3},
+    {"RELAY 3 OFF", CMD_CLOSE_RELAY3},
+    {"RELAY 4 ON",  CMD_OPEN_RELAY4},
+    {"RELAY 4 OFF", CMD_CLOSE_RELAY4},
+};
+
+static void set_heater_bit(uint8_t heater_index, bool enabled)
+// Currently, this function is not used to pass information to the thermal mcu. This should be added (Jonathan, 26.7.)
+{
+    if (heater_index >= 8)
+    {
+        return;
+    }
+
+    uint8_t mask = static_cast<uint8_t>(1U << heater_index);
+    if (enabled)
+    {
+        active_heater_mask |= mask;
+    }
+    else
+    {
+        active_heater_mask &= static_cast<uint8_t>(~mask);
+    }
+}
+
+static std::string to_upper_copy(const uint8_t *data, size_t length)
+{
+    std::string text;
+    text.reserve(length);
+
+    for (size_t index = 0; index < length; ++index)
+    {
+        text.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(data[index]))));
+    }
+
+    return text;
+}
+
+static void trim_in_place(std::string &text)
+{
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())))
+    {
+        text.erase(text.begin());
+    }
+
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())))
+    {
+        text.pop_back();
+    }
+}
+void handle_command()
+{
+    ethernet_command_text = to_upper_copy(ethernet_recieve_buf, ethernet_recieve_buf_bytes_read);
+
+    if (ethernet_command_text.empty())
+    {
+        ESP_LOGW(TAG, "Received empty ethernet command");
+        return;
+    }
+
+    trim_in_place(ethernet_command_text);
+
+    int heater_index = 0;
+
+    if (ethernet_command_text == "STATUS" || ethernet_command_text == "REQUEST STATUS" || ethernet_command_text == "REQUEST STATUS UPDATE")
+    {
+        status_update_requested = true;
+        ESP_LOGI(TAG, "Status update requested");
+        return;
+    }
+
+    if (ethernet_command_text == "HEATER ON")
+    {
+        set_heater_bit(0, true);
+        ESP_LOGI(TAG, "Heater 1 turned ON. Mask now 0x%02X", active_heater_mask);
+        return;
+    }
+
+    if (ethernet_command_text == "HEATER OFF")
+    {
+        set_heater_bit(0, false);
+        ESP_LOGI(TAG, "Heater 1 turned OFF. Mask now 0x%02X", active_heater_mask);
+        return;
+    }
+
+    if (sscanf(ethernet_command_text.c_str(), "HEATER ON %d", &heater_index) == 1)
+    {
+        if (heater_index >= 1 && heater_index <= 8)
+        {
+            set_heater_bit(static_cast<uint8_t>(heater_index - 1), true);
+            ESP_LOGI(TAG, "Heater %d turned ON. Mask now 0x%02X", heater_index, active_heater_mask);
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Invalid heater index in command: %s", ethernet_command_text.c_str());
+        }
+        return;
+    }
+
+    if (sscanf(ethernet_command_text.c_str(), "HEATER OFF %d", &heater_index) == 1)
+    {
+        if (heater_index >= 1 && heater_index <= 8)
+        {
+            set_heater_bit(static_cast<uint8_t>(heater_index - 1), false);
+            ESP_LOGI(TAG, "Heater %d turned OFF. Mask now 0x%02X", heater_index, active_heater_mask);
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Invalid heater index in command: %s", ethernet_command_text.c_str());
+        }
+        return;
+    }
+
+    if (ethernet_command_text == "HEATER ALL ON")
+    {
+        active_heater_mask = 0xFF;
+        ESP_LOGI(TAG, "All heaters turned ON");
+        return;
+    }
+
+    if (ethernet_command_text == "HEATER ALL OFF")
+    {
+        active_heater_mask = 0x00;
+        ESP_LOGI(TAG, "All heaters turned OFF");
+        return;
+    }
+
+    for (const auto &entry : relay_commands)
+    {
+        if (ethernet_command_text == entry.text)
+        {
+            ESP_LOGI(TAG, "%s command received", entry.text);
+            pressure_slave_commands.push_front(entry.cmd);
+            return;
+        }
+    }
+    
+
+    ESP_LOGW(TAG, "Unrecognized ethernet command: %.*s", (int)ethernet_recieve_buf_bytes_read, ethernet_recieve_buf);
+}
 
 static esp_err_t send_system_status_packet()
 {
@@ -160,32 +317,6 @@ static void handle_ethernet_receive_status(esp_err_t esp_err_status)
     }
 }
 
-static std::string to_upper_copy(const uint8_t *data, size_t length)
-{
-    std::string text;
-    text.reserve(length);
-
-    for (size_t index = 0; index < length; ++index)
-    {
-        text.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(data[index]))));
-    }
-
-    return text;
-}
-
-static void trim_in_place(std::string &text)
-{
-    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())))
-    {
-        text.erase(text.begin());
-    }
-
-    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())))
-    {
-        text.pop_back();
-    }
-}
-
 //Values for thermal slave
 uint8_t number_channels_thermal=8;  //0-8 depending on the number of switches used
 //Variables for thermal under this comment will need to have value assigned in loop. Currently using placeholders (Remove comment when this has changed)
@@ -204,24 +335,6 @@ uint8_t error_thermal;
 uint16_t thermal_current_temperatures[8];
 int32_t OUTLET_TEMPERATURE_THRESHOLD = 50; // Threshold for outlet temperature in Celsius
 
-static void set_heater_bit(uint8_t heater_index, bool enabled)
-// Currently, this function is not used to pass information to the thermal mcu. This should be added (Jonathan, 26.7.)
-{
-    if (heater_index >= 8)
-    {
-        return;
-    }
-
-    uint8_t mask = static_cast<uint8_t>(1U << heater_index);
-    if (enabled)
-    {
-        active_heater_mask |= mask;
-    }
-    else
-    {
-        active_heater_mask &= static_cast<uint8_t>(~mask);
-    }
-}
 
 static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_ms){
     uint8_t chosen_channel_id_thermal=0x00; //0x00- 0x07
@@ -306,6 +419,45 @@ static void comms_pressure_sensor(SensorData &sensor_data, uint32_t current_time
     PressureStatusData pressure_status;
     pressure_send_sensors(pressure_mcu, sensor_data);
 
+    // Add the command for the current mode to the list of commands to send to the pressure slave
+    // This is done to ensure that the the slave is always on the same mode as the main MCU, even if the mode is changed e.g. via ethernet command.
+    // If also done for the thermal slave, it would be impossible to have the slaved on different modes than the main MCU.
+    switch (mode)
+    {
+        case 1: // Test Loop
+            pressure_slave_commands.push_front(CMD_MEASUREMENTS);
+            break;
+        case 2: // Standby
+            pressure_slave_commands.push_front(CMD_STANDBY);
+            break;
+        case 3: // Measurement
+            pressure_slave_commands.push_front(CMD_MEASUREMENTS);
+            break;
+        case 4: // Humidity
+            pressure_slave_commands.push_front(CMD_STANDBY);
+            break;
+        default:
+            ESP_LOGW(TAG, "Unrecognized mode: %d. No command sent to Pressure MCU.", mode);
+            break;
+    }
+
+    // Check if there are any commands to send to the pressure slave
+    auto commands = pressure_slave_commands;
+    pressure_slave_commands.clear();
+    for (int command : commands)
+    {
+        ESP_LOGI(TAG, "Sending command 0x%02X to Pressure MCU", command);
+        // Send the command to the pressure slave
+        if (pressure_send_command(pressure_mcu, static_cast<uint8_t>(command)))
+        {
+            ESP_LOGI(TAG, "Command 0x%02X sent successfully to Pressure MCU", command);
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to send command 0x%02X to Pressure MCU", command);
+        }
+    }
+
     if (pressure_receive_package(pressure_mcu, &pressure_status))
     {
         last_pressure_ping_time = current_time_ms;
@@ -338,11 +490,13 @@ extern "C" void app_main()
     init_gpio_pins();
     init_spi();
     wiz_init();
-    while(!wizphy_getphylink())
-    {
-        ESP_LOGI(TAG,"Waiting for Ethernet link...");
+    // Try to establish Ethernet for 5 seconds before proceeding. This is to ensure that the system can still run even if Ethernet is not available.
+    TickType_t start_time = xTaskGetTickCount();
+    while ((xTaskGetTickCount() - start_time) < pdMS_TO_TICKS(5000) && !wizphy_getphylink()){
+        ESP_LOGW(TAG, "Ethernet link not established yet. Retrying...");
         vTaskDelay(pdMS_TO_TICKS(500));
     }
+        
 
     ESP_LOGI(TAG,"Ethernet link up");
     init_i2c();
@@ -462,6 +616,10 @@ void loop()
             //}
 
             // Bark at pressure subsystem
+            if (not pressure_mcu_lost)
+            {
+                comms_pressure_sensor(sensor_data, current_time_ms);
+            }
 
             //Bark at thermal subsystem
             if (not thermal_mcu_lost)
@@ -613,86 +771,3 @@ void loop()
     }
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-void handle_command()
-{
-    ethernet_command_text = to_upper_copy(ethernet_recieve_buf, ethernet_recieve_buf_bytes_read);
-
-    if (ethernet_command_text.empty())
-    {
-        ESP_LOGW(TAG, "Received empty ethernet command");
-        return;
-    }
-
-    trim_in_place(ethernet_command_text);
-
-    int heater_index = 0;
-
-    if (ethernet_command_text == "STATUS" || ethernet_command_text == "REQUEST STATUS" || ethernet_command_text == "REQUEST STATUS UPDATE")
-    {
-        status_update_requested = true;
-        ESP_LOGI(TAG, "Status update requested");
-        return;
-    }
-
-    if (ethernet_command_text == "HEATER ON")
-    {
-        set_heater_bit(0, true);
-        ESP_LOGI(TAG, "Heater 1 turned ON. Mask now 0x%02X", active_heater_mask);
-        return;
-    }
-
-    if (ethernet_command_text == "HEATER OFF")
-    {
-        set_heater_bit(0, false);
-        ESP_LOGI(TAG, "Heater 1 turned OFF. Mask now 0x%02X", active_heater_mask);
-        return;
-    }
-
-    if (sscanf(ethernet_command_text.c_str(), "HEATER ON %d", &heater_index) == 1)
-    {
-        if (heater_index >= 1 && heater_index <= 8)
-        {
-            set_heater_bit(static_cast<uint8_t>(heater_index - 1), true);
-            ESP_LOGI(TAG, "Heater %d turned ON. Mask now 0x%02X", heater_index, active_heater_mask);
-        }
-        else
-        {
-            ESP_LOGW(TAG, "Invalid heater index in command: %s", ethernet_command_text.c_str());
-        }
-        return;
-    }
-
-    if (sscanf(ethernet_command_text.c_str(), "HEATER OFF %d", &heater_index) == 1)
-    {
-        if (heater_index >= 1 && heater_index <= 8)
-        {
-            set_heater_bit(static_cast<uint8_t>(heater_index - 1), false);
-            ESP_LOGI(TAG, "Heater %d turned OFF. Mask now 0x%02X", heater_index, active_heater_mask);
-        }
-        else
-        {
-            ESP_LOGW(TAG, "Invalid heater index in command: %s", ethernet_command_text.c_str());
-        }
-        return;
-    }
-
-    if (ethernet_command_text == "HEATER ALL ON")
-    {
-        active_heater_mask = 0xFF;
-        ESP_LOGI(TAG, "All heaters turned ON");
-        return;
-    }
-
-    if (ethernet_command_text == "HEATER ALL OFF")
-    {
-        active_heater_mask = 0x00;
-        ESP_LOGI(TAG, "All heaters turned OFF");
-        return;
-    }
-
-    ESP_LOGW(TAG, "Unrecognized ethernet command: %.*s", (int)ethernet_recieve_buf_bytes_read, ethernet_recieve_buf);
-}

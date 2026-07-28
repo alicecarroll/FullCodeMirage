@@ -48,6 +48,8 @@ typedef enum
 
 } PacketType;
 
+static const char *TAG = "main";
+
 // ------------------------------------------------------------------
 // Internal state
 // ------------------------------------------------------------------
@@ -106,29 +108,29 @@ static void pressure_set_valve_override(bool open)
     }
 }
 
-static void pressure_set_pump_pwms(uint8_t pump1_pwm, uint8_t pump2_pwm, uint8_t compressor_pwm)
+static void pressure_set_vpump1_pwm(uint8_t pwm)
 {
     // The hardware is still driven as plain digital outputs, but the
     // packet values are now consumed instead of being dropped on the floor.
-    if (pump1_pwm || pump2_pwm)
-    {
-        pumps_on();
-    }
-    else
-    {
-        pumps_off();
-    }
-
-    if (compressor_pwm)
-    {
-        compressor_on();
-    }
-    else
-    {
-        compressor_off();
-    }
+    pump1_on();
+    
 }
 
+static void pressure_set_vpump2_pwm(uint8_t pwm)
+{
+    // The hardware is still driven as plain digital outputs, but the
+    // packet values are now consumed instead of being dropped on the floor.
+    pump2_on();
+    
+}
+
+static void pressure_set_compressor_pwm(uint8_t pwm)
+{
+    // The hardware is still driven as plain digital outputs, but the
+    // packet values are now consumed instead of being dropped on the floor.
+    compressor_on();
+    
+}
 // ------------------------------------------------------------------
 // Internal hardware functions
 //
@@ -322,10 +324,63 @@ uint8_t computeCRC8(
     return crc;
 }
 
+uint8_t cmd = 0;
+uint8_t info_bit = 0;
+
+typedef enum
+{
+    CMD_VPUMP1_OFF       = 0x01,
+    CMD_VPUMP1_ON        = 0x02,
+
+    CMD_VPUMP2_OFF       = 0x03,
+    CMD_VPUMP2_ON        = 0x04,
+    CMD_COMPRESSOR_OFF    = 0x05,
+    CMD_COMPRESSOR_ON     = 0x06,
+
+    CMD_OPEN_SHUTTERS   = 0x07,
+    CMD_CLOSE_SHUTTERS  = 0x08,
+
+    CMD_STANDBY         = 0x09,
+    CMD_MEASUREMENTS    = 0x0A,
+
+    CMD_HEATER_ON       = 0x0B,
+    CMD_HEATER_OFF      = 0x0C,
+
+    CMD_OPEN_RELAY1      = 0x0D,
+    CMD_CLOSE_RELAY1     = 0x0E,
+    CMD_OPEN_RELAY2      = 0x0F,
+    CMD_CLOSE_RELAY2     = 0x10,
+    CMD_OPEN_RELAY3      = 0x11,
+    CMD_CLOSE_RELAY3     = 0x12,
+    CMD_OPEN_RELAY4      = 0x13,
+    CMD_CLOSE_RELAY4     = 0x14
+
+} SlaveCommands;
+
+struct CommandMapping
+{
+     void (*func)();
+    SlaveCommands cmd;
+};
+
+static const CommandMapping relay_commands[] =
+{
+    {pdb_relay1_on,  CMD_OPEN_RELAY1},
+    {pdb_relay1_off, CMD_CLOSE_RELAY1},
+    {pdb_relay2_on,  CMD_OPEN_RELAY2},
+    {pdb_relay2_off, CMD_CLOSE_RELAY2},
+    {pdb_relay3_on,  CMD_OPEN_RELAY3},
+    {pdb_relay3_off, CMD_CLOSE_RELAY3},
+    {pdb_relay4_on,  CMD_OPEN_RELAY4},
+    {pdb_relay4_off, CMD_CLOSE_RELAY4},
+    {valve_open,      CMD_OPEN_SHUTTERS},
+    {valve_close,     CMD_CLOSE_SHUTTERS},
+};
+
 void i2c_slave_task(void *pvParameters) {
     uint8_t rx_data[24]; // Large enough to fit either packet type
     uint8_t tx_data[8];
-
+ 
     while (1) {
         // Non-blocking read check
         int rx_len = i2c_slave_read_buffer(I2C_SLAVE_NUM, rx_data, sizeof(rx_data), 10 / portTICK_PERIOD_MS);
@@ -333,34 +388,45 @@ void i2c_slave_task(void *pvParameters) {
         if (rx_len > 0) {
             uint8_t opcode = rx_data[0];
 
-            if (opcode == OPCODE_SENSORS && rx_len == 17) {
-                // Verify CRC for sensor packet (bytes 0 to 15)
-                if (computeCRC8(rx_data, 16) == rx_data[16]) {
+            if (opcode == OPCODE_SENSORS && rx_len == 16) {
+                // Verify CRC for sensor packet (bytes 0 to 14)
+                if (computeCRC8(rx_data, 16) == rx_data[15]) {
                     float incoming_sensors[7];
                     for(int i = 0; i < 7; i++) {
-                        int16_t raw_val = (static_cast<int16_t>(rx_data[2 + (i*2)]) << 8) |
-                                          static_cast<int16_t>(rx_data[3 + (i*2)]);
+                        int16_t raw_val = (static_cast<int16_t>(rx_data[1 + (i*2)]) << 8) |
+                                          static_cast<int16_t>(rx_data[2 + (i*2)]);
                         incoming_sensors[i] = (float)raw_val / SENSOR_SCALE;
                     }
                     pressure_update_external_sensors(incoming_sensors);
                 }
             } 
-            else if (opcode == OPCODE_COMMANDS && rx_len == 8) {
-                // Verify CRC for command packet (bytes 0 to 6)
-                if (computeCRC8(rx_data, 7) == rx_data[7]) {
-                    last_channel_id = rx_data[1];
-                    uint8_t mode = rx_data[2];
-                    if (mode == 1 && !pressure_system_is_on()) pressure_cmd_measurements();
-                    else if (mode == 0 && pressure_system_is_on()) pressure_cmd_standby();
-
-                    uint8_t mask = rx_data[3];
-                    pressure_set_valve_override((mask & 0x01) != 0);
-                    (mask & 0x02) ? pdb_relay1_on() : pdb_relay1_off();
-                    (mask & 0x04) ? pdb_relay2_on() : pdb_relay2_off();
-                    (mask & 0x08) ? pdb_relay3_on() : pdb_relay3_off();
-                    (mask & 0x10) ? pdb_relay4_on() : pdb_relay4_off();
-
-                    pressure_set_pump_pwms(rx_data[4], rx_data[5], rx_data[6]);
+            else if (opcode == OPCODE_COMMANDS && rx_len == 3) {
+                // Verify CRC for command packet 
+                if (computeCRC8(rx_data, 3) == rx_data[3]) {
+                    cmd = rx_data[1]; // The command byte
+                    info_bit = rx_data[2]; // The info bit
+                    for (const auto &mapping : relay_commands) {
+                        if (cmd == mapping.cmd) {
+                            // For pump and compressor ON commands, use info_bit to set PWM
+                            if (cmd == CMD_VPUMP1_ON) {
+                                mapping.func();
+                                pressure_set_vpump1_pwm(info_bit);
+                            } else if (cmd == CMD_VPUMP2_ON) {
+                                mapping.func();
+                                pressure_set_vpump2_pwm(info_bit);
+                            } else if (cmd == CMD_COMPRESSOR_ON) {
+                                mapping.func();
+                                pressure_set_compressor_pwm(info_bit);
+                            }
+                            else {
+                                mapping.func();
+                            }
+                            break;
+                        }
+                        else {
+                            ESP_LOGW(TAG, "Received unknown command: 0x%02X", cmd);
+                        }
+                    }
                 }
             }
         }

@@ -418,14 +418,12 @@ bool pressure_send_sensors(
     
     // Packet layout:
     // [0] opcode
-    // [1] reserved for future use / channel ID
-    // [2..15] seven int16 sensor values
-    // [16] CRC8
-    const int package_length = 17;
+    // [1..14] seven int16 sensor values
+    // [15] CRC8
+    const int package_length = 16;
     uint8_t package[package_length];
 
     package[0] = Slave_packet_data;
-    package[1] = 0x00;
 
     int16_t sensor_ints[7] = {
         (int16_t)(sensor_data.Pp3 * SENSOR_SCALE),
@@ -438,8 +436,8 @@ bool pressure_send_sensors(
     };
 
     for(int i = 0; i < 7; i++) {
-        package[2 + (i*2)] = (sensor_ints[i] >> 8) & 0xFF; // MSB
-        package[3 + (i*2)] = sensor_ints[i] & 0xFF;        // LSB
+        package[1 + (i*2)] = (sensor_ints[i] >> 8) & 0xFF; // MSB
+        package[2 + (i*2)] = sensor_ints[i] & 0xFF;        // LSB
     }
 
     package[package_length - 1] = computeCRC8(package, package_length - 1);
@@ -456,8 +454,8 @@ bool pressure_send_sensors(
 
 bool pressure_send_command(
     SlaveDevice slave, 
-    uint8_t channel_id,
-    const pressure_command& cmd
+    uint8_t cmd,
+    uint8_t info_bit //Default to 0 if not used
 ) {
     uint8_t mux_channel; 
     gpio_num_t reset_pin;
@@ -465,22 +463,12 @@ bool pressure_send_command(
     if (!select_slave(slave, &mux_channel, &reset_pin)) return false;
     if (sel_mux_channel(mux_channel) != ESP_OK) return false;
     
-    const int package_length = 8;
+    const int package_length = 3;
     uint8_t package[package_length];
 
     package[0] = Slave_packet_command;
-    package[1] = channel_id;
-    package[2] = cmd.mode;
-    
-    package[3] = (cmd.valve_state ? 0x01 : 0) |
-                 (cmd.pdb1 ? 0x02 : 0) |
-                 (cmd.pdb2 ? 0x04 : 0) |
-                 (cmd.pdb3 ? 0x08 : 0) |
-                 (cmd.pdb4 ? 0x10 : 0);
-
-    package[4] = cmd.pump1_pwm;
-    package[5] = cmd.pump2_pwm;
-    package[6] = cmd.compressor_pwm;
+    package[1] = cmd;
+    package[2] = info_bit;
 
     package[package_length - 1] = computeCRC8(package, package_length - 1);
 

@@ -64,31 +64,33 @@ typedef enum
 
 
 // Commands
-struct pressure_command
-{
-    uint8_t mode;          // 0 = standby, 1 = measurements
-    bool valve_state;      // true = open, false = closed
-    bool pdb1;             // true = on, false = off
-    bool pdb2;             // true = on, false = off
-    bool pdb3;             // true = on, false = off
-    bool pdb4;             // true = on, false = off
-    uint8_t pump1_pwm;     // 0-255 PWM value for pump 1
-    uint8_t pump2_pwm;     // 0-255 PWM value for pump 2
-    uint8_t compressor_pwm;// 0-255 PWM value for compressor
-};
 typedef enum
 {
-    CMD_PUMPS_OFF       = 0x01,
-    CMD_PUMPS_ON        = 0x02,
+    CMD_VPUMP1_OFF       = 0x01,
+    CMD_VPUMP1_ON        = 0x02,
 
-    CMD_OPEN_SHUTTERS   = 0x03,
-    CMD_CLOSE_SHUTTERS  = 0x04,
+    CMD_VPUMP2_OFF       = 0x03,
+    CMD_VPUMP2_ON        = 0x04,
+    CMD_COMPRESSOR_OFF    = 0x05,
+    CMD_COMPRESSOR_ON     = 0x06,
 
-    CMD_STANDBY         = 0x05,
-    CMD_MEASUREMENTS    = 0x06,
+    CMD_OPEN_SHUTTERS   = 0x07,
+    CMD_CLOSE_SHUTTERS  = 0x08,
 
-    CMD_HEATER_ON       = 0x07,
-    CMD_HEATER_OFF      = 0x08
+    CMD_STANDBY         = 0x09,
+    CMD_MEASUREMENTS    = 0x0A,
+
+    CMD_HEATER_ON       = 0x0B,
+    CMD_HEATER_OFF      = 0x0C,
+
+    CMD_OPEN_RELAY1      = 0x0D,
+    CMD_CLOSE_RELAY1     = 0x0E,
+    CMD_OPEN_RELAY2      = 0x0F,
+    CMD_CLOSE_RELAY2     = 0x10,
+    CMD_OPEN_RELAY3      = 0x11,
+    CMD_CLOSE_RELAY3     = 0x12,
+    CMD_OPEN_RELAY4      = 0x13,
+    CMD_CLOSE_RELAY4     = 0x14
 
 } SlaveCommands;
 
@@ -183,8 +185,8 @@ bool pressure_receive_package(
 
 bool pressure_send_command(
     SlaveDevice slave, 
-    uint8_t channel_id,
-    const pressure_command& cmd
+    uint8_t cmd,
+    uint8_t info_bit=0
 );
 
 // Watchdog background worker task loop declaration
