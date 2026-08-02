@@ -67,6 +67,7 @@ static bool pressure_system_active = false;
 static bool status_update_requested = false;
 static bool status_packet_sent_this_loop = false;
 static std::string ethernet_command_text;
+bool manual_mode_overwrite = false; // To track if manual mode overwrite is active
 
 std::forward_list <int> pressure_slave_commands; // List of commands to send to the pressure slave in the current loop iteration
 
@@ -147,10 +148,33 @@ void handle_command()
 
     int heater_index = 0;
 
-    if (ethernet_command_text == "STATUS" || ethernet_command_text == "REQUEST STATUS" || ethernet_command_text == "REQUEST STATUS UPDATE")
+    //if (ethernet_command_text == "STATUS" || ethernet_command_text == "REQUEST STATUS" || ethernet_command_text == "REQUEST STATUS UPDATE")
+    //{
+    //    status_update_requested = true;
+    //    ESP_LOGI(TAG, "Status update requested");
+    //    return;
+    //}
+
+    if (ethernet_command_text == "MODE MEASUREMENTS")
     {
-        status_update_requested = true;
-        ESP_LOGI(TAG, "Status update requested");
+        mode = 3;
+        manual_mode_overwrite = true;
+        ESP_LOGI(TAG, "Mode changed to MEASUREMENTS");
+        return;
+    }
+
+    if (ethernet_command_text == "MODE STANDBY")
+    {
+        mode = 2;
+        manual_mode_overwrite = true;
+        ESP_LOGI(TAG, "Mode changed to STANDBY");
+        return;
+    }
+
+    if (ethernet_command_text == "MODE OVERRIDE RESET")
+    {
+        manual_mode_overwrite = false;
+        ESP_LOGI(TAG, "Manual mode overwrite reset");
         return;
     }
 
@@ -226,7 +250,7 @@ void handle_command()
 
 static esp_err_t send_system_status_packet()
 {
-    MainSystemStatusPacket system_status_packet = {};
+    MainSystemStatusPacket system_status_packet  = {};
     system_status_packet.sensor_data = sensor_data;
     system_status_packet.operating_mode = static_cast<uint8_t>(mode);
     system_status_packet.command_received = command_received ? 1 : 0;
@@ -283,17 +307,17 @@ static void handle_ethernet_receive_status(esp_err_t esp_err_status)
         loops_since_connection = 0; // Reset connection loss buffer
         connection_reestablished(&con_lost, &loss_timestamp_us);
 
-        if (status_update_requested)
-        {
-            read_sensors();
-            buffer_SD_data_csv(&sensor_data);
-            print_sensor_data(&sensor_data);
+        //if (status_update_requested)
+        //{
+        //    read_sensors();
+        //    buffer_SD_data_csv(&sensor_data);
+        //    print_sensor_data(&sensor_data);
 
-            esp_err_t esp_err_status_send = send_system_status_packet();
-            handle_ethernet_send_status(esp_err_status_send);
-            status_packet_sent_this_loop = (esp_err_status_send == ESP_OK);
-            status_update_requested = false;
-        }
+        //    esp_err_t esp_err_status_send = send_system_status_packet();
+        //    handle_ethernet_send_status(esp_err_status_send);
+        //    status_packet_sent_this_loop = (esp_err_status_send == ESP_OK);
+        //    status_update_requested = false;
+        //}
         break;
 
     case ESP_FAIL:
@@ -323,7 +347,7 @@ uint8_t number_channels_thermal=8;  //0-8 depending on the number of switches us
 uint8_t thermal_mode=1; //0 bang bang 1 PID 155-255 D_cycle
 int16_t thermal_currentTemp=2000; // 5000 = 50,0C  
 int16_t thermal_target=5000;
-int16_t thermal_watchdog_tolerance=5; // 1 according to SEDv3. Number of subsequent times where the thermal slave is reset. If reset more than this number of times, the thermal MCU will be considered lost.
+int16_t thermal_watchdog_tolerance=3000; // 1 according to SEDv3. Number of subsequent times where the thermal slave is reset. If reset more than this number of times, the thermal MCU will be considered lost.
 bool thermal_mcu_lost=false; // To track if the thermal slave is lost.
 //Data recieved from thermal
 uint8_t received_channel_id_thermal; //Reason i seperate recieved and sent is to be able to compare later if data packet made it
@@ -411,7 +435,7 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
 
 //Pressure
 bool shutters_open = false; // To track if shutters are open
-int16_t pressure_watchdog_tolerance=5; // 1 according to SEDv3. Number of subsequent times where the pressure slave is reset. If reset more than this number of times, the pressure MCU will be considered lost.
+int16_t pressure_watchdog_tolerance=3000; // 1 according to SEDv3. Number of subsequent times where the pressure slave is reset. If reset more than this number of times, the pressure MCU will be considered lost.
 bool pressure_mcu_lost=false; // To track if the pressure slave is lost.
 
 static void comms_pressure_sensor(SensorData &sensor_data, uint32_t current_time_ms)
@@ -575,7 +599,10 @@ void loop()
             flightphase = 1; // Update flightphase to float
             ESP_LOGI(TAG, "Flight phase updated to Float");
         }
-        mode = 2; // Enter standby mode if pressure is below threshold
+        if (!manual_mode_overwrite) // If manual mode overwrite is not active, enter standby mode if pressure is below threshold
+        {
+            mode = 2; // Enter standby mode if pressure is below threshold
+        }
     }
     else {
         if (flightphase == 1) // If flightphase was in float, switch it to descend
@@ -585,7 +612,10 @@ void loop()
         }
         else if (flightphase == 0) // If flightphase is in ascend, the mode should be measurement mode
         {
-            mode = 3; // Enter measurement mode if pressure is above threshold
+            if (!manual_mode_overwrite) // If manual mode overwrite is not active, enter measurement mode if pressure is above threshold
+            {
+                mode = 3; // Enter measurement mode if pressure is above threshold
+            }
         }
     }
 
@@ -634,6 +664,9 @@ void loop()
 
     // Standby
     case 2:
+        // Deactivate K96
+        K96_off();
+
         //Reset overrides
 
         //Pressure communication
@@ -651,12 +684,16 @@ void loop()
 
     // measurement
     case 3:
+
+        // Activate K96
+        K96_on();
+
+
         // Pressure check block to see if pressure in chamber is too high 
         //Check if pressure in chamber is below threshold, if so, increase pressure first.
         if (sensor_data.Pp2 < CHAMBER_P_SHUTTER_THRESHOLD)
         {
             //Pressure communication: increase p in chamber.
-            break;
         } 
         //Open shutters if close
         //Skip data collection to ensure proper pressure in chamber.
@@ -664,13 +701,11 @@ void loop()
         {
             //Pressure communication: open shutters
             shutters_open = true;
-            break;
         }
         //Check if pressure in chamber is above threshold, if so, take meassurements.
         if (sensor_data.Pp2 < CHAMBER_P_CHAMBER_THRESHOLD)
         {
             //Pressure communication: increase p in chamber.
-            break;
         }
 
         // Thermal check block to see if temperatures are out of limits 
@@ -748,7 +783,7 @@ void loop()
     //} else {
     //    // formatting error or truncation — handle appropriately
     //}
-    print_sensor_data(&sensor_data);
+    //print_sensor_data(&sensor_data);
     
     //char buf[300];
     //int len2 = snprintf(buf, sizeof(buf), "Time: %02u:%02u:%02u, Pa1=%.2f \n", sensor_data.hours, sensor_data.minutes, sensor_data.seconds, sensor_data.Pa1);
@@ -762,9 +797,18 @@ void loop()
         handle_ethernet_send_status(esp_err_status_send);
     }
 
-    // Wait until loop has taken 100 ms.
+    // Delay only the remaining time so the full loop period stays near 1 second.
     TickType_t current_time_stop = xTaskGetTickCount();
-    time_loop = pdMS_TO_TICKS(1000); //- (current_time_stop - current_time_start);
+    TickType_t elapsed_ticks = current_time_stop - current_time_start;
+    TickType_t target_period_ticks = pdMS_TO_TICKS(1000);
+    if (elapsed_ticks < target_period_ticks)
+    {
+        time_loop = static_cast<uint16_t>(target_period_ticks - elapsed_ticks);
+    }
+    else
+    {
+        time_loop = 0;
+    }
     if (time_loop > 0)
     {
         vTaskDelay(time_loop);

@@ -50,7 +50,14 @@ static void print_sensor_data(const SensorData *data)
     printf("Pressures: Pa1=%.2f Pp1=%.2f Pp2=%.2f Pp3=%.2f\n",
            data->Pa1, data->Pp1, data->Pp2, data->Pp3);
     printf("Ambient: Ha1=%.2f %% RH\n", data->Ha1);
-    printf("K96: CO2=%.2f ppm pressure=%.2f hPa temp=%.2f C humidity=%.2f RH error=%u\n",
-           data->K96_CO2, data->K96_pressure, data->K96_temperature,
-           data->K96_humidity, data->K96_error);
+    float K96_avg_temp = (data->K96_NTC0_Temp + data->K96_NTC1_Temp) / 2.0f;
+    // if any of the K96 errors are non-zero, print a warning
+    if (data->K96_MPL_uflt_Error != 0 || data->K96_LPL_uflt_Error != 0 || data->K96_SPL_uflt_Error != 0)
+    {
+        printf("Warning: K96 sensor error detected! MPL error=%u, LPL error=%u, SPL error=%u\n",
+               data->K96_MPL_uflt_Error, data->K96_LPL_uflt_Error, data->K96_SPL_uflt_Error);
+    }
+    printf("K96: CO2=%.2f H2O=%.2f CH4=%.2f NTCtemp=%.2f C humidity=%.2f RH\n",
+           data->K96_SPL_uflt_Conc, data->K96_MPL_uflt_Conc, data->K96_LPL_uflt_Conc, K96_avg_temp,
+           data->K96_RH);
 }

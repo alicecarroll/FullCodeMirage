@@ -566,28 +566,56 @@ void read_sensors()
         &sensor_data.Tt3);
 }
 
+/*
+
 void write_csv_header(FILE *f)
 {
     fprintf(f, "hours,minutes,seconds,"
-               "Tp1,Tp2,Tp3,Tp6,Pp3,Tp4,Pp1,Pa1,Ta1,Ta2,Ha1,Tp5,Pp2,"
-               "Tt1,Tt2,Tt3,"
-               "K96_CO2,K96_pressure,K96_temperature,K96_humidity,K96_error\n");
+            "Tp1,Tp2,Tp3,Tp6,Pp3,Tp4,Pp1,Pa1,Ta1,Ta2,Ta3,Ha1,Tp5,Pp2,"
+            "Tt1,Tt2,Tt3,"
+            "K96_LPL_Signal,K96_LPL_Signal_filtered,K96_SPL_Signal,K96_SPL_Signal_filtered,"
+            "K96_MPL_Signal,K96_MPL_Signal_filtered,K96_ADuCdie_Temp,K96_ADuCdie_Temp_filtered,"
+            "K96_NTC0_Temp,K96_NTC0_Temp_filtered,K96_NTC1_Temp,K96_NTC1_Temp_filtered,"
+            "K96_RH,K96_RH_Temp,K96_MPL_uflt_IR_Signal,K96_MPL_flt_IR_Signal,"
+            "K96_MPL_uflt_Conc,K96_MPL_flt_Conc,K96_MPL_uflt_Error,"
+            "K96_LPL_uflt_IR_Signal,K96_LPL_flt_IR_Signal,K96_LPL_uflt_Conc,"
+            "K96_LPL_uflt_Error,K96_LPL_flt_Error,K96_SPL_uflt_IR_Signal,"
+            "K96_SPL_flt_IR_Signal,K96_SPL_uflt_Conc,K96_SPL_uflt_Error,K96_SPL_flt_Error\n");
 }
 
 void write_csv_row(FILE *f, const SensorData *data)
 {
-    if (data == nullptr) return;
+    if (data == NULL) return; // Use NULL for standard C compatibility (nullptr is C++ standard)
 
     fprintf(f, "%02u,%02u,%02u,"
                "%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,"
                "%.2f,%.2f,%.2f,"
-               "%.2f,%.2f,%.2f,%.2f,%u\n",
-            data->hours, data->minutes, data->seconds,
-            data->Tp1, data->Tp2, data->Tp3, data->Tp6, data->Pp3, data->Tp4,
-            data->Pp1, data->Pa1, data->Ta1, data->Ta2, data->Ta3, data->Ha1, data->Tp5, data->Pp2,
-            data->Tt1, data->Tt2, data->Tt3,
-            data->K96_CO2, data->K96_pressure, data->K96_temperature,
-            data->K96_humidity, data->K96_error);
+               "%ld,%.4f,%ld,%.4f,"
+               "%ld,%.4f,%.2f,%.2f,"
+               "%.2f,%.2f,%.2f,%.2f,"
+               "%.2f,%.2f,%u,%u,"
+               "%.2f,%.2f,%u,"
+               "%u,%u,%.2f,"
+               "%u,%u,%u,"
+               "%u,%.2f,%u,%u\n",
+        data->hours, data->minutes, data->seconds,
+        data->Tp1, data->Tp2, data->Tp3, data->Tp6, data->Pp3, data->Tp4,
+        data->Pp1, data->Pa1, data->Ta1, data->Ta2, data->Ta3, data->Ha1, data->Tp5, data->Pp2,
+        data->Tt1, data->Tt2, data->Tt3,
+        // K96 fields mapping
+        (long)data->K96_LPL_Signal, data->K96_LPL_Signal_filtered,
+        (long)data->K96_SPL_Signal, data->K96_SPL_Signal_filtered,
+        (long)data->K96_MPL_Signal, data->K96_MPL_Signal_filtered,
+        data->K96_ADuCdie_Temp, data->K96_ADuCdie_Temp_filtered,
+        data->K96_NTC0_Temp, data->K96_NTC0_Temp_filtered,
+        data->K96_NTC1_Temp, data->K96_NTC1_Temp_filtered,
+        data->K96_RH, data->K96_RH_Temp,
+        data->K96_MPL_uflt_IR_Signal, data->K96_MPL_flt_IR_Signal,
+        data->K96_MPL_uflt_Conc, data->K96_MPL_flt_Conc, data->K96_MPL_uflt_Error,
+        data->K96_LPL_uflt_IR_Signal, data->K96_LPL_flt_IR_Signal, data->K96_LPL_uflt_Conc,
+        data->K96_LPL_uflt_Error, data->K96_LPL_flt_Error,
+        data->K96_SPL_uflt_IR_Signal, data->K96_SPL_flt_IR_Signal, data->K96_SPL_uflt_Conc,
+        data->K96_SPL_uflt_Error, data->K96_SPL_flt_Error);
 }
 
 void log_sensor_data(const SensorData *data, const char *filepath)
@@ -610,3 +638,5 @@ void log_sensor_data(const SensorData *data, const char *filepath)
 
     fclose(f);
 }
+
+*/

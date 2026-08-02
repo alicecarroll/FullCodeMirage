@@ -122,7 +122,7 @@ extern spi_device_handle_t WIZ_handle;
 #define DEFAULT_MODE 1
 
 // Sensor value thresholds
-#define P_STRATOSPHERE 40 // Stratosphere limit, TBD
-#define CHAMBER_P_SHUTTER_THRESHOLD 3200// Pressure threshold for opening shutter to meassurment chamber, TBD
-#define CHAMBER_P_CHAMBER_THRESHOLD 2800// Pressure threshold for taking measurements,TBD
+#define P_STRATOSPHERE 0.040 // Stratosphere limit, TBD
+#define CHAMBER_P_SHUTTER_THRESHOLD 3.200// Pressure threshold for opening shutter to meassurment chamber, TBD
+#define CHAMBER_P_CHAMBER_THRESHOLD 2.800// Pressure threshold for taking measurements,TBD
 //#define INLET_TEMPERATURE_THRESHOLD // Temperature threshold for taking measurements, TBD

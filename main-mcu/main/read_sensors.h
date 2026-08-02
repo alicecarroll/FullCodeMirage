@@ -29,14 +29,43 @@ struct SensorData
     float Tt2;           // Temperature in SD-card
     float Tt3;           // Temperature in inlet air
 
-    float K96_CO2;           // CO2 concentration [ppm]
-    float K96_CH4;           // CO2 concentration [ppm]
-    float K96_H2O;           // CO2 concentration [ppm]
+    // ----- K96 Sensor Fields -----
+    int32_t  K96_LPL_Signal;
+    double   K96_LPL_Signal_filtered;
+    int32_t  K96_SPL_Signal;
+    double   K96_SPL_Signal_filtered;
+    int32_t  K96_MPL_Signal;
+    double   K96_MPL_Signal_filtered;
 
-    float K96_pressure;      // Internal pressure [hPa]
-    float K96_temperature;   // Internal temperature [°C]
-    float K96_humidity;      // Internal humidity [%RH]
-    uint16_t K96_error;      // K96 error/status flags
+    float    K96_ADuCdie_Temp;
+    float    K96_ADuCdie_Temp_filtered;
+    float    K96_NTC0_Temp;
+    float    K96_NTC0_Temp_filtered;
+    float    K96_NTC1_Temp;
+    float    K96_NTC1_Temp_filtered;
+    
+    float    K96_RH;
+    float    K96_RH_Temp;
+
+    uint16_t K96_MPL_uflt_IR_Signal;
+    uint16_t K96_MPL_flt_IR_Signal;
+    float    K96_MPL_uflt_Conc;
+    float    K96_MPL_flt_Conc;
+    uint16_t K96_MPL_uflt_Error;
+
+    uint16_t K96_LPL_uflt_IR_Signal;
+    uint16_t K96_LPL_flt_IR_Signal;
+    float    K96_LPL_uflt_Conc;
+    uint16_t K96_LPL_uflt_Error;
+    uint16_t K96_LPL_flt_Error;
+
+    uint16_t K96_SPL_uflt_IR_Signal;
+    uint16_t K96_SPL_flt_IR_Signal;
+    float    K96_SPL_uflt_Conc;
+    uint16_t K96_SPL_uflt_Error;
+    uint16_t K96_SPL_flt_Error;
+
+    uint16_t K96_error;  // General error code for K96 sensor
 };
 #pragma pack(pop)
 

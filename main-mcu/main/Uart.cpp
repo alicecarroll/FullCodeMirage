@@ -4,10 +4,12 @@
 #include "freertos/task.h" //FreeRTOS functionality
 #include "driver/gpio.h" //GPIO driver functions
 #include "driver/uart.h" //UART communication driver
+#include "esp_log.h"
 #include "Settings.h" //Pin definitions and hardware configuration
 #include "read_sensors.h" //Data storage
 #include "uart.h" //Initialization/configuration functions
 
+static const char *TAG = "K96_SENSOR";
 
 //Turn sensor on
 void K96_on()
@@ -21,26 +23,20 @@ void K96_off()
     gpio_set_level(K96_EN_PIN, 0);
 }
 
-// ----- Compute Modbus CRC checksum for error checking communication integrity ----
 
-//data = Byte array to checksum
-//length = Number of bytes
-// uint16_t = 16-bit CRC value
+// ----- Compute Modbus CRC checksum for error checking communication integrity ----
 static uint16_t modbus_crc16(
     const uint8_t *data,
     uint16_t length)
 {
-    // Initial  value
     uint16_t crc = 0xFFFF;
 
     for (uint16_t i = 0; i < length; i++)
     {
-        // Next input byte into the CRC calculation.
         crc ^= data[i];
 
         for (uint8_t j = 0; j < 8; j++)
         {
-            // If the least significant bit is set, apply the MODBUS polynomial.
             if (crc & 0x0001)
             {
                 crc >>= 1;
@@ -53,85 +49,51 @@ static uint16_t modbus_crc16(
         }
     }
 
-    // Final CRC
     return crc;
 }
 
 /**
  * Read data from the K96 RAM using the MODBUS protocol.
- *
- * ram_address = RAM address to read.
- * num_bytes =   Number of data bytes requested.
- * response =    Buffer that receives the complete MODBUS response.
- *
- * @return true if the response is valid.
- * @return false if communication or CRC verification fails.
  */
 static bool K96_read_ram(
     uint16_t ram_address, // Address to read
     uint8_t num_bytes, // Number of bytes requested
     uint8_t *response) // Where the reply is stored
 {
-    // Communication packet
     uint8_t frame[7];
 
-    // Device address (K96 default is 0x68)
-    frame[0] = 0x68;
-
-    // Function code (0x44 for reading RAM)
-    frame[1] = 0x44;
-
-    // RAM address
-    frame[2] =
-        (ram_address >> 8) & 0xFF; //High bytes
-
-    frame[3] =
-        ram_address & 0xFF; //Low bytes
-
-    // Number of bytes to read
+    frame[0] = 0x68; // Device address
+    frame[1] = 0x44; // Function code (read RAM)
+    frame[2] = (ram_address >> 8) & 0xFF; // High byte
+    frame[3] = ram_address & 0xFF; // Low byte
     frame[4] = num_bytes;
 
-    // CRC checksum stored as low bytes first
-    uint16_t crc =
-        modbus_crc16(frame, 5);
+    uint16_t crc = modbus_crc16(frame, 5);
+    frame[5] = crc & 0xFF;
+    frame[6] = (crc >> 8) & 0xFF;
 
-    frame[5] =
-        crc & 0xFF;
-
-    frame[6] =
-        (crc >> 8) & 0xFF;
-
-    // Clear old UART data
-    uart_flush(UART_PORT);
+    // Completely clear out any stale or leftover data in the UART buffers first
+    uart_flush_input(UART_PORT);
 
     // Send MODBUS frame
-    // Address, Function, RAM high, RAM low, Length, CRC low, CRC high
-    uart_write_bytes(
-        UART_PORT,
-        (const char *)frame,
-        sizeof(frame));
-    int len =
+    uart_write_bytes(UART_PORT, (const char *)frame, sizeof(frame));
+    uart_wait_tx_done(UART_PORT, pdMS_TO_TICKS(10));
 
-    /*
-    * MODBUS response format
-    *
-    * Byte 0 : Device address
-    * Byte 1 : Function code
-    * Byte 2 : Number of data bytes
-    * Byte 3..N : Payload
-    * Last 2 bytes : CRC (low byte first)
-    */
-    uart_read_bytes(
+    // Read expected response bytes: header (3 bytes) + payload (num_bytes) + CRC (2 bytes)
+    uint16_t expected_len = num_bytes + 5;
+    uint16_t len = uart_read_bytes(
         UART_PORT,
         response,
-        num_bytes + 5,
-        pdMS_TO_TICKS(1000));
+        expected_len,
+        pdMS_TO_TICKS(100)); // Reduced timeout for faster recovery if a frame drops
 
-// ======= Changes from the original code begin from here ========
+    // Return false if expected number of bytes were not received
+    if (len != expected_len)
+    {
+        return false;
+    }
 
-    // Return true if expected number of bytes were recieved
-    // Otherwise, return false
-    if (len != (num_bytes + 5))
+    if (response[1] == (0x44 | 0x80))
     {
         return false;
     }
@@ -143,16 +105,13 @@ static bool K96_read_ram(
         return false;
     }
 
-// Combine 4 big-endian bytes into a signed 32-bit integer.
-    uint16_t received_crc =
-        response[len-2] |
-        (response[len-1] << 8);
-
-    uint16_t calculated_crc =
-        modbus_crc16(response, len-2);
+    uint16_t received_crc = response[len-2] | (response[len-1] << 8);
+    uint16_t calculated_crc = modbus_crc16(response, len-2);
 
     if (received_crc != calculated_crc)
+    {
         return false;
+    }
 
     return true;
 }
@@ -168,14 +127,6 @@ typedef enum
     K96_S32_16
 } K96_DataType;
 
-/**
- * Filter variable of interest by their RAM address
- *
- * Address      MODBUS RAM address
- * Name         Variable name.
- * Unit         Engineering unit
- * K96_DataType Interpretation of the data type.
- */
 typedef struct
 {
     uint16_t address;
@@ -207,6 +158,8 @@ static const K96_RAM_Item ram_items[] =
 
     {0x038E, "MPL_uflt_Error",         "-",      K96_B16},
     {0x03A4, "MPL_flt_IR_Signal",      "counts", K96_U16},
+    {0x038A, "MPL_uflt_Conc",          "ppm",    K96_S16},
+    {0x03AA, "MPL_flt_Conc",           "ppm",    K96_S16},
 
     {0x0424, "LPL_uflt_IR_Signal",     "counts", K96_U16},
     {0x042A, "LPL_uflt_Conc",          "ppm",    K96_S16},
@@ -221,134 +174,161 @@ static const K96_RAM_Item ram_items[] =
     {0x04AE, "SPL_flt_Error",          "-",      K96_B16},
 };
 
-//----- Read and print all sensor data -----
+// ----- Check and log K96 hardware errors -----
+void check_k96_errors(void)
+{
+    uint8_t response[32];
+    
+    if (!K96_read_ram(0x001C, 2, response))
+    {
+        ESP_LOGE(TAG, "Failed to read ErrorStatus register (0x001C)");
+        return;
+    }
+
+    uint16_t error_status = ((uint16_t)response[3] << 8) | response[4];
+    sensor_data.K96_error = error_status; // Keep structure updated
+
+    if (error_status == 0)
+    {
+        return;
+    }
+
+    ESP_LOGE(TAG, "Sensor reported errors! ErrorStatus: 0x%04X", error_status);
+
+    if (error_status & (1 << 15)) ESP_LOGE(TAG, "- LPL_Calc_Conc_error");
+    if (error_status & (1 << 14)) ESP_LOGE(TAG, "- SPL_Calc_Conc_error");
+    if (error_status & (1 << 13)) ESP_LOGE(TAG, "- MPL_Calc_Conc_error");
+    if (error_status & (1 << 11)) ESP_LOGE(TAG, "- ADuCdie_Temp_error");
+    if (error_status & (1 << 10)) ESP_LOGE(TAG, "- ADuC_NTCs_Temp_error");
+    if (error_status & (1 << 9))  ESP_LOGE(TAG, "- SPI error");
+    if (error_status & (1 << 8))  ESP_LOGE(TAG, "- Logger_error");
+    if (error_status & (1 << 7))  ESP_LOGW(TAG, "- Warm Up"); 
+    if (error_status & (1 << 6))  ESP_LOGE(TAG, "- Memory Error");
+    if (error_status & (1 << 4))  ESP_LOGE(TAG, "- SelfDiag error");
+    if (error_status & (1 << 3))  ESP_LOGE(TAG, "- Calibration calculation error");
+    if (error_status & (1 << 2))  ESP_LOGE(TAG, "- Configuration error");
+    if (error_status & (1 << 0))  ESP_LOGE(TAG, "- Fatal error");
+}
+
+//----- Read and update all sensor data in the global struct -----
 void read_k96(void)
 {
-    uint8_t response[16];
+    check_k96_errors(); // Check for any hardware errors first
+    uint8_t response[32];
     size_t num_items = sizeof(ram_items) / sizeof(ram_items[0]);
 
     for (size_t i = 0; i < num_items; i++)
     {
         const K96_RAM_Item *item = &ram_items[i];
+        uint8_t bytes = 0;
 
-        // Checks the sensor's data type
-        // 32-bit = 4 bytes
-        // 16-bit = 2 bytes
-        uint8_t bytes =
-            (item->type == K96_S32 || item->type == K96_S32_16) ? 4 : 2;
+        switch(item->type)
+        {
+            case K96_S16_8:  bytes = 3; break;
+            case K96_S32_16: bytes = 6; break;
+            case K96_S32:    bytes = 4; break;
+            case K96_U16:
+            case K96_S16:
+            case K96_B16:
+            default:         bytes = 2; break;
+        }
 
-        // Reads data from the sensor
-        // Skip this variable if communication failed and continue reading the rest.
+        // Read data from K96 
+        memset(response, 0, sizeof(response));
+        vTaskDelay(pdMS_TO_TICKS(10)); // Small delay to avoid overwhelming the sensor with requests
         if (!K96_read_ram(item->address, bytes, response))
         {
-            printf("0x%04X %-25s : Read failed\n",
-                    item->address,
-                    item->name);
-            continue;
+            ESP_LOGW(TAG, "Failed to read K96 RAM address 0x%04X (%s)", item->address, item->name);
         }
 
-        printf("------------------------------------------\n");
-        printf("Address : 0x%04X\n", item->address);
-        printf("Name    : %s\n", item->name);
+        double   val_f = 0.0;
+        int32_t  val_i = 0;
+        uint16_t val_u = 0;
 
-        // Combine 4 bytes into 32-bit value and prints the result
-        if (bytes == 4)
+        switch(item->type)
         {
-            int32_t raw =
-                ((int32_t)response[3] << 24) |
-                ((int32_t)response[4] << 16) |
-                ((int32_t)response[5] << 8)  |
-                response[6];
+            case K96_U16:
+            case K96_B16:
+                val_u = ((uint16_t)response[3] << 8) | response[4];
+                break;
 
-            switch(item->type)
+            case K96_S16:
             {
-                case K96_S32:
-                    printf("Format  : S32\n");
-                    printf("Value   : %ld %s\n",
-                        (long)raw,
-                        item->unit);
-                    break;
-
-                case K96_S32_16:
-                    printf("Format  : S32.16\n");
-                    printf("Value   : %.4f %s\n",
-                        raw / 65536.0,
-                        item->unit);
-                    break;
-
-                default:
-                    break;
+                int16_t raw = ((int16_t)response[3] << 8) | response[4];
+                if (item->address == 0x01F0 || item->address == 0x01F8) {
+                    val_f = raw * 0.01f;
+                } else {
+                    val_f = (float)raw;
+                }
+                break;
             }
+
+            case K96_S16_8:
+            {
+                int32_t raw = ((int32_t)response[3] << 16) | ((int32_t)response[4] << 8) | response[5];
+                if (raw & 0x800000) raw |= 0xFF000000;
+                val_f = (raw / 256.0f) * 0.01f;
+                break;
+            }
+
+            case K96_S32:
+            {
+                val_i = ((int32_t)response[3] << 24) | ((int32_t)response[4] << 16) | 
+                        ((int32_t)response[5] << 8) | response[6];
+                break;
+            }
+
+            case K96_S32_16:
+            {
+                int32_t int_part = ((int32_t)response[3] << 24) | ((int32_t)response[4] << 16) | 
+                                   ((int32_t)response[5] << 8) | response[6];
+                uint16_t frac_part = ((uint16_t)response[7] << 8) | response[8];
+                val_f = int_part + (frac_part / 65536.0);
+                break;
+            }
+            default:
+                break;
         }
-        else
+
+        switch(item->address)
         {
-            // Combine 2 bytes into 16-bit value and prints the result
-            uint16_t raw =
-                ((uint16_t)response[3] << 8) |
-                response[4];
+            case 0x0180: sensor_data.K96_LPL_Signal = val_i; break;
+            case 0x0184: sensor_data.K96_LPL_Signal_filtered = val_f; break;
+            case 0x0190: sensor_data.K96_SPL_Signal = val_i; break;
+            case 0x0194: sensor_data.K96_SPL_Signal_filtered = val_f; break;
 
-            switch(item->type)
-            {
-                case K96_U16:
-                    printf("Format  : U16\n");
-                    printf("Value   : %u %s\n",
-                        raw,
-                        item->unit);
-                    break;
+            case 0x01B0: sensor_data.K96_ADuCdie_Temp = val_f; break;
+            case 0x01B4: sensor_data.K96_ADuCdie_Temp_filtered = val_f; break;
+            case 0x01B8: sensor_data.K96_NTC0_Temp = val_f; break;
+            case 0x01BC: sensor_data.K96_NTC0_Temp_filtered = val_f; break;
+            case 0x01C0: sensor_data.K96_NTC1_Temp = val_f; break;
+            case 0x01C4: sensor_data.K96_NTC1_Temp_filtered = val_f; break;
 
-                case K96_S16:
-                    printf("Format  : S16\n");
-                    printf("Value   : %d %s\n",
-                        (int16_t)raw,
-                        item->unit);
-                    break;
+            case 0x01F0: sensor_data.K96_RH = val_f; break;
+            case 0x01F8: sensor_data.K96_RH_Temp = val_f; break;
 
-                case K96_B16:
-                    printf("Format  : B16\n");
-                    printf("Value   : 0x%04X\n",
-                        raw);
-                    break;
+            case 0x0360: sensor_data.K96_MPL_Signal = val_i; break;
+            case 0x0364: sensor_data.K96_MPL_Signal_filtered = val_f; break;
+            case 0x0384: sensor_data.K96_MPL_uflt_IR_Signal = val_u; break;
+            case 0x038A: sensor_data.K96_MPL_uflt_Conc = val_f; break;
+            case 0x038E: sensor_data.K96_MPL_uflt_Error = val_u; break;
+            case 0x03A4: sensor_data.K96_MPL_flt_IR_Signal = val_u; break;
+            case 0x03AA: sensor_data.K96_MPL_flt_Conc = val_f; break;
 
-                case K96_S16_8:
-                    printf("Format  : S16.8\n");
-                    printf("Value   : %.2f %s\n",
-                        ((int16_t)raw) / 256.0,
-                        item->unit);
-                    break;
+            case 0x0424: sensor_data.K96_LPL_uflt_IR_Signal = val_u; break;
+            case 0x042A: sensor_data.K96_LPL_uflt_Conc = val_f; break;
+            case 0x042E: sensor_data.K96_LPL_uflt_Error = val_u; break;
+            case 0x0444: sensor_data.K96_LPL_flt_IR_Signal = val_u; break;
+            case 0x044E: sensor_data.K96_LPL_flt_Error = val_u; break;
 
-                default:
-                    break;
-            }
+            case 0x0484: sensor_data.K96_SPL_uflt_IR_Signal = val_u; break;
+            case 0x048A: sensor_data.K96_SPL_uflt_Conc = val_f; break;
+            case 0x048E: sensor_data.K96_SPL_uflt_Error = val_u; break;
+            case 0x04A4: sensor_data.K96_SPL_flt_IR_Signal = val_u; break;
+            case 0x04AE: sensor_data.K96_SPL_flt_Error = val_u; break;
+
+            default:
+                break;
         }
     }
 }
-        
-
-/*
------Expected output-----
-
-Address : 0x01B8
-Name    : NTC0_Temp
-Format  : S16.8
-Value   : 24.38 °C
-
-Address : 0x01F0
-Name    : RH
-Format  : S16
-Value   : 43 %RH
-
-Address : 0x0384
-Name    : MPL_uflt_IR_Signal
-Format  : U16
-Value   : 2148 counts
-
-Address : 0x042E
-Name    : LPL_uflt_Error
-Format  : B16
-Value   : 0x0000
-
-Address : 0x0184
-Name    : LPL_Signal_filtered
-Format  : S32.16
-Value   : 153482.1250 counts
-*/

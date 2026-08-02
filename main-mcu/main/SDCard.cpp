@@ -130,35 +130,52 @@ void buffer_SD_data_binary(const SensorData *sensor_data)
 
 void buffer_SD_data_csv(SensorData *sensor_data)
 {
-    //Create temp CSV line to store
-    char line[512];
+    if (sensor_data == NULL) return;
+
+    // Create temp CSV line to store (increased size to 1024 to fit all expanded sensor fields)
+    char line[1024];
     int n = snprintf(line, sizeof(line),
-        "%u,%u,%u,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%u\n",
+        "%02u,%02u,%02u,"
+        "%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,"
+        "%.2f,%.2f,%.2f,"
+        "%ld,%.4f,%ld,%.4f,"
+        "%ld,%.4f,%.2f,%.2f,"
+        "%.2f,%.2f,%.2f,%.2f,"
+        "%.2f,%.2f,%u,%u,"
+        "%.2f,%.2f,%u,"
+        "%u,%u,%.2f,"
+        "%u,%u,%u,"
+        "%u,%.2f,%u,%u,%u\n",
         sensor_data->hours,
         sensor_data->minutes,
         sensor_data->seconds,
-        sensor_data->Tp1,
-        sensor_data->Tp2,
-        sensor_data->Tp3,
-        sensor_data->Tp6,
-        sensor_data->Pp3,
-        sensor_data->Tp4,
-        sensor_data->Pp1,
-        sensor_data->Pa1,
-        sensor_data->Ta1,
-        sensor_data->Ta2,
-        sensor_data->Ha1,
-        sensor_data->Tp5,
-        sensor_data->Pp2,
-        sensor_data->Tt1,
-        sensor_data->Tt2,
-        sensor_data->Tt3,
-        sensor_data->K96_CO2,
-        sensor_data->K96_pressure,
-        sensor_data->K96_temperature,
-        sensor_data->K96_humidity,
-        sensor_data->K96_error
+        sensor_data->Tp1, sensor_data->Tp2, sensor_data->Tp3, sensor_data->Tp6, 
+        sensor_data->Pp3, sensor_data->Tp4, sensor_data->Pp1, sensor_data->Pa1, 
+        sensor_data->Ta1, sensor_data->Ta2, sensor_data->Ta3, sensor_data->Ha1, 
+        sensor_data->Tp5, sensor_data->Pp2,
+        sensor_data->Tt1, sensor_data->Tt2, sensor_data->Tt3,
+        // K96 fields mapping
+        (long)sensor_data->K96_LPL_Signal, sensor_data->K96_LPL_Signal_filtered,
+        (long)sensor_data->K96_SPL_Signal, sensor_data->K96_SPL_Signal_filtered,
+        (long)sensor_data->K96_MPL_Signal, sensor_data->K96_MPL_Signal_filtered,
+        sensor_data->K96_ADuCdie_Temp, sensor_data->K96_ADuCdie_Temp_filtered,
+        sensor_data->K96_NTC0_Temp, sensor_data->K96_NTC0_Temp_filtered,
+        sensor_data->K96_NTC1_Temp, sensor_data->K96_NTC1_Temp_filtered,
+        sensor_data->K96_RH, sensor_data->K96_RH_Temp,
+        sensor_data->K96_MPL_uflt_IR_Signal, sensor_data->K96_MPL_flt_IR_Signal,
+        sensor_data->K96_MPL_uflt_Conc, sensor_data->K96_MPL_flt_Conc, sensor_data->K96_MPL_uflt_Error,
+        sensor_data->K96_LPL_uflt_IR_Signal, sensor_data->K96_LPL_flt_IR_Signal, sensor_data->K96_LPL_uflt_Conc,
+        sensor_data->K96_LPL_uflt_Error, sensor_data->K96_LPL_flt_Error,
+        sensor_data->K96_SPL_uflt_IR_Signal, sensor_data->K96_SPL_flt_IR_Signal, sensor_data->K96_SPL_uflt_Conc,
+        sensor_data->K96_SPL_uflt_Error, sensor_data->K96_SPL_flt_Error, sensor_data->K96_error
     );
+
+    // Check if snprintf encountered an error or truncation
+    if (n < 0 || (size_t)n >= sizeof(line))
+    {
+        ESP_LOGE(TAG, "CSV line formatting failed or was truncated!");
+        return;
+    }
 
     // If the line doesn't fit, flush current buffer first
     // Extra check since csv can be variable length and might exceed buffer size on its own,
@@ -195,8 +212,8 @@ void buffer_SD_data_csv(SensorData *sensor_data)
         }
         SD_buffer_offset = 0;  // Reset for next batch
     }
-    ESP_LOGI(TAG, "Flushed %zu bytes CSV to SD", SD_buffer_offset);
 }
+
 // Flush remaining data (call before shutdown)
 void buffer_SD_data_flush()
 {
