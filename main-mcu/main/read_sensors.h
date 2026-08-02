@@ -69,6 +69,10 @@ struct SensorData
 };
 #pragma pack(pop)
 
+// This is part of the on-wire status protocol. Keep the groundstation format
+// in sync with this exact packed size.
+static_assert(sizeof(SensorData) == 179, "SensorData wire layout changed");
+
 extern SensorData sensor_data;
 
 enum class MS5803Model : uint8_t {

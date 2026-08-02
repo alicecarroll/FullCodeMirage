@@ -90,7 +90,8 @@ typedef enum
     CMD_OPEN_RELAY3      = 0x11,
     CMD_CLOSE_RELAY3     = 0x12,
     CMD_OPEN_RELAY4      = 0x13,
-    CMD_CLOSE_RELAY4     = 0x14
+    CMD_CLOSE_RELAY4     = 0x14,
+    CMD_SET_MODE         = 0x15
 
 } SlaveCommands;
 
@@ -115,6 +116,12 @@ struct PressureStatusData {
     uint8_t channel_id;
     uint8_t state;          // Standby, Prepressurisation, etc.
     uint8_t error_code;
+    uint8_t relay_mask; // bits 0..3 relays, bit 6 manual override, bit 7 valve open
+    uint8_t pump1_pwm;
+    uint8_t pump2_pwm;
+    uint8_t compressor_pwm;
+    bool valve_open;
+    bool manual_override;
 };
 
 // API

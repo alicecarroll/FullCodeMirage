@@ -24,6 +24,14 @@ typedef struct
 
     uint8_t error;
 
+    // Actuator state reported to the Main MCU.
+    uint8_t relay_mask;       // bit 0..3 = PDB relay 1..4
+    uint8_t pump1_pwm;
+    uint8_t pump2_pwm;
+    uint8_t compressor_pwm;
+    bool valve_open;
+    bool relay_manual_override;
+
 } PressureStatus;
 
 

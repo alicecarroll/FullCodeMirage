@@ -464,13 +464,16 @@ bool pressure_send_command(
     if (!select_slave(slave, &mux_channel, &reset_pin)) return false;
     if (sel_mux_channel(mux_channel) != ESP_OK) return false;
     
-    const int package_length = 3;
+    // Normal commands are [opcode, command, CRC]. Mode/PWM commands with an
+    // info byte are [opcode, command, info, CRC].
+    const int package_length = info_bit == 0 ? 3 : 4;
     uint8_t package[package_length];
 
     package[0] = Slave_packet_command;
     package[1] = cmd;
-    package[2] = info_bit;
-
+    if (package_length == 4) {
+        package[2] = info_bit;
+    }
     package[package_length - 1] = computeCRC8(package, package_length - 1);
 
     esp_err_t err = i2c_master_write_to_device(
@@ -510,6 +513,12 @@ bool pressure_receive_package(
     status_out->channel_id = data[0];
     status_out->state      = data[1];
     status_out->error_code = data[2];
+    status_out->relay_mask = data[3];
+    status_out->pump1_pwm = data[4];
+    status_out->pump2_pwm = data[5];
+    status_out->compressor_pwm = data[6];
+    status_out->valve_open = (data[3] & 0x80) != 0;
+    status_out->manual_override = (data[3] & 0x40) != 0;
 
     return true;
 }

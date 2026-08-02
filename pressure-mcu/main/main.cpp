@@ -20,10 +20,10 @@
 // PDB relay signals — connector pins 1, 4, 5, 28 -> these GPIOs.
 // Plain on/off to MOSFETs on the power distribution board, no
 // sequencing/timing logic.
-#define PDB_RELAY1_PIN   GPIO_NUM_21  // pin 28
-#define PDB_RELAY2_PIN   GPIO_NUM_48   // pin 1
-#define PDB_RELAY3_PIN   GPIO_NUM_1   // pin 4
-#define PDB_RELAY4_PIN   GPIO_NUM_2  // pin 5
+#define PDB_RELAY1_PIN   GPIO_NUM_21  // pin 28, black cable
+#define PDB_RELAY2_PIN   GPIO_NUM_48   // pin 1, red cable
+#define PDB_RELAY3_PIN   GPIO_NUM_1   // pin 4, blue cable
+#define PDB_RELAY4_PIN   GPIO_NUM_2  // pin 5, yellow cable
 
 // I2C_SDA / I2C_SCL (IO13 / IO14)
 #define I2C_SCL_PIN      GPIO_NUM_14
@@ -83,6 +83,11 @@ static void compressor_off();
 static void valve_open();
 static void valve_close();
 
+static bool manual_pump1_override = false;
+static bool manual_pump2_override = false;
+static bool manual_compressor_override = false;
+static bool manual_valve_override = false;
+
 static void pressure_update_external_sensors(const float sensors[7])
 {
     memcpy(external_sensors, sensors, sizeof(external_sensors));
@@ -112,24 +117,24 @@ static void pressure_set_vpump1_pwm(uint8_t pwm)
 {
     // The hardware is still driven as plain digital outputs, but the
     // packet values are now consumed instead of being dropped on the floor.
-    pump1_on();
-    
+    if (pwm == 0) pump1_off(); else pump1_on();
+    status.pump1_pwm = pwm;
 }
 
 static void pressure_set_vpump2_pwm(uint8_t pwm)
 {
     // The hardware is still driven as plain digital outputs, but the
     // packet values are now consumed instead of being dropped on the floor.
-    pump2_on();
-    
+    if (pwm == 0) pump2_off(); else pump2_on();
+    status.pump2_pwm = pwm;
 }
 
 static void pressure_set_compressor_pwm(uint8_t pwm)
 {
     // The hardware is still driven as plain digital outputs, but the
     // packet values are now consumed instead of being dropped on the floor.
-    compressor_on();
-    
+    if (pwm == 0) compressor_off(); else compressor_on();
+    status.compressor_pwm = pwm;
 }
 // ------------------------------------------------------------------
 // Internal hardware functions
@@ -143,63 +148,83 @@ static void pressure_set_compressor_pwm(uint8_t pwm)
 
 static void pump1_on()
 {
-    gpio_set_level(PUMP1_PIN, 1);
+    esp_err_t err = gpio_set_level(PUMP1_PIN, 1);
+    if (err != ESP_OK) ESP_LOGE(TAG, "Failed to set pump 1 GPIO %d high: %s", PUMP1_PIN, esp_err_to_name(err));
+    status.pump1_pwm = 255;
 }
 
 static void pump1_off()
 {
-    gpio_set_level(PUMP1_PIN, 0);
+    esp_err_t err = gpio_set_level(PUMP1_PIN, 0);
+    if (err != ESP_OK) ESP_LOGE(TAG, "Failed to set pump 1 GPIO %d low: %s", PUMP1_PIN, esp_err_to_name(err));
+    status.pump1_pwm = 0;
 }
 
 static void pump2_on()
 {
-    gpio_set_level(PUMP2_PIN, 1);
+    esp_err_t err = gpio_set_level(PUMP2_PIN, 1);
+    if (err != ESP_OK) ESP_LOGE(TAG, "Failed to set pump 2 GPIO %d high: %s", PUMP2_PIN, esp_err_to_name(err));
+    status.pump2_pwm = 255;
 }
 
 static void pump2_off()
 {
-    gpio_set_level(PUMP2_PIN, 0);
+    esp_err_t err = gpio_set_level(PUMP2_PIN, 0);
+    if (err != ESP_OK) ESP_LOGE(TAG, "Failed to set pump 2 GPIO %d low: %s", PUMP2_PIN, esp_err_to_name(err));
+    status.pump2_pwm = 0;
 }
 
 static void pumps_on()
 {
-    pump1_on();
-    pump2_on();
+    if (!manual_pump1_override) pump1_on();
+    if (!manual_pump2_override) pump2_on();
 }
 
 static void pumps_off()
 {
-    pump1_off();
-    pump2_off();
+    if (!manual_pump1_override) pump1_off();
+    if (!manual_pump2_override) pump2_off();
 }
 
 static void compressor_on()
 {
     // PWM1 driven as plain digital HIGH for now — swap to real PWM
     // (ledc driver) once a duty cycle is decided.
-    gpio_set_level(COMPRESSOR_PIN, 1);
+    esp_err_t err = gpio_set_level(COMPRESSOR_PIN, 1);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set compressor GPIO %d high: %s", COMPRESSOR_PIN, esp_err_to_name(err));
+    } else if (gpio_get_level(COMPRESSOR_PIN) != 1) {
+        ESP_LOGE(TAG, "Compressor GPIO %d did not read back high", COMPRESSOR_PIN);
+    }
+    status.compressor_pwm = 255;
 }
 
 static void compressor_off()
 {
-    gpio_set_level(COMPRESSOR_PIN, 0);
+    esp_err_t err = gpio_set_level(COMPRESSOR_PIN, 0);
+    if (err != ESP_OK) ESP_LOGE(TAG, "Failed to set compressor GPIO %d low: %s", COMPRESSOR_PIN, esp_err_to_name(err));
+    status.compressor_pwm = 0;
 }
 
 static void valve_open()
 {
-    gpio_set_level(VALVE_PIN, 1);
+    esp_err_t err = gpio_set_level(VALVE_PIN, 1);
+    if (err != ESP_OK) ESP_LOGE(TAG, "Failed to set valve GPIO %d high: %s", VALVE_PIN, esp_err_to_name(err));
+    status.valve_open = true;
 }
 
 static void valve_close()
 {
-    gpio_set_level(VALVE_PIN, 0);
+    esp_err_t err = gpio_set_level(VALVE_PIN, 0);
+    if (err != ESP_OK) ESP_LOGE(TAG, "Failed to set valve GPIO %d low: %s", VALVE_PIN, esp_err_to_name(err));
+    status.valve_open = false;
 }
 
 // PDB relays — plain on/off, no sequencing.
-static void pdb_relay1_set(int level) { gpio_set_level(PDB_RELAY1_PIN, level); }
-static void pdb_relay2_set(int level) { gpio_set_level(PDB_RELAY2_PIN, level); }
-static void pdb_relay3_set(int level) { gpio_set_level(PDB_RELAY3_PIN, level); }
-static void pdb_relay4_set(int level) { gpio_set_level(PDB_RELAY4_PIN, level); }
+static void pdb_relay1_set(int level) { gpio_set_level(PDB_RELAY1_PIN, level); status.relay_mask = (status.relay_mask & ~0x01) | (level ? 0x01 : 0); }
+static void pdb_relay2_set(int level) { gpio_set_level(PDB_RELAY2_PIN, level); status.relay_mask = (status.relay_mask & ~0x02) | (level ? 0x02 : 0); }
+static void pdb_relay3_set(int level) { gpio_set_level(PDB_RELAY3_PIN, level); status.relay_mask = (status.relay_mask & ~0x04) | (level ? 0x04 : 0); }
+static void pdb_relay4_set(int level) { gpio_set_level(PDB_RELAY4_PIN, level); status.relay_mask = (status.relay_mask & ~0x08) | (level ? 0x08 : 0); }
 
 // ------------------------------------------------------------------
 // Internal sensor functions
@@ -254,9 +279,9 @@ static bool read_compressor_inlet_pressure(float *out_pressure)
 
 static void run_prepressurisation()
 {
-    valve_close();
+    if (!manual_valve_override) valve_close();
 
-    compressor_off();
+    if (!manual_compressor_override) compressor_on();
 
     pumps_on();
 
@@ -276,9 +301,9 @@ static void run_air_exchange()
 {
     pumps_off();
 
-    valve_open();
+    if (!manual_valve_override) valve_open();
 
-    compressor_on();
+    if (!manual_compressor_override) compressor_on();
 
     // Bug 1 fix: per the spec, this phase ends when COMPRESSOR INLET
     // pressure has dropped to its lower limit — not when chamber
@@ -287,9 +312,9 @@ static void run_air_exchange()
     // longer what decides the phase transition here.
     if (status.compressor_inlet_pressure <= compressor_inlet_lower_limit)
     {
-        compressor_off();
+        if (!manual_compressor_override) compressor_off();
 
-        valve_close();
+        if (!manual_valve_override) valve_close();
 
         status.state =
             PRESSURE_PREPRESSURISATION;
@@ -326,6 +351,16 @@ uint8_t computeCRC8(
 
 uint8_t cmd = 0;
 uint8_t info_bit = 0;
+static bool relay_manual_override = false;
+static uint8_t applied_mode = 0;
+
+static void clear_manual_actuator_overrides()
+{
+    manual_pump1_override = false;
+    manual_pump2_override = false;
+    manual_compressor_override = false;
+    manual_valve_override = false;
+}
 
 typedef enum
 {
@@ -353,7 +388,8 @@ typedef enum
     CMD_OPEN_RELAY3      = 0x11,
     CMD_CLOSE_RELAY3     = 0x12,
     CMD_OPEN_RELAY4      = 0x13,
-    CMD_CLOSE_RELAY4     = 0x14
+    CMD_CLOSE_RELAY4     = 0x14,
+    CMD_SET_MODE         = 0x15
 
 } SlaveCommands;
 
@@ -377,59 +413,165 @@ static const CommandMapping relay_commands[] =
     {valve_close,     CMD_CLOSE_SHUTTERS},
 };
 
+static void apply_mode_relays(uint8_t mode)
+{
+    // A mode command is sent every Main-MCU loop. Only a mode transition
+    // clears a manual override; otherwise the recurring mode command would
+    // immediately undo a manually requested relay state.
+    if (mode != applied_mode)
+    {
+        applied_mode = mode;
+        relay_manual_override = false;
+        clear_manual_actuator_overrides();
+    }
+
+    if (relay_manual_override)
+        return;
+
+    if (mode == 3)
+    {
+        pdb_relay2_on();
+        pdb_relay3_on();
+    }
+    else if (mode == 2)
+    {
+        pdb_relay2_off();
+        pdb_relay3_off();
+    }
+}
+
+static void execute_pressure_command(uint8_t command, uint8_t info_bit)
+{
+    switch (command)
+    {
+        case CMD_VPUMP1_ON: manual_pump1_override = true; pressure_set_vpump1_pwm(info_bit); break;
+        case CMD_VPUMP1_OFF: manual_pump1_override = true; pump1_off(); break;
+        case CMD_VPUMP2_ON: manual_pump2_override = true; pressure_set_vpump2_pwm(info_bit); break;
+        case CMD_VPUMP2_OFF: manual_pump2_override = true; pump2_off(); break;
+        case CMD_COMPRESSOR_ON: manual_compressor_override = true; pressure_set_compressor_pwm(info_bit); break;
+        case CMD_COMPRESSOR_OFF: manual_compressor_override = true; compressor_off(); break;
+        case CMD_MEASUREMENTS:
+            apply_mode_relays(3);
+            pressure_cmd_measurements();
+            break;
+        case CMD_STANDBY:
+            apply_mode_relays(2);
+            pressure_cmd_standby();
+            break;
+        case CMD_SET_MODE:
+            apply_mode_relays(info_bit);
+            if (info_bit == 2) {
+                pressure_cmd_standby();
+            } else {
+                // Preserve the existing pressure behavior for test-loop and
+                // measurement modes; relay policy still uses the exact mode.
+                pressure_cmd_measurements();
+            }
+            break;
+        default:
+            for (const auto &mapping : relay_commands)
+                if (command == mapping.cmd) {
+                    if (command >= CMD_OPEN_RELAY1 && command <= CMD_CLOSE_RELAY4) {
+                        relay_manual_override = true;
+                    } else {
+                        manual_valve_override = true;
+                    }
+                    mapping.func();
+                    return;
+                }
+            ESP_LOGW(TAG, "Received unknown command: 0x%02X", command);
+            break;
+    }
+}
+
 void i2c_slave_task(void *pvParameters) {
     uint8_t rx_data[24]; // Large enough to fit either packet type
     uint8_t tx_data[8];
+    uint8_t pending_data[64] = {};
+    size_t pending_len = 0;
  
     while (1) {
-        // Non-blocking read check
+        // The Main MCU sends a 16-byte sensor frame followed immediately by
+        // command frames. The ESP-IDF slave RX FIFO may return those
+        // transactions together, so parse a stream of frames instead
+        // of requiring one read to equal one packet.
         int rx_len = i2c_slave_read_buffer(I2C_SLAVE_NUM, rx_data, sizeof(rx_data), 10 / portTICK_PERIOD_MS);
-        
         if (rx_len > 0) {
-            uint8_t opcode = rx_data[0];
+            if (pending_len + static_cast<size_t>(rx_len) <= sizeof(pending_data)) {
+                memcpy(pending_data + pending_len, rx_data, rx_len);
+                pending_len += static_cast<size_t>(rx_len);
+            } else {
+                ESP_LOGW(TAG, "Pressure I2C RX frame buffer overflow; discarding buffered data");
+                pending_len = 0;
+            }
+        }
 
-            if (opcode == OPCODE_SENSORS && rx_len == 16) {
-                // Verify CRC for sensor packet (bytes 0 to 14)
-                if (computeCRC8(rx_data, 16) == rx_data[15]) {
+        while (pending_len > 0) {
+            uint8_t frame_length = 0;
+            uint8_t opcode = pending_data[0];
+
+            if (opcode == OPCODE_SENSORS) {
+                if (pending_len < 16) break;
+                frame_length = 16;
+                if (computeCRC8(pending_data, 15) == pending_data[15]) {
                     float incoming_sensors[7];
                     for(int i = 0; i < 7; i++) {
-                        int16_t raw_val = (static_cast<int16_t>(rx_data[1 + (i*2)]) << 8) |
-                                          static_cast<int16_t>(rx_data[2 + (i*2)]);
+                        int16_t raw_val = (static_cast<int16_t>(pending_data[1 + (i*2)]) << 8) |
+                                          static_cast<int16_t>(pending_data[2 + (i*2)]);
                         incoming_sensors[i] = (float)raw_val / SENSOR_SCALE;
                     }
                     pressure_update_external_sensors(incoming_sensors);
                 }
-            } 
-            else if (opcode == OPCODE_COMMANDS && rx_len == 3) {
-                // Verify CRC for command packet 
-                if (computeCRC8(rx_data, 3) == rx_data[3]) {
-                    cmd = rx_data[1]; // The command byte
-                    info_bit = rx_data[2]; // The info bit
-                    for (const auto &mapping : relay_commands) {
-                        if (cmd == mapping.cmd) {
-                            // For pump and compressor ON commands, use info_bit to set PWM
-                            if (cmd == CMD_VPUMP1_ON) {
-                                mapping.func();
-                                pressure_set_vpump1_pwm(info_bit);
-                            } else if (cmd == CMD_VPUMP2_ON) {
-                                mapping.func();
-                                pressure_set_vpump2_pwm(info_bit);
-                            } else if (cmd == CMD_COMPRESSOR_ON) {
-                                mapping.func();
-                                pressure_set_compressor_pwm(info_bit);
-                            }
-                            else {
-                                mapping.func();
-                            }
-                            break;
-                        }
-                        else {
-                            ESP_LOGW(TAG, "Received unknown command: 0x%02X", cmd);
-                        }
-                    }
+
+                // Consume the sensor frame, whether valid or not, so a bad
+                // frame cannot block all following commands.
+            } else if (opcode == OPCODE_COMMANDS) {
+                if (pending_len < 3) break;
+                cmd = pending_data[1];
+                const bool has_info = cmd == CMD_VPUMP1_ON || cmd == CMD_VPUMP2_ON ||
+                                      cmd == CMD_COMPRESSOR_ON || cmd == CMD_SET_MODE;
+                const bool compact_allowed = cmd != CMD_SET_MODE;
+                // Pump/compressor ON commands historically used the compact
+                // three-byte form when no PWM was supplied. They may also be
+                // four bytes with an explicit PWM value. Prefer a valid
+                // four-byte frame, but accept the valid three-byte form so
+                // it cannot consume the first byte of the next mode packet.
+                const bool crc3_valid = computeCRC8(pending_data, 2) == pending_data[2];
+                const bool crc4_valid = pending_len >= 4 && computeCRC8(pending_data, 3) == pending_data[3];
+                if (has_info && crc4_valid) {
+                    frame_length = 4;
+                    info_bit = pending_data[2];
+                } else if (compact_allowed && crc3_valid) {
+                    frame_length = 3;
+                    info_bit = 255;
+                } else if (has_info && pending_len < 4) {
+                    break;
+                } else {
+                    frame_length = has_info ? 4 : 3;
                 }
+
+                const uint8_t crc_index = frame_length - 1;
+                if (computeCRC8(pending_data, crc_index) == pending_data[crc_index]) {
+                    execute_pressure_command(cmd, info_bit);
+                } else {
+                    ESP_LOGW(TAG, "Invalid pressure command CRC for 0x%02X", cmd);
+                }
+            } else {
+                ESP_LOGW(TAG, "Discarding unknown pressure I2C opcode 0x%02X", opcode);
+                frame_length = 1;
             }
+
+            if (frame_length == 0) break;
+            pending_len -= frame_length;
+            memmove(pending_data, pending_data + frame_length, pending_len);
         }
+
+        if (pending_len == sizeof(pending_data)) {
+            ESP_LOGW(TAG, "Unable to find a complete pressure I2C frame");
+            pending_len = 0;
+        }
+
+        status.relay_manual_override = relay_manual_override;
 
         // Prepare Status Packet for Master to read anytime
         PressureStatus current_status = pressure_get_status();
@@ -438,10 +580,13 @@ void i2c_slave_task(void *pvParameters) {
         tx_data[1] = (uint8_t)current_status.state;
         tx_data[2] = current_status.error;
         
-        tx_data[3] = 0x00; 
-        tx_data[4] = 0x00; 
-        tx_data[5] = 0x00; 
-        tx_data[6] = 0x00; 
+        // Bits 0..3 are relays; bit 7 is the valve state.
+        tx_data[3] = current_status.relay_mask |
+                     (current_status.relay_manual_override ? 0x40 : 0) |
+                     (current_status.valve_open ? 0x80 : 0);
+        tx_data[4] = current_status.pump1_pwm;
+        tx_data[5] = current_status.pump2_pwm;
+        tx_data[6] = current_status.compressor_pwm;
         tx_data[7] = computeCRC8(tx_data, 7);
 
         i2c_reset_tx_fifo(I2C_SLAVE_NUM);
@@ -475,7 +620,13 @@ void pressure_init()
         (1ULL << PDB_RELAY4_PIN);
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-    gpio_config(&io_conf);
+    esp_err_t gpio_err = gpio_config(&io_conf);
+    if (gpio_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to configure pressure actuator GPIOs: %s", esp_err_to_name(gpio_err));
+    } else {
+        ESP_LOGI(TAG, "Actuator GPIOs configured: compressor=%d, pump1=%d, pump2=%d, valve=%d",
+                 COMPRESSOR_PIN, PUMP1_PIN, PUMP2_PIN, VALVE_PIN);
+    }
 
     status.state =
         PRESSURE_STANDBY;
@@ -485,6 +636,12 @@ void pressure_init()
     status.compressor_inlet_pressure = 0.0f;
 
     status.error = PRESSURE_ERR_NONE;
+    status.relay_mask = 0;
+    status.pump1_pwm = 0;
+    status.pump2_pwm = 0;
+    status.compressor_pwm = 0;
+    status.valve_open = false;
+    status.relay_manual_override = false;
 
     pumps_off();
 
@@ -563,9 +720,9 @@ void pressure_cmd_standby()
 
     pumps_off();
 
-    compressor_off();
+    if (!manual_compressor_override) compressor_off();
 
-    valve_close();
+    if (!manual_valve_override) valve_close();
 }
 
 void pressure_cmd_measurements()

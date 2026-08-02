@@ -78,8 +78,21 @@ while True:  # outer loop: always wait for a (new) connection
 
     try:
         while not stop_event.is_set():  # inner loop: handle this connection until it drops
-            fmt = '<BBB' + 'f' * 23 + 'H' + '9B'
+            # Must match MainSystemStatusPacket in SystemStatus.h exactly:
+            # SensorData (179 bytes) + status tail (27 bytes) = 206 bytes.
+            fmt = (
+                '<3B17f'
+                'ididid'
+                '8f'
+                'HHffH'
+                'HHfHH'
+                'HHfHH'
+                'H'
+                '5BH12BQ'
+            )
             size = struct.calcsize(fmt)
+            if size != 206:
+                raise RuntimeError(f"listener packet layout is {size} bytes, expected 206")
 
             data = recv_exact(conn, size)
 
@@ -97,13 +110,19 @@ while True:  # outer loop: always wait for a (new) connection
                 K96_error,
                 operating_mode, command_received, connection_lost, status_ok,
                 pressure_system_on, heater_mask, thermal_online, thermal_state,
-                thermal_error) = values
+                thermal_error, pressure_state, pressure_error, relay_mask,
+                pump1_pwm, pump2_pwm, compressor_pwm, actuator_mask,
+                manual_override, valve_open, captured_errors) = values
 
                 print(f"Mode: {operating_mode} ({MODE_NAMES.get(operating_mode, 'Unknown')})")
                 print(f"Ethernet command received: {'yes' if command_received else 'no'}")
                 print(f"Connection lost: {'yes' if connection_lost else 'no'} | Status OK: {'yes' if status_ok else 'no'}")
                 print(f"Pressure system active: {'yes' if pressure_system_on else 'no'} | Active heaters: {describe_heaters(heater_mask)}")
                 print(f"Thermal MCU: {'online' if thermal_online else 'offline'} | state={thermal_state} | error={thermal_error}")
+                print(f"Pressure MCU: state={pressure_state} | error={pressure_error} | relays=0x{relay_mask:02X} | "
+                      f"VP1={pump1_pwm}/255 | VP2={pump2_pwm}/255 | compressor={compressor_pwm}/255 | "
+                      f"valve={'open' if valve_open else 'closed'} | "
+                      f"manual_override={'yes' if manual_override else 'no'}")
 
                 print(f"Time: {hours:02}:{minutes:02}:{seconds:02}")
                 print(f"Ambient: Ta1(Tmp117)= {Ta1:.2}, Pa1(MS5803)={Pa1:.6f}, Ta2(MS5803)={Ta2:.6f}, Ha1={Ha1:.2f}, Ta3(SHT45)={Ta3:.2f}") 

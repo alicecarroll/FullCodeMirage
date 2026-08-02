@@ -4,7 +4,6 @@
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
   ],
-  "idf.port": "/dev/cu.usbmodem1101",
   "idf.portWin": "COM6",
   "idf.currentSetup": "/Users/jonathan/esp/esp-idf",
   "idf.customExtraVars": {

@@ -15,7 +15,7 @@
 #include "Multiplexer.h"
 #include "Neopixel.h"
 #include "SystemStatus.h"
-#include "ErrorStatus.h"
+#include "ErrorStatus.h" // For error logging and status tracking. Before flight it would be good to check that only used errors are defined as bits in ErrorStatus.h
 #include "read_sensors.h"
 
 #include "Uart.h"
@@ -64,6 +64,7 @@ int32_t LOOP_RETRY_CONNECTION = 10; // Number of loops to wait before retrying c
 int64_t loss_timestamp_us = -1; // To track when connection was lost for termination
 int loops_since_connection = 0; // To buffer short con losses for stable running
 static SlaveStatus thermal_status = {};
+static PressureStatusData pressure_status = {};
 static uint8_t active_heater_mask = 0x00;
 static bool pressure_system_active = false;
 static bool status_update_requested = false;
@@ -80,7 +81,7 @@ struct CommandMapping
     SlaveCommands cmd;
 };
 
-static const CommandMapping relay_commands[] =
+static const CommandMapping pressure_commands[] =
 {
     {"RELAY 1 ON",  CMD_OPEN_RELAY1},
     {"RELAY 1 OFF", CMD_CLOSE_RELAY1},
@@ -90,6 +91,16 @@ static const CommandMapping relay_commands[] =
     {"RELAY 3 OFF", CMD_CLOSE_RELAY3},
     {"RELAY 4 ON",  CMD_OPEN_RELAY4},
     {"RELAY 4 OFF", CMD_CLOSE_RELAY4},
+    {"SHUTTERS OPEN",  CMD_OPEN_SHUTTERS},
+    {"SHUTTERS CLOSE", CMD_CLOSE_SHUTTERS},
+    {"VALVE OPEN",     CMD_OPEN_SHUTTERS},
+    {"VALVE CLOSE",    CMD_CLOSE_SHUTTERS},
+    {"PUMP 1 ON", CMD_VPUMP1_ON},
+    {"PUMP 1 OFF", CMD_VPUMP1_OFF},
+    {"PUMP 2 ON", CMD_VPUMP2_ON},
+    {"PUMP 2 OFF", CMD_VPUMP2_OFF},
+    {"COMPRESSOR ON", CMD_COMPRESSOR_ON},
+    {"COMPRESSOR OFF", CMD_COMPRESSOR_OFF}
 };
 
 static void set_heater_bit(uint8_t heater_index, bool enabled)
@@ -236,7 +247,7 @@ void handle_command()
         return;
     }
 
-    for (const auto &entry : relay_commands)
+    for (const auto &entry : pressure_commands)
     {
         if (ethernet_command_text == entry.text)
         {
@@ -263,6 +274,15 @@ static esp_err_t send_system_status_packet()
     system_status_packet.thermal_online = thermal_status.online ? 1 : 0;
     system_status_packet.thermal_state = thermal_status.state;
     system_status_packet.thermal_error = thermal_status.error;
+    system_status_packet.pressure_state = pressure_status.state;
+    system_status_packet.pressure_error = pressure_status.error_code;
+    system_status_packet.pressure_relay_mask = pressure_status.relay_mask & 0x0F;
+    system_status_packet.pressure_pump1_pwm = pressure_status.pump1_pwm;
+    system_status_packet.pressure_pump2_pwm = pressure_status.pump2_pwm;
+    system_status_packet.pressure_compressor_pwm = pressure_status.compressor_pwm;
+    system_status_packet.pressure_actuator_mask = pressure_status.relay_mask & 0x80 ? 0x01 : 0x00;
+    system_status_packet.pressure_manual_override = pressure_status.manual_override ? 1 : 0;
+    system_status_packet.pressure_valve_open = pressure_status.valve_open ? 1 : 0;
     system_status_packet.captured_errors = captured_errors;
 
     return wiz_send((uint8_t *)&system_status_packet, sizeof(system_status_packet));
@@ -443,30 +463,11 @@ bool pressure_mcu_lost=false; // To track if the pressure slave is lost.
 
 static void comms_pressure_sensor(SensorData &sensor_data, uint32_t current_time_ms)
 {
-    PressureStatusData pressure_status;
     pressure_send_sensors(pressure_mcu, sensor_data);
 
-    // Add the command for the current mode to the list of commands to send to the pressure slave
-    // This is done to ensure that the the slave is always on the same mode as the main MCU, even if the mode is changed e.g. via ethernet command.
-    // If also done for the thermal slave, it would be impossible to have the slaved on different modes than the main MCU.
-    switch (mode)
-    {
-        case 1: // Test Loop
-            pressure_slave_commands.push_front(CMD_MEASUREMENTS);
-            break;
-        case 2: // Standby
-            pressure_slave_commands.push_front(CMD_STANDBY);
-            break;
-        case 3: // Measurement
-            pressure_slave_commands.push_front(CMD_MEASUREMENTS);
-            break;
-        case 4: // Humidity
-            pressure_slave_commands.push_front(CMD_STANDBY);
-            break;
-        default:
-            ESP_LOGW(TAG, "Unrecognized mode: %d. No command sent to Pressure MCU.", mode);
-            break;
-    }
+    // Send the actual Main-MCU mode, including its numeric value. The
+    // pressure MCU uses mode 3/2 to control relay 2/3 automatically.
+    pressure_slave_commands.push_front(CMD_SET_MODE);
 
     // Check if there are any commands to send to the pressure slave
     auto commands = pressure_slave_commands;
@@ -475,7 +476,11 @@ static void comms_pressure_sensor(SensorData &sensor_data, uint32_t current_time
     {
         ESP_LOGI(TAG, "Sending command 0x%02X to Pressure MCU", command);
         // Send the command to the pressure slave
-        if (pressure_send_command(pressure_mcu, static_cast<uint8_t>(command)))
+        const bool is_mode_command = command == CMD_SET_MODE;
+        const bool sent = is_mode_command
+            ? pressure_send_command(pressure_mcu, static_cast<uint8_t>(command), static_cast<uint8_t>(mode))
+            : pressure_send_command(pressure_mcu, static_cast<uint8_t>(command));
+        if (sent)
         {
             ESP_LOGI(TAG, "Command 0x%02X sent successfully to Pressure MCU", command);
         }
@@ -488,8 +493,12 @@ static void comms_pressure_sensor(SensorData &sensor_data, uint32_t current_time
     if (pressure_receive_package(pressure_mcu, &pressure_status))
     {
         last_pressure_ping_time = current_time_ms;
-        ESP_LOGI(TAG, "Pressure MCU responded successfully. Channel ID: %d, State: %d, Error Code: %d",
-                 pressure_status.channel_id, pressure_status.state, pressure_status.error_code);
+        pressure_system_active = pressure_status.state != 0;
+        ESP_LOGI(TAG, "Pressure MCU responded successfully. Channel ID: %d, State: %d, Error Code: %d, "
+                 "Relay mask: 0x%02X, manual override: %s",
+                 pressure_status.channel_id, pressure_status.state, pressure_status.error_code,
+                 pressure_status.relay_mask & 0x0F,
+                 pressure_status.manual_override ? "yes" : "no");
     }
     else
     {
