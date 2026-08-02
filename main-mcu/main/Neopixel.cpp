@@ -5,6 +5,7 @@
  */
 
 #include "Neopixel.h"
+#include "ErrorStatus.h"
 #include "Settings.h"
 #include "Initialize.h"
 #include "driver/ledc.h"
@@ -21,7 +22,7 @@ static esp_err_t refresh(void)
 {
     if (s_strip == NULL)
     {
-        ESP_LOGE(TAG, "Can't find a handle. Call neopixel_init()");
+        ESP_LOGE_CAPTURED(ERROR_BIT_19, TAG, "Can't find a handle. Call neopixel_init()");
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -33,7 +34,7 @@ static esp_err_t fill_all(uint8_t r, uint8_t g, uint8_t b)
 {
     if (s_strip == NULL)
     {
-        ESP_LOGE(TAG, "Can't find a handle. Call neopixel_init()");
+        ESP_LOGE_CAPTURED(ERROR_BIT_20, TAG, "Can't find a handle. Call neopixel_init()");
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -42,7 +43,7 @@ static esp_err_t fill_all(uint8_t r, uint8_t g, uint8_t b)
         esp_err_t err = led_strip_set_pixel(s_strip, i, r, g, b);
         if (err != ESP_OK)
         {
-            ESP_LOGE(TAG, "led_strip_set_pixel(%d) failed: %s", i, esp_err_to_name(err));
+            ESP_LOGE_CAPTURED(ERROR_BIT_21, TAG, "led_strip_set_pixel(%d) failed: %s", i, esp_err_to_name(err));
             return err;
         }
     }
@@ -55,12 +56,12 @@ esp_err_t neopixel_set_pixel(uint8_t index, uint8_t red, uint8_t green, uint8_t 
 {
     if (s_strip == NULL)
     {
-        ESP_LOGE(TAG, "Can't find a handle. Call neopixel_init()");
+        ESP_LOGE_CAPTURED(ERROR_BIT_22, TAG, "Can't find a handle. Call neopixel_init()");
         return ESP_ERR_INVALID_STATE;
     }
     if (index >= NEOPIXEL_COUNT)
     {
-        ESP_LOGE(TAG, "Pixel index %d out of range (max %d)", index, NEOPIXEL_COUNT - 1);
+        ESP_LOGE_CAPTURED(ERROR_BIT_23, TAG, "Pixel index %d out of range (max %d)", index, NEOPIXEL_COUNT - 1);
         return ESP_ERR_INVALID_ARG;
     }
 

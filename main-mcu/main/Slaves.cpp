@@ -8,6 +8,7 @@
 #include "Initialize.h"
 //#include "communication.h"
 #include "Slaves.h"
+#include "ErrorStatus.h"
 #include "read_sensors.h"
 
 // Shared slave address
@@ -242,9 +243,9 @@ bool slave_read_status(
     {
         status->online = false;
         if (err != ESP_OK) {
-            ESP_LOGE("I2C_DEBUG", "I2C Transaction Failed: 0x%02X", err);
+            ESP_LOGE_CAPTURED(ERROR_BIT_34, "I2C_DEBUG", "I2C Transaction Failed: 0x%02X", err);
             if (err==0xFFFFFFFF) {
-                ESP_LOGE("I2C_DEBUG", "I2C bus may be stuck. Attempting recovery...");
+                ESP_LOGE_CAPTURED(ERROR_BIT_35, "I2C_DEBUG", "I2C bus may be stuck. Attempting recovery...");
                 recover_i2c_driver();
             }
         }

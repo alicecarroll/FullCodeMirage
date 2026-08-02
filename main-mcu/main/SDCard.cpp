@@ -16,6 +16,7 @@
  */
 
 #include "SDCard.h"
+#include "ErrorStatus.h"
 #include "Settings.h"
 #include "read_sensors.h"
 
@@ -122,7 +123,7 @@ void buffer_SD_data_binary(const SensorData *sensor_data)
         }
         else
         {
-            ESP_LOGE(TAG, "Failed to write buffer to SD");
+            ESP_LOGE_CAPTURED(ERROR_BIT_24, TAG, "Failed to write buffer to SD");
         }
         SD_buffer_offset = 0;  // Reset for next batch
     }
@@ -173,7 +174,7 @@ void buffer_SD_data_csv(SensorData *sensor_data)
     // Check if snprintf encountered an error or truncation
     if (n < 0 || (size_t)n >= sizeof(line))
     {
-        ESP_LOGE(TAG, "CSV line formatting failed or was truncated!");
+        ESP_LOGE_CAPTURED(ERROR_BIT_25, TAG, "CSV line formatting failed or was truncated!");
         return;
     }
 
@@ -189,7 +190,7 @@ void buffer_SD_data_csv(SensorData *sensor_data)
         }
         else
         {
-            ESP_LOGE(TAG, "Failed to flush CSV buffer to SD");
+            ESP_LOGE_CAPTURED(ERROR_BIT_26, TAG, "Failed to flush CSV buffer to SD");
         }
         SD_buffer_offset = 0;
     }
@@ -208,7 +209,7 @@ void buffer_SD_data_csv(SensorData *sensor_data)
         }
         else
         {
-            ESP_LOGE(TAG, "Failed to write CSV buffer to SD");
+            ESP_LOGE_CAPTURED(ERROR_BIT_27, TAG, "Failed to write CSV buffer to SD");
         }
         SD_buffer_offset = 0;  // Reset for next batch
     }
@@ -264,7 +265,7 @@ esp_err_t sd_mount(void)
 
     if (ret != ESP_OK)
     {
-        ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(ret));
+        ESP_LOGE_CAPTURED(ERROR_BIT_28, TAG, "Failed to mount SD card: %s", esp_err_to_name(ret));
         return ret;
     }
 
@@ -295,7 +296,7 @@ esp_err_t sd_write(const char *filename, const uint8_t *data, size_t length)
     FILE *f = fopen(path, "ab");
     if (!f)
     {
-        ESP_LOGE(TAG, "Cannot open %s (errno %d)", path, errno);
+        ESP_LOGE_CAPTURED(ERROR_BIT_29, TAG, "Cannot open %s (errno %d)", path, errno);
         return ESP_FAIL;
     }
 
@@ -304,7 +305,7 @@ esp_err_t sd_write(const char *filename, const uint8_t *data, size_t length)
 
     if (written != length)
     {
-        ESP_LOGE(TAG, "Wrote %zu/%zu bytes", written, length);
+        ESP_LOGE_CAPTURED(ERROR_BIT_30, TAG, "Wrote %zu/%zu bytes", written, length);
         return ESP_FAIL;
     }
 
@@ -321,7 +322,7 @@ esp_err_t sd_read(const char *filename, uint8_t *out_buf,
     FILE *f = fopen(path, "rb");
     if (!f)
     {
-        ESP_LOGE(TAG, "Cannot open %s (errno %d)", path, errno);
+        ESP_LOGE_CAPTURED(ERROR_BIT_31, TAG, "Cannot open %s (errno %d)", path, errno);
         return ESP_FAIL;
     }
 
@@ -337,7 +338,7 @@ esp_err_t sd_wipe_files(void)
     DIR *dir = opendir(SD_MOUNT_POINT);
     if (!dir)
     {
-        ESP_LOGE(TAG, "Failed to open directory (errno %d)", errno);
+        ESP_LOGE_CAPTURED(ERROR_BIT_32, TAG, "Failed to open directory (errno %d)", errno);
         return ESP_FAIL;
     }
 
@@ -355,7 +356,7 @@ esp_err_t sd_wipe_files(void)
 
         if (unlink(path) != 0)
         {
-            ESP_LOGE(TAG, "Failed to delete %s (errno %d)", path, errno);
+            ESP_LOGE_CAPTURED(ERROR_BIT_33, TAG, "Failed to delete %s (errno %d)", path, errno);
             failed++;
         }
         else

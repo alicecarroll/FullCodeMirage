@@ -9,6 +9,7 @@
 #include "Settings.h"
 #include "Multiplexer.h"
 #include "read_sensors.h"
+#include "ErrorStatus.h"
 
 SensorData sensor_data;
 
@@ -627,7 +628,7 @@ void log_sensor_data(const SensorData *data, const char *filepath)
 
     FILE *f = fopen(filepath, "a"); // append mode
     if (f == nullptr) {
-        ESP_LOGE(TAG, "Failed to open %s for writing", filepath);
+        ESP_LOGE_CAPTURED(ERROR_BIT_56, TAG, "Failed to open %s for writing", filepath);
         return;
     }
 

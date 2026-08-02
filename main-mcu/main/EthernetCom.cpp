@@ -34,6 +34,7 @@
 
 // ioLibrary headers (from WIZnet ioLibrary_Driver component)
 #include "EthernetCom.h"
+#include "ErrorStatus.h"
 
 #include "wizchip_conf.h"
 #include "wizsocket.h"
@@ -123,7 +124,7 @@ static uint8_t wiz_spi_read_byte(void)
     esp_err_t err = spi_device_transmit(WIZ_handle, &t);
     if (err != ESP_OK)
     {
-        ESP_LOGE(TAG, "SPI read transaction failed: %s", esp_err_to_name(err));
+        ESP_LOGE_CAPTURED(ERROR_BIT_00, TAG, "SPI read transaction failed: %s", esp_err_to_name(err));
     }
     ESP_LOGD(TAG, "SPI read byte returned: 0x%02X", t.rx_data[0]);
     return t.rx_data[0];
@@ -138,7 +139,7 @@ static void wiz_spi_write_byte(uint8_t byte)
     esp_err_t err = spi_device_transmit(WIZ_handle, &t);
     if (err != ESP_OK)
     {
-        ESP_LOGE(TAG, "SPI write transaction failed: %s", esp_err_to_name(err));
+        ESP_LOGE_CAPTURED(ERROR_BIT_01, TAG, "SPI write transaction failed: %s", esp_err_to_name(err));
     }
 }
 
@@ -189,7 +190,7 @@ esp_err_t wiz_init(void)
 {
     if (WIZ_handle == NULL)
     {
-        ESP_LOGE(TAG, "W5500 SPI device is not registered");
+        ESP_LOGE_CAPTURED(ERROR_BIT_02, TAG, "W5500 SPI device is not registered");
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -209,7 +210,7 @@ esp_err_t wiz_init(void)
 
     if (wizchip_init(tx_size, rx_size) != 0)
     {
-        ESP_LOGE(TAG, "wizchip_init failed");
+        ESP_LOGE_CAPTURED(ERROR_BIT_03, TAG, "wizchip_init failed");
         return ESP_FAIL;
     }
 
@@ -224,7 +225,7 @@ esp_err_t wiz_init(void)
 
     if (ctlnetwork(CN_SET_NETINFO, &net_info) != 0)
     {
-        ESP_LOGE(TAG, "W5500 network configuration failed");
+        ESP_LOGE_CAPTURED(ERROR_BIT_04, TAG, "W5500 network configuration failed");
         return ESP_FAIL;
     }
 
@@ -241,7 +242,7 @@ esp_err_t wiz_send(const uint8_t *data, size_t length)
     int32_t sent = wizsend(WIZ_SOCKET, (uint8_t *)data, (uint16_t)length);
     if (sent != (int32_t)length)
     {
-        ESP_LOGE(TAG, "send() failed, returned %ld", (long)sent);
+        ESP_LOGE_CAPTURED(ERROR_BIT_05, TAG, "send() failed, returned %ld", (long)sent);
         return ESP_FAIL;
     }
 
@@ -260,7 +261,7 @@ esp_err_t wiz_sendto(uint8_t *target_ip, uint8_t *data, uint8_t length)
     int32_t sent = wizsendto(WIZ_SOCKET, (uint8_t *)data, (uint16_t)length, data, REMOTE_PORT);
     if (sent != (int32_t)length)
     {
-        ESP_LOGE(TAG, "send() failed, returned %ld", (long)sent);
+        ESP_LOGE_CAPTURED(ERROR_BIT_06, TAG, "send() failed, returned %ld", (long)sent);
         return ESP_FAIL;
     }
 
@@ -286,7 +287,7 @@ esp_err_t wiz_receive(uint8_t *buf, size_t buf_size, size_t *bytes_read)
     int32_t result = wizrecv(WIZ_SOCKET, buf, to_read);
     if (result <= 0)
     {
-        ESP_LOGE(TAG, "wizrecv() failed, returned %ld", (long)result);
+        ESP_LOGE_CAPTURED(ERROR_BIT_07, TAG, "wizrecv() failed, returned %ld", (long)result);
         return ESP_FAIL;
     }
 
@@ -333,7 +334,7 @@ esp_err_t wiz_ping(uint8_t *target_ip, const char *message)
 
     if (wizsocket(WIZ_PING_SOCKET, Sn_MR_IPRAW, LOCAL_PORT, 0) != WIZ_PING_SOCKET)
     {
-        ESP_LOGE(TAG, "ping: socket() failed");
+        ESP_LOGE_CAPTURED(ERROR_BIT_08, TAG, "ping: socket() failed");
         return ESP_FAIL;
     }
     wait_socket_command(WIZ_SOCKET);
@@ -354,7 +355,7 @@ esp_err_t wiz_ping(uint8_t *target_ip, const char *message)
 
     if (sent != sizeof(request))
     {
-        ESP_LOGE(TAG, "ping: wizsendto() failed");
+        ESP_LOGE_CAPTURED(ERROR_BIT_09, TAG, "ping: wizsendto() failed");
         return ESP_FAIL;
     }
 
@@ -430,7 +431,7 @@ esp_err_t wiz_connect(uint8_t *remote_ip, uint16_t remote_port)
 
     if (s != WIZ_SOCKET)
     {
-        ESP_LOGE(TAG, "socket() failed, returned %d", s);
+        ESP_LOGE_CAPTURED(ERROR_BIT_10, TAG, "socket() failed, returned %d", s);
         return ESP_FAIL;
     }
 
@@ -467,7 +468,7 @@ getSn_IR(WIZ_SOCKET));
 
     if (ret < 0)
     {
-        ESP_LOGE(TAG, "connect() command failed");
+        ESP_LOGE_CAPTURED(ERROR_BIT_11, TAG, "connect() command failed");
 
         setSn_IR(WIZ_SOCKET, 0xFF);
         //wizclose(WIZ_SOCKET);
@@ -487,7 +488,7 @@ getSn_IR(WIZ_SOCKET));
         // Timeout reported by W5500
         if (ir & Sn_IR_TIMEOUT)
         {
-            ESP_LOGE(TAG,
+            ESP_LOGE_CAPTURED(ERROR_BIT_12, TAG,
                      "TCP timeout. State=0x%02X IR=0x%02X",
                      state, ir);
 
@@ -503,7 +504,7 @@ getSn_IR(WIZ_SOCKET));
         // Software timeout
         if ((xTaskGetTickCount() - start) > pdMS_TO_TICKS(3000))
         {
-            ESP_LOGE(TAG,
+            ESP_LOGE_CAPTURED(ERROR_BIT_13, TAG,
                      "TCP connection timeout. State=0x%02X IR=0x%02X",
                      state, ir);
 

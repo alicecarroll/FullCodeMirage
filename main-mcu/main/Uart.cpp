@@ -8,6 +8,7 @@
 #include "Settings.h" //Pin definitions and hardware configuration
 #include "read_sensors.h" //Data storage
 #include "uart.h" //Initialization/configuration functions
+#include "ErrorStatus.h"
 
 static const char *TAG = "K96_SENSOR";
 
@@ -181,7 +182,7 @@ void check_k96_errors(void)
     
     if (!K96_read_ram(0x001C, 2, response))
     {
-        ESP_LOGE(TAG, "Failed to read ErrorStatus register (0x001C)");
+        ESP_LOGE_CAPTURED(ERROR_BIT_36, TAG, "Failed to read ErrorStatus register (0x001C)");
         return;
     }
 
@@ -193,21 +194,21 @@ void check_k96_errors(void)
         return;
     }
 
-    ESP_LOGE(TAG, "Sensor reported errors! ErrorStatus: 0x%04X", error_status);
+    // ESP_LOGE_CAPTURED(ERROR_BIT_37, TAG, "Sensor reported errors! ErrorStatus: 0x%04X", error_status);
 
-    if (error_status & (1 << 15)) ESP_LOGE(TAG, "- LPL_Calc_Conc_error");
-    if (error_status & (1 << 14)) ESP_LOGE(TAG, "- SPL_Calc_Conc_error");
-    if (error_status & (1 << 13)) ESP_LOGE(TAG, "- MPL_Calc_Conc_error");
-    if (error_status & (1 << 11)) ESP_LOGE(TAG, "- ADuCdie_Temp_error");
-    if (error_status & (1 << 10)) ESP_LOGE(TAG, "- ADuC_NTCs_Temp_error");
-    if (error_status & (1 << 9))  ESP_LOGE(TAG, "- SPI error");
-    if (error_status & (1 << 8))  ESP_LOGE(TAG, "- Logger_error");
+    if (error_status & (1 << 15)) ESP_LOGE_CAPTURED(ERROR_BIT_38, TAG, "- LPL_Calc_Conc_error");
+    if (error_status & (1 << 14)) ESP_LOGE_CAPTURED(ERROR_BIT_39, TAG, "- SPL_Calc_Conc_error");
+    if (error_status & (1 << 13)) ESP_LOGE_CAPTURED(ERROR_BIT_40, TAG, "- MPL_Calc_Conc_error");
+    if (error_status & (1 << 11)) ESP_LOGE_CAPTURED(ERROR_BIT_41, TAG, "- ADuCdie_Temp_error");
+    if (error_status & (1 << 10)) ESP_LOGE_CAPTURED(ERROR_BIT_42, TAG, "- ADuC_NTCs_Temp_error");
+    if (error_status & (1 << 9))  ESP_LOGE_CAPTURED(ERROR_BIT_43, TAG, "- SPI error");
+    if (error_status & (1 << 8))  ESP_LOGE_CAPTURED(ERROR_BIT_44, TAG, "- Logger_error");
     if (error_status & (1 << 7))  ESP_LOGW(TAG, "- Warm Up"); 
-    if (error_status & (1 << 6))  ESP_LOGE(TAG, "- Memory Error");
-    if (error_status & (1 << 4))  ESP_LOGE(TAG, "- SelfDiag error");
-    if (error_status & (1 << 3))  ESP_LOGE(TAG, "- Calibration calculation error");
-    if (error_status & (1 << 2))  ESP_LOGE(TAG, "- Configuration error");
-    if (error_status & (1 << 0))  ESP_LOGE(TAG, "- Fatal error");
+    if (error_status & (1 << 6))  ESP_LOGE_CAPTURED(ERROR_BIT_45, TAG, "- Memory Error");
+    if (error_status & (1 << 4))  ESP_LOGE_CAPTURED(ERROR_BIT_46, TAG, "- SelfDiag error");
+    if (error_status & (1 << 3))  ESP_LOGE_CAPTURED(ERROR_BIT_47, TAG, "- Calibration calculation error");
+    if (error_status & (1 << 2))  ESP_LOGE_CAPTURED(ERROR_BIT_48, TAG, "- Configuration error");
+    if (error_status & (1 << 0))  ESP_LOGE_CAPTURED(ERROR_BIT_49, TAG, "- Fatal error");
 }
 
 //----- Read and update all sensor data in the global struct -----

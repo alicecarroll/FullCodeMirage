@@ -15,6 +15,7 @@
 #include "Multiplexer.h"
 #include "Neopixel.h"
 #include "SystemStatus.h"
+#include "ErrorStatus.h"
 #include "read_sensors.h"
 
 #include "Uart.h"
@@ -58,6 +59,7 @@ uint8_t targetip[4] = {192, 168, 0, 3};
 bool command_received = false;
 bool con_lost = false; // To track connection status
 bool status_ok = true;
+uint64_t captured_errors = 0;
 int32_t LOOP_RETRY_CONNECTION = 10; // Number of loops to wait before retrying connection
 int64_t loss_timestamp_us = -1; // To track when connection was lost for termination
 int loops_since_connection = 0; // To buffer short con losses for stable running
@@ -261,6 +263,7 @@ static esp_err_t send_system_status_packet()
     system_status_packet.thermal_online = thermal_status.online ? 1 : 0;
     system_status_packet.thermal_state = thermal_status.state;
     system_status_packet.thermal_error = thermal_status.error;
+    system_status_packet.captured_errors = captured_errors;
 
     return wiz_send((uint8_t *)&system_status_packet, sizeof(system_status_packet));
 }
@@ -414,7 +417,7 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
     }
     else
     {
-        ESP_LOGE(TAG, "I2C Write transmission failed to Thermal MCU");
+        ESP_LOGE_CAPTURED(ERROR_BIT_50, TAG, "I2C Write transmission failed to Thermal MCU");
     }
 
     //Watchdog reset for thermal
@@ -427,7 +430,7 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
         if (thermal_watchdog_count >= thermal_watchdog_tolerance)
         {
             thermal_mcu_lost = true;
-            ESP_LOGE(TAG, "!!! Thermal MCU considered lost after %d resets. Manual intervention required. !!!", thermal_watchdog_count);
+            ESP_LOGE_CAPTURED(ERROR_BIT_51, TAG, "!!! Thermal MCU considered lost after %d resets. Manual intervention required. !!!", thermal_watchdog_count);
         }
     }
 }
@@ -478,7 +481,7 @@ static void comms_pressure_sensor(SensorData &sensor_data, uint32_t current_time
         }
         else
         {
-            ESP_LOGE(TAG, "Failed to send command 0x%02X to Pressure MCU", command);
+            ESP_LOGE_CAPTURED(ERROR_BIT_52, TAG, "Failed to send command 0x%02X to Pressure MCU", command);
         }
     }
 
@@ -490,7 +493,7 @@ static void comms_pressure_sensor(SensorData &sensor_data, uint32_t current_time
     }
     else
     {
-        ESP_LOGE(TAG, "Pressure MCU failed to respond to sensor query");
+        ESP_LOGE_CAPTURED(ERROR_BIT_53, TAG, "Pressure MCU failed to respond to sensor query");
     }
 
     // Watchdog reset for pressure
@@ -503,7 +506,7 @@ static void comms_pressure_sensor(SensorData &sensor_data, uint32_t current_time
         if (pressure_watchdog_count >= pressure_watchdog_tolerance)
         {
             pressure_mcu_lost = true;
-            ESP_LOGE(TAG, "!!! Pressure MCU considered lost after %d resets. Manual intervention required. !!!", pressure_watchdog_count);
+            ESP_LOGE_CAPTURED(ERROR_BIT_54, TAG, "!!! Pressure MCU considered lost after %d resets. Manual intervention required. !!!", pressure_watchdog_count);
         }
     }
 }
@@ -734,7 +737,7 @@ void loop()
             if (loops_since_connection > LOOP_WO_CONNECTION) // If connection lost for more than LOOP_WO_CONNECTION loops, enter safe mode
             {
                 mode = 2; // Standby
-                ESP_LOGE(TAG, "Connection lost for more than %d loops. Entering standby mode.", LOOP_WO_CONNECTION);
+                ESP_LOGE_CAPTURED(ERROR_BIT_55, TAG, "Connection lost for more than %d loops. Entering standby mode.", LOOP_WO_CONNECTION);
                 //con_lost = true;
                 //connection_lost(&con_lost, &loss_timestamp_us);
                 //wiz_ping(targetip, "Connection lost. Entering safe mode."); // Why are we pinging when the connection is lost? This seems counterintuitive. If the connection is lost, how can we ping? This might be a logic error or a misunderstanding of the system's state.
@@ -796,6 +799,7 @@ void loop()
         esp_err_t esp_err_status_send = send_system_status_packet();
         handle_ethernet_send_status(esp_err_status_send);
     }
+    captured_errors = 0;
 
     // Delay only the remaining time so the full loop period stays near 1 second.
     TickType_t current_time_stop = xTaskGetTickCount();
@@ -814,4 +818,3 @@ void loop()
         vTaskDelay(time_loop);
     }
 }
-

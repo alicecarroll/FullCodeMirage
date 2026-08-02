@@ -8,6 +8,7 @@
 #include "driver/spi_master.h"
 #include "Multiplexer.h"
 #include "initialize.h"
+#include "ErrorStatus.h"
 #include "read_sensors.h"
 #include "esp_log.h"
 #include <stdio.h>
@@ -67,7 +68,7 @@ esp_err_t init_spi()
     esp_err_t err = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
     if (err != ESP_OK)
     {
-        ESP_LOGE("Init", "spi_bus_initialize failed: %s", esp_err_to_name(err));
+        ESP_LOGE_CAPTURED(ERROR_BIT_14, "Init", "spi_bus_initialize failed: %s", esp_err_to_name(err));
         return err;
     }
 
@@ -95,7 +96,7 @@ esp_err_t init_spi()
     err = spi_bus_add_device(SPI2_HOST, &WIZ_cfg, &WIZ_handle);
     if (err != ESP_OK)
     {
-        ESP_LOGE("Init", "spi_bus_add_device(WIZ) failed: %s", esp_err_to_name(err));
+        ESP_LOGE_CAPTURED(ERROR_BIT_15, "Init", "spi_bus_add_device(WIZ) failed: %s", esp_err_to_name(err));
         return err;
     }
 
@@ -116,14 +117,14 @@ esp_err_t init_i2c()
     esp_err_t err = i2c_param_config(I2C_master, &conf);
     if (err != ESP_OK)
     {
-        ESP_LOGE("Init", "i2c_param_config failed: %s", esp_err_to_name(err));
+        ESP_LOGE_CAPTURED(ERROR_BIT_16, "Init", "i2c_param_config failed: %s", esp_err_to_name(err));
         return err;
     }
 
     err = i2c_driver_install(I2C_master, conf.mode, 0, 0, 0);
     if (err != ESP_OK)
     {
-        ESP_LOGE("Init", "i2c_driver_install failed: %s", esp_err_to_name(err));
+        ESP_LOGE_CAPTURED(ERROR_BIT_17, "Init", "i2c_driver_install failed: %s", esp_err_to_name(err));
         return err;
     }
 
@@ -276,8 +277,8 @@ void init_neopixel()
 
     if (err != ESP_OK)
     {
-        ESP_LOGE(
-            "NeoPixel",
+        ESP_LOGE_CAPTURED(
+            ERROR_BIT_18, "NeoPixel",
             "Initialization failed: %s",
             esp_err_to_name(err));
 

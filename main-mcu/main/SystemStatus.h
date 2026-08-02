@@ -16,5 +16,6 @@ typedef struct {
     uint8_t thermal_online;
     uint8_t thermal_state;
     uint8_t thermal_error;
+    uint64_t captured_errors;
 } MainSystemStatusPacket;
 #pragma pack(pop)
