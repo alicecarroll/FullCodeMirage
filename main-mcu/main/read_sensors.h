@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include "esp_err.h"
+#include "ErrorStatus.h"
 
 #pragma pack(push, 1)
 struct SensorData 
@@ -91,7 +92,11 @@ extern MS5803_Calibration pp2_cal;
 void read_ms5803(
     MS5803_Calibration *cal,
     float *pressure,
-    float *temperature);
+    ErrorBit pressure_error_bit,
+    const char *pressure_reading,
+    float *temperature,
+    ErrorBit temperature_error_bit,
+    const char *temperature_reading);
 
 
 void read_sensors();

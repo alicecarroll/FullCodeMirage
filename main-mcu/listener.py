@@ -79,7 +79,7 @@ while True:  # outer loop: always wait for a (new) connection
     try:
         while not stop_event.is_set():  # inner loop: handle this connection until it drops
             # Must match MainSystemStatusPacket in SystemStatus.h exactly:
-            # SensorData (179 bytes) + status tail (27 bytes) = 206 bytes.
+            # SensorData (179 bytes) + status tail (34 bytes) = 213 bytes.
             fmt = (
                 '<3B17f'
                 'ididid'
@@ -88,11 +88,11 @@ while True:  # outer loop: always wait for a (new) connection
                 'HHfHH'
                 'HHfHH'
                 'H'
-                '5BH12BQ'
+                '5BH11B16s'
             )
             size = struct.calcsize(fmt)
-            if size != 206:
-                raise RuntimeError(f"listener packet layout is {size} bytes, expected 206")
+            if size != 213:
+                raise RuntimeError(f"listener packet layout is {size} bytes, expected 213")
 
             data = recv_exact(conn, size)
 
@@ -111,8 +111,9 @@ while True:  # outer loop: always wait for a (new) connection
                 operating_mode, command_received, connection_lost, status_ok,
                 pressure_system_on, heater_mask, thermal_online, thermal_state,
                 thermal_error, pressure_state, pressure_error, relay_mask,
-                pump1_pwm, pump2_pwm, compressor_pwm, actuator_mask,
-                manual_override, valve_open, captured_errors) = values
+                pump1_pwm, pump2_pwm, compressor_pwm,
+                manual_override, valve_open, captured_errors_bytes) = values
+                captured_errors = int.from_bytes(captured_errors_bytes, byteorder="little")
 
                 print(f"Mode: {operating_mode} ({MODE_NAMES.get(operating_mode, 'Unknown')})")
                 print(f"Ethernet command received: {'yes' if command_received else 'no'}")

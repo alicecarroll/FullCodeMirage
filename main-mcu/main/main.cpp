@@ -59,7 +59,7 @@ uint8_t targetip[4] = {192, 168, 0, 3};
 bool command_received = false;
 bool con_lost = false; // To track connection status
 bool status_ok = true;
-uint64_t captured_errors = 0;
+CapturedErrors captured_errors = {};
 int32_t LOOP_RETRY_CONNECTION = 10; // Number of loops to wait before retrying connection
 int64_t loss_timestamp_us = -1; // To track when connection was lost for termination
 int loops_since_connection = 0; // To buffer short con losses for stable running
@@ -625,7 +625,7 @@ void loop()
 
     // I (Jonathan) skipped the current checks, because the current PDB has no functioning current sensor. 
 
-    // The sensor checks are done during read_sensors() or read_k96(). The corresponding errors are saved in the ErrorBits variable.
+    // The error messages for the sensors are handled in read_sensors() and read_k96(). To be able to collect the K96 errors, actions based on these errors are taken after the mode switch.
     
     
 
@@ -765,6 +765,46 @@ void loop()
         //wiz_send(msg, sizeof(msg));
         break;
     }
+
+    // Decode after mode work so this includes K96 errors raised by read_k96().
+    // Add actions as cases in this switch.
+
+    // Manual overrides of all settings here needs to be done, so that the system is not overriding these decisions here.
+    // Every loop these override values should be reset, so that the system can take over again if sensors are coming back online.
+    for (uint8_t bit = 0; bit < 75; ++bit)
+    {
+        if (!captured_error_is_set(captured_errors, bit)) continue;
+
+        switch (decode_captured_error(bit))
+        {
+            case TT1:
+                // Switch autonomous outlet heater off and use last saved value in sensor_data as fallback.
+                break;
+            case TT2:
+                if (!captured_error_is_set(captured_errors, 70)) // If TA2 has no error, use it as fallback
+                {
+                    // Use TA2 as fallback for SD card heater
+                }
+                else {
+                    // Stop autonomous SD card heater. 
+                }
+                break;
+            case TT3:
+                // Switch autonomous inlet heater off and use last saved value in sensor_data as fallback.
+                break;
+            case PP2:
+                // Turn pressurisation system off or set target pressure to low value so that K96 pressure readings can be used as fallback.
+                break;
+            case K96_FATAL:
+                // Turn pressurisation system off and go into standby.
+                break;
+            default:
+                break;
+        }
+    }
+
+
+    captured_errors = {};
     printf("mode %d\n", mode);
 
     //Transmit data over E-Link
@@ -799,8 +839,6 @@ void loop()
         esp_err_t esp_err_status_send = send_system_status_packet();
         handle_ethernet_send_status(esp_err_status_send);
     }
-    captured_errors = 0;
-
     // Delay only the remaining time so the full loop period stays near 1 second.
     TickType_t current_time_stop = xTaskGetTickCount();
     TickType_t elapsed_ticks = current_time_stop - current_time_start;

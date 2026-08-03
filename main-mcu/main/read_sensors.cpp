@@ -14,8 +14,24 @@
 SensorData sensor_data;
 
 static const char *TAG = "read_sensors";
+
+static void log_sensor_error(ErrorBit bit, const char *reading,
+                             const char *operation, esp_err_t err)
+{
+    ESP_LOGE_CAPTURED(bit, TAG, "%s (%s) failed: %s", reading, operation,
+                      esp_err_to_name(err));
+}
+
+static void log_sensor_crc_error(ErrorBit bit, const char *reading,
+                                 const char *quantity)
+{
+    ESP_LOGE_CAPTURED(bit, TAG, "%s %s CRC check failed; data corrupted on I2C bus",
+                      reading, quantity);
+}
+
 // continous sensor
-static void read_tmp1075(float *temperature)
+static void read_tmp1075(float *temperature, ErrorBit error_bit,
+                         const char *reading)
 {
     uint8_t temp_reg = 0x00;
     uint8_t data[2];
@@ -31,7 +47,7 @@ static void read_tmp1075(float *temperature)
 
     if (err != ESP_OK)
     {
-        printf("TMP1075 read failed: %s\n", esp_err_to_name(err));
+        log_sensor_error(error_bit, reading, "TMP1075 read", err);
         return;
     }
 
@@ -48,8 +64,9 @@ static void read_tmp1075(float *temperature)
 }
 
 // ABP2 is single-shot only. Must trigger conversion, wait, then read.
-static void read_abp2(float *pressure,
-                      float *temperature)
+static void read_abp2(float *pressure, ErrorBit pressure_error_bit,
+                      const char *pressure_reading, float *temperature,
+                      ErrorBit temperature_error_bit, const char *temperature_reading)
 {
     uint8_t data[7];
     uint8_t cmd[3] = {0xAA, 0x00, 0x00}; // High precision measurement command
@@ -64,7 +81,10 @@ static void read_abp2(float *pressure,
 
     if (err_write != ESP_OK)
     {
-        printf("ABP2 measurement trigger failed: %s\n", esp_err_to_name(err_write));
+        log_sensor_error(pressure_error_bit, pressure_reading,
+                         "ABP2 measurement trigger", err_write);
+        log_sensor_error(temperature_error_bit, temperature_reading,
+                         "ABP2 measurement trigger", err_write);
         return;
     }
 
@@ -80,7 +100,8 @@ static void read_abp2(float *pressure,
 
     if (err_read != ESP_OK)
     {
-        printf("ABP2 read failed: %s\n", esp_err_to_name(err_read));
+        log_sensor_error(pressure_error_bit, pressure_reading, "ABP2 read", err_read);
+        log_sensor_error(temperature_error_bit, temperature_reading, "ABP2 read", err_read);
         return;
     }
 
@@ -116,7 +137,8 @@ static void read_abp2(float *pressure,
 }
 
 // Continuous temperature sensor
-static void read_tmp117(float *temperature)
+static void read_tmp117(float *temperature, ErrorBit error_bit,
+                        const char *reading)
 {
     uint8_t reg = 0x00;
     uint8_t data[2];
@@ -132,7 +154,7 @@ static void read_tmp117(float *temperature)
 
     if (err != ESP_OK)
     {
-        printf("TMP117 read failed: %s\n", esp_err_to_name(err));
+        log_sensor_error(error_bit, reading, "TMP117 read", err);
         return;
     }
 
@@ -172,7 +194,9 @@ static uint8_t sensirion_crc8(const uint8_t *data, size_t len)
 }
 
 // SHT45 is single-shot only. Must trigger conversion, wait, then read.
-static void read_sht45(float *temperature, float *humidity)
+static void read_sht45(float *temperature, ErrorBit temperature_error_bit,
+                       const char *temperature_reading, float *humidity,
+                       ErrorBit humidity_error_bit, const char *humidity_reading)
 {
     uint8_t cmd = 0xFD; // High precision measurement command
     uint8_t data[6];
@@ -187,7 +211,12 @@ static void read_sht45(float *temperature, float *humidity)
 
     if (err != ESP_OK)
     {
-        printf("SHT45 measurement trigger failed: %s\n", esp_err_to_name(err));
+        if (temperature != nullptr)
+            log_sensor_error(temperature_error_bit, temperature_reading,
+                             "SHT45 measurement trigger", err);
+        if (humidity != nullptr)
+            log_sensor_error(humidity_error_bit, humidity_reading,
+                             "SHT45 measurement trigger", err);
         return;
     }
 
@@ -204,7 +233,12 @@ static void read_sht45(float *temperature, float *humidity)
 
     if (err != ESP_OK)
     {
-        printf("SHT45 data read failed: %s\n", esp_err_to_name(err));
+        if (temperature != nullptr)
+            log_sensor_error(temperature_error_bit, temperature_reading,
+                             "SHT45 data read", err);
+        if (humidity != nullptr)
+            log_sensor_error(humidity_error_bit, humidity_reading,
+                             "SHT45 data read", err);
         return;
     }
 
@@ -212,7 +246,8 @@ static void read_sht45(float *temperature, float *humidity)
     // data[0]=MSB, data[1]=LSB, data[2]=CRC
     if (sensirion_crc8(&data[0], 2) != data[2])
     {
-        printf("SHT45 Temperature CRC Check Failed! Data corrupted on I2C bus.\n");
+        if (temperature != nullptr)
+            log_sensor_crc_error(temperature_error_bit, temperature_reading, "temperature");
         return; // Reject corrupted data
     }
 
@@ -220,7 +255,8 @@ static void read_sht45(float *temperature, float *humidity)
     // data[3]=MSB, data[4]=LSB, data[5]=CRC
     if (sensirion_crc8(&data[3], 2) != data[5])
     {
-        printf("SHT45 Humidity CRC Check Failed! Data corrupted on I2C bus.\n");
+        if (humidity != nullptr)
+            log_sensor_crc_error(humidity_error_bit, humidity_reading, "humidity");
         return; // Reject corrupted data
     }
 
@@ -243,7 +279,10 @@ static void read_sht45(float *temperature, float *humidity)
 MS5803_Calibration pa1_cal;
 MS5803_Calibration pp2_cal;
 
-void read_ms5803(MS5803_Calibration *cal, float *pressure, float *temperature)
+void read_ms5803(MS5803_Calibration *cal, float *pressure,
+                 ErrorBit pressure_error_bit, const char *pressure_reading,
+                 float *temperature, ErrorBit temperature_error_bit,
+                 const char *temperature_reading)
 {
     uint8_t cmd;
     uint8_t data[3];
@@ -263,7 +302,10 @@ void read_ms5803(MS5803_Calibration *cal, float *pressure, float *temperature)
 
     if (err != ESP_OK)
     {
-        printf("MS5803 command write failed: %s\n", esp_err_to_name(err));
+        log_sensor_error(pressure_error_bit, pressure_reading,
+                         "MS5803 pressure command", err);
+        log_sensor_error(temperature_error_bit, temperature_reading,
+                         "MS5803 pressure command", err);
         return;
     }
 
@@ -282,7 +324,8 @@ void read_ms5803(MS5803_Calibration *cal, float *pressure, float *temperature)
 
     if (err != ESP_OK)
     {
-        printf("MS5803 read failed: %s\n", esp_err_to_name(err));
+        log_sensor_error(pressure_error_bit, pressure_reading, "MS5803 pressure read", err);
+        log_sensor_error(temperature_error_bit, temperature_reading, "MS5803 pressure read", err);
         return;
     }
 
@@ -302,7 +345,10 @@ void read_ms5803(MS5803_Calibration *cal, float *pressure, float *temperature)
 
     if (err != ESP_OK)
     {
-        printf("MS5803 conversion command failed: %s\n", esp_err_to_name(err));
+        log_sensor_error(pressure_error_bit, pressure_reading,
+                         "MS5803 temperature command", err);
+        log_sensor_error(temperature_error_bit, temperature_reading,
+                         "MS5803 temperature command", err);
         return;
     }
 
@@ -321,7 +367,8 @@ void read_ms5803(MS5803_Calibration *cal, float *pressure, float *temperature)
 
     if (err != ESP_OK)
     {
-        printf("MS5803 read failed: %s\n", esp_err_to_name(err));
+        log_sensor_error(pressure_error_bit, pressure_reading, "MS5803 temperature read", err);
+        log_sensor_error(temperature_error_bit, temperature_reading, "MS5803 temperature read", err);
         return;
     }
 
@@ -437,7 +484,7 @@ static void read_ds3231(uint8_t *hours, uint8_t *minutes, uint8_t *seconds)
 
     if (err != ESP_OK)
     {
-        printf("RTC read failed: %s\n", esp_err_to_name(err));
+        ESP_LOGE_CAPTURED(ERROR_BIT_74, TAG, "- RTC read failed: %s", esp_err_to_name(err));
         return;
     }
 
@@ -478,7 +525,7 @@ void read_sensors()
         &sensor_data.minutes,
         &sensor_data.seconds);
 
-    read_tmp1075(&sensor_data.Tp2);
+    read_tmp1075(&sensor_data.Tp2, ERROR_BIT_61, "TP2");
 
     // Channel 1: Tp1
     sel_mux_channel(multiplex_Tp1_devT);
@@ -486,7 +533,7 @@ void read_sensors()
 
     //vTaskDelay(pdMS_TO_TICKS(20));
 
-    read_tmp1075(&sensor_data.Tp1);
+    read_tmp1075(&sensor_data.Tp1, ERROR_BIT_60, "TP1");
 
     // Channel 2: Ambient sensors (temperature, humidity, preassure)
     sel_mux_channel(multiplex_Ambient);
@@ -494,16 +541,13 @@ void read_sensors()
 
     //vTaskDelay(pdMS_TO_TICKS(20));
 
-    read_tmp117(&sensor_data.Ta1);
+    read_tmp117(&sensor_data.Ta1, ERROR_BIT_69, "TA1");
 
-    read_sht45(
-        &sensor_data.Ta3,
-        &sensor_data.Ha1);
+    read_sht45(&sensor_data.Ta3, ERROR_BIT_71, "TA3",
+               &sensor_data.Ha1, ERROR_BIT_72, "HA1");
 
-    read_ms5803(
-        &pa1_cal,
-        &sensor_data.Pa1,
-        &sensor_data.Ta2);
+    read_ms5803(&pa1_cal, &sensor_data.Pa1, ERROR_BIT_73, "PA1",
+                &sensor_data.Ta2, ERROR_BIT_70, "TA2");
 
 
     // Channel 3: Tp4 + Pp1 + Tp5 + Pp2
@@ -513,9 +557,8 @@ void read_sensors()
     //vTaskDelay(pdMS_TO_TICKS(20));
 
     // ABP2 pipe pressure + temperature
-    read_abp2(
-        &sensor_data.Pp1,
-        &sensor_data.Tp4);
+    read_abp2(&sensor_data.Pp1, ERROR_BIT_66, "PP1",
+              &sensor_data.Tp4, ERROR_BIT_63, "TP4");
 
     // Chamber temperature, but currently not connected to anything
     //read_sht45(
@@ -523,17 +566,15 @@ void read_sensors()
     //    nullptr);
 
     // Chamber pressure
-    read_ms5803(
-        &pp2_cal,
-        &sensor_data.Pp2,
-        &sensor_data.Tp5);
+    read_ms5803(&pp2_cal, &sensor_data.Pp2, ERROR_BIT_67, "PP2",
+                &sensor_data.Tp5, ERROR_BIT_64, "TP5");
 
     // Channel 4: Tp3
     sel_mux_channel(multiplex_Tp3);
     //printf("Switching to MUX channel: %i\n", multiplex_Tp3);
 
     //vTaskDelay(pdMS_TO_TICKS(20));
-    read_tmp1075(&sensor_data.Tp3);
+    read_tmp1075(&sensor_data.Tp3, ERROR_BIT_62, "TP3");
 
     // Channel 5: Tt1 + Tt2
     sel_mux_channel(multiplex_Outlet);
@@ -541,11 +582,10 @@ void read_sensors()
 
     //vTaskDelay(pdMS_TO_TICKS(20));
 
-    read_sht45(
-        &sensor_data.Tt1,
-        nullptr);
+    read_sht45(&sensor_data.Tt1, ERROR_BIT_57, "TT1",
+               nullptr, ERROR_BIT_57, "TT1");
     //vTaskDelay(pdMS_TO_TICKS(20));
-    read_tmp1075(&sensor_data.Tt2); 
+    read_tmp1075(&sensor_data.Tt2, ERROR_BIT_58, "TT2");
 
     // Channel 6: Tp6 + Pp3
     sel_mux_channel(multiplex_Tp6_Pp3);
@@ -553,9 +593,8 @@ void read_sensors()
 
     //vTaskDelay(pdMS_TO_TICKS(20));
     
-    read_abp2(
-        &sensor_data.Pp3,
-        &sensor_data.Tp6);
+    read_abp2(&sensor_data.Pp3, ERROR_BIT_68, "PP3",
+              &sensor_data.Tp6, ERROR_BIT_65, "TP6");
 
     // Channel 7: Tt3
     sel_mux_channel(multiplex_Tt3_devP);
@@ -563,8 +602,7 @@ void read_sensors()
 
     //vTaskDelay(pdMS_TO_TICKS(20));
 
-    read_tmp117(
-        &sensor_data.Tt3);
+    read_tmp117(&sensor_data.Tt3, ERROR_BIT_59, "TT3");
 }
 
 /*
