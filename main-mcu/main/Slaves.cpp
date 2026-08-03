@@ -78,7 +78,7 @@ bool slave_send_data(
     sel_mux_channel(mux_channel);
 
     uint8_t packet[6];
-    packet[0] = Slave_packet_data;
+    packet[0] = PRESSURE_PACKET_SENSORS;
     packet[1] = data_id;
     memcpy(&packet[2], &value, sizeof(float));
 
@@ -110,7 +110,7 @@ bool slave_send_command(
     sel_mux_channel(mux_channel);
 
     uint8_t packet[2];
-    packet[0] = Slave_packet_command;
+    packet[0] = PRESSURE_PACKET_COMMANDS;
     packet[1] = command;
 
     esp_err_t err = i2c_master_write_to_device(
@@ -150,7 +150,7 @@ bool slave_send_complex_state(
     // Byte 1: Control flags (Bit 0: Emergency, Bit 1: Auto/Manual, Bit 2: Pressure System)
     // Byte 2: Heater Activation Bitmask (Bit 0 = Heater 1, Bit 1 = Heater 2...)
     uint8_t packet[3];
-    packet[0] = Slave_packet_command; 
+    packet[0] = PRESSURE_PACKET_COMMANDS;
     
     packet[1] = 0;
     if (emergency_stop)      packet[1] |= (1 << 0);
@@ -185,7 +185,7 @@ bool slave_update_setting(
     }
 
     uint8_t packet[6];
-    packet[0] = Slave_packet_setting;
+    packet[0] = PRESSURE_PACKET_SETTINGS;
     packet[1] = setting;
     memcpy(&packet[2], &value, sizeof(float));
 
@@ -424,7 +424,7 @@ bool pressure_send_sensors(
     const int package_length = 16;
     uint8_t package[package_length];
 
-    package[0] = Slave_packet_data;
+    package[0] = PRESSURE_PACKET_SENSORS;
 
     int16_t sensor_ints[7] = {
         (int16_t)(sensor_data.Pp3 * SENSOR_SCALE),
@@ -456,7 +456,7 @@ bool pressure_send_sensors(
 bool pressure_send_command(
     SlaveDevice slave, 
     uint8_t cmd,
-    uint8_t info_bit //Default to 0 if not used
+    uint8_t info_bit
 ) {
     uint8_t mux_channel; 
     gpio_num_t reset_pin;
@@ -464,17 +464,15 @@ bool pressure_send_command(
     if (!select_slave(slave, &mux_channel, &reset_pin)) return false;
     if (sel_mux_channel(mux_channel) != ESP_OK) return false;
     
-    // Normal commands are [opcode, command, CRC]. Mode/PWM commands with an
-    // info byte are [opcode, command, info, CRC].
-    const int package_length = info_bit == 0 ? 3 : 4;
-    uint8_t package[package_length];
+    // Every command has the same frame shape. The info byte is reserved for
+    // PWM values today and mode values in the future; it is never omitted.
+    uint8_t package[PRESSURE_COMMAND_FRAME_SIZE];
 
-    package[0] = Slave_packet_command;
+    package[0] = PRESSURE_PACKET_COMMANDS;
     package[1] = cmd;
-    if (package_length == 4) {
-        package[2] = info_bit;
-    }
-    package[package_length - 1] = computeCRC8(package, package_length - 1);
+    package[2] = info_bit;
+    package[PRESSURE_COMMAND_FRAME_SIZE - 1] =
+        computeCRC8(package, PRESSURE_COMMAND_FRAME_SIZE - 1);
 
     esp_err_t err = i2c_master_write_to_device(
         I2C_master, Slave_MCU_addr, package, sizeof(package), 100 / portTICK_PERIOD_MS

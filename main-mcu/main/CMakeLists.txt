@@ -16,6 +16,7 @@ idf_component_register(
 
     INCLUDE_DIRS
         "."
+        "../../protocol"
 
     REQUIRES
         # Logging

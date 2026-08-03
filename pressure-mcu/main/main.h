@@ -42,6 +42,12 @@ void pressure_init();
 // Called every loop
 void pressure_update();
 
+// Called by the communication task when the Main MCU sends its sensor frame.
+void pressure_update_external_sensors(const float sensors[7]);
+
+// Apply one canonical command frame.
+void pressure_execute_command(uint8_t command, uint8_t info);
+
 
 // Commands from Main MCU
 void pressure_cmd_standby();

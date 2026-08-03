@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include "pressure_protocol.h"
 
 struct SensorData;
 
@@ -16,14 +17,6 @@ typedef enum
 
 } SlaveDevice;
 
-// Packet types
-typedef enum
-{
-    Slave_packet_data     = 0x01,
-    Slave_packet_command  = 0x02,
-    Slave_packet_setting  = 0x03
-
-} PacketType;
 
 
 // Telemetry/Data IDs. I am not sure that one struct for both slaves is the way to go. It is not used atm I think (Jonathan, 26.7.)
@@ -64,36 +57,7 @@ typedef enum
 
 
 // Commands
-typedef enum
-{
-    CMD_VPUMP1_OFF       = 0x01,
-    CMD_VPUMP1_ON        = 0x02,
-
-    CMD_VPUMP2_OFF       = 0x03,
-    CMD_VPUMP2_ON        = 0x04,
-    CMD_COMPRESSOR_OFF    = 0x05,
-    CMD_COMPRESSOR_ON     = 0x06,
-
-    CMD_OPEN_SHUTTERS   = 0x07,
-    CMD_CLOSE_SHUTTERS  = 0x08,
-
-    CMD_STANDBY         = 0x09,
-    CMD_MEASUREMENTS    = 0x0A,
-
-    CMD_HEATER_ON       = 0x0B,
-    CMD_HEATER_OFF      = 0x0C,
-
-    CMD_OPEN_RELAY1      = 0x0D,
-    CMD_CLOSE_RELAY1     = 0x0E,
-    CMD_OPEN_RELAY2      = 0x0F,
-    CMD_CLOSE_RELAY2     = 0x10,
-    CMD_OPEN_RELAY3      = 0x11,
-    CMD_CLOSE_RELAY3     = 0x12,
-    CMD_OPEN_RELAY4      = 0x13,
-    CMD_CLOSE_RELAY4     = 0x14,
-    CMD_SET_MODE         = 0x15
-
-} SlaveCommands;
+using SlaveCommands = PressureCommand;
 
 // Settings
 typedef enum

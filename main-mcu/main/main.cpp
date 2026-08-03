@@ -83,24 +83,15 @@ struct CommandMapping
 
 static const CommandMapping pressure_commands[] =
 {
-    {"RELAY 1 ON",  CMD_OPEN_RELAY1},
-    {"RELAY 1 OFF", CMD_CLOSE_RELAY1},
-    {"RELAY 2 ON",  CMD_OPEN_RELAY2},
-    {"RELAY 2 OFF", CMD_CLOSE_RELAY2},
-    {"RELAY 3 ON",  CMD_OPEN_RELAY3},
-    {"RELAY 3 OFF", CMD_CLOSE_RELAY3},
-    {"RELAY 4 ON",  CMD_OPEN_RELAY4},
-    {"RELAY 4 OFF", CMD_CLOSE_RELAY4},
-    {"SHUTTERS OPEN",  CMD_OPEN_SHUTTERS},
-    {"SHUTTERS CLOSE", CMD_CLOSE_SHUTTERS},
-    {"VALVE OPEN",     CMD_OPEN_SHUTTERS},
-    {"VALVE CLOSE",    CMD_CLOSE_SHUTTERS},
-    {"PUMP 1 ON", CMD_VPUMP1_ON},
-    {"PUMP 1 OFF", CMD_VPUMP1_OFF},
-    {"PUMP 2 ON", CMD_VPUMP2_ON},
-    {"PUMP 2 OFF", CMD_VPUMP2_OFF},
-    {"COMPRESSOR ON", CMD_COMPRESSOR_ON},
-    {"COMPRESSOR OFF", CMD_COMPRESSOR_OFF}
+    {"RELAY 1 ON",  PRESSURE_CMD_RELAY1_ON}, {"RELAY 1 OFF", PRESSURE_CMD_RELAY1_OFF},
+    {"RELAY 2 ON",  PRESSURE_CMD_RELAY2_ON}, {"RELAY 2 OFF", PRESSURE_CMD_RELAY2_OFF},
+    {"RELAY 3 ON",  PRESSURE_CMD_RELAY3_ON}, {"RELAY 3 OFF", PRESSURE_CMD_RELAY3_OFF},
+    {"RELAY 4 ON",  PRESSURE_CMD_RELAY4_ON}, {"RELAY 4 OFF", PRESSURE_CMD_RELAY4_OFF},
+    {"SHUTTERS OPEN", PRESSURE_CMD_VALVE_OPEN}, {"SHUTTERS CLOSE", PRESSURE_CMD_VALVE_CLOSE},
+    {"VALVE OPEN", PRESSURE_CMD_VALVE_OPEN}, {"VALVE CLOSE", PRESSURE_CMD_VALVE_CLOSE},
+    {"PUMP 1 ON", PRESSURE_CMD_PUMP1_ON}, {"PUMP 1 OFF", PRESSURE_CMD_PUMP1_OFF},
+    {"PUMP 2 ON", PRESSURE_CMD_PUMP2_ON}, {"PUMP 2 OFF", PRESSURE_CMD_PUMP2_OFF},
+    {"COMPRESSOR ON", PRESSURE_CMD_COMPRESSOR_ON}, {"COMPRESSOR OFF", PRESSURE_CMD_COMPRESSOR_OFF}
 };
 
 static void set_heater_bit(uint8_t heater_index, bool enabled)
@@ -280,7 +271,6 @@ static esp_err_t send_system_status_packet()
     system_status_packet.pressure_pump1_pwm = pressure_status.pump1_pwm;
     system_status_packet.pressure_pump2_pwm = pressure_status.pump2_pwm;
     system_status_packet.pressure_compressor_pwm = pressure_status.compressor_pwm;
-    system_status_packet.pressure_actuator_mask = pressure_status.relay_mask & 0x80 ? 0x01 : 0x00;
     system_status_packet.pressure_manual_override = pressure_status.manual_override ? 1 : 0;
     system_status_packet.pressure_valve_open = pressure_status.valve_open ? 1 : 0;
     system_status_packet.captured_errors = captured_errors;
@@ -467,7 +457,7 @@ static void comms_pressure_sensor(SensorData &sensor_data, uint32_t current_time
 
     // Send the actual Main-MCU mode, including its numeric value. The
     // pressure MCU uses mode 3/2 to control relay 2/3 automatically.
-    pressure_slave_commands.push_front(CMD_SET_MODE);
+    pressure_slave_commands.push_front(PRESSURE_CMD_SET_MODE);
 
     // Check if there are any commands to send to the pressure slave
     auto commands = pressure_slave_commands;
@@ -476,10 +466,10 @@ static void comms_pressure_sensor(SensorData &sensor_data, uint32_t current_time
     {
         ESP_LOGI(TAG, "Sending command 0x%02X to Pressure MCU", command);
         // Send the command to the pressure slave
-        const bool is_mode_command = command == CMD_SET_MODE;
-        const bool sent = is_mode_command
-            ? pressure_send_command(pressure_mcu, static_cast<uint8_t>(command), static_cast<uint8_t>(mode))
-            : pressure_send_command(pressure_mcu, static_cast<uint8_t>(command));
+        const bool is_mode_command = command == PRESSURE_CMD_SET_MODE;
+        const bool sent = pressure_send_command(
+            pressure_mcu, static_cast<uint8_t>(command),
+            is_mode_command ? static_cast<uint8_t>(mode) : 0);
         if (sent)
         {
             ESP_LOGI(TAG, "Command 0x%02X sent successfully to Pressure MCU", command);
@@ -635,8 +625,9 @@ void loop()
 
     // I (Jonathan) skipped the current checks, because the current PDB has no functioning current sensor. 
 
-    // I (Jonathan) skipped the sensor checks, because I do not know what should happen if a sensor is not working. 
-    // For testing it is also good to have the system continue running even if a sensor is not working.
+    // The sensor checks are done during read_sensors() or read_k96(). The corresponding errors are saved in the ErrorBits variable.
+    
+    
 
     // Mode dependent actions
     printf("mode %d\n", mode);
