@@ -29,7 +29,7 @@ extern "C"
     /**
      * @brief  Interpret and execute a received command from the Ethernet buffer.
      */
-    void handle_command(void);
+    bool handle_command(void);
 
 #ifdef __cplusplus
 }

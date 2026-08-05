@@ -79,7 +79,7 @@ while True:  # outer loop: always wait for a (new) connection
     try:
         while not stop_event.is_set():  # inner loop: handle this connection until it drops
             # Must match MainSystemStatusPacket in SystemStatus.h exactly:
-            # SensorData (179 bytes) + status tail (34 bytes) = 213 bytes.
+            # SensorData (179 bytes) + status tail (37 bytes) = 216 bytes.
             fmt = (
                 '<3B17f'
                 'ididid'
@@ -88,11 +88,11 @@ while True:  # outer loop: always wait for a (new) connection
                 'HHfHH'
                 'HHfHH'
                 'H'
-                '5BH11B16s'
+                '5BH14B16s'
             )
             size = struct.calcsize(fmt)
-            if size != 213:
-                raise RuntimeError(f"listener packet layout is {size} bytes, expected 213")
+            if size != 216:
+                raise RuntimeError(f"listener packet layout is {size} bytes, expected 216")
 
             data = recv_exact(conn, size)
 
@@ -112,7 +112,8 @@ while True:  # outer loop: always wait for a (new) connection
                 pressure_system_on, heater_mask, thermal_online, thermal_state,
                 thermal_error, pressure_state, pressure_error, relay_mask,
                 pump1_pwm, pump2_pwm, compressor_pwm,
-                manual_override, valve_open, captured_errors_bytes) = values
+                manual_override, valve_open, onboard_logging, storage_free_pct,
+                controller_state, captured_errors_bytes) = values
                 captured_errors = int.from_bytes(captured_errors_bytes, byteorder="little")
 
                 print(f"Mode: {operating_mode} ({MODE_NAMES.get(operating_mode, 'Unknown')})")
@@ -121,9 +122,11 @@ while True:  # outer loop: always wait for a (new) connection
                 print(f"Pressure system active: {'yes' if pressure_system_on else 'no'} | Active heaters: {describe_heaters(heater_mask)}")
                 print(f"Thermal MCU: {'online' if thermal_online else 'offline'} | state={thermal_state} | error={thermal_error}")
                 print(f"Pressure MCU: state={pressure_state} | error={pressure_error} | relays=0x{relay_mask:02X} | "
-                      f"VP1={pump1_pwm}/255 | VP2={pump2_pwm}/255 | compressor={compressor_pwm}/255 | "
+                      f"VP1={pump1_pwm}% | VP2={pump2_pwm}% | compressor={compressor_pwm}% | "
                       f"valve={'open' if valve_open else 'closed'} | "
                       f"manual_override={'yes' if manual_override else 'no'}")
+                print(f"SD logging: {'yes' if onboard_logging else 'no'} | free={storage_free_pct}% | "
+                      f"controller_state={controller_state}")
 
                 print(f"Time: {hours:02}:{minutes:02}:{seconds:02}")
                 print(f"Ambient: Ta1(Tmp117)= {Ta1:.2}, Pa1(MS5803)={Pa1:.6f}, Ta2(MS5803)={Ta2:.6f}, Ha1={Ha1:.2f}, Ta3(SHT45)={Ta3:.2f}") 

@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include "esp_err.h"
 #include <dirent.h>
 #include "read_sensors.h"
@@ -38,6 +39,8 @@ extern "C"
 
     esp_err_t sd_mount(void);
     void sd_unmount(void);
+    bool sd_is_mounted(void);
+    bool sd_get_free_percent(uint8_t *free_percent);
     void buffer_SD_data_csv(SensorData *sensor_data);
     void buffer_SD_data_flush(void);
 

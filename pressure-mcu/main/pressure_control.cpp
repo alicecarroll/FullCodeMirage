@@ -13,11 +13,13 @@ bool relay_manual = false;
 uint8_t applied_mode = 0;
 float target_pressure = 3.0f;
 float inlet_upper = 1.0f, inlet_lower = 0.2f;
+constexpr float FLUSH_COMPLETE_PRESSURE_BAR = 0.05f;
 constexpr uint8_t ERR_NONE = 0, ERR_CHAMBER_SENSOR = 1, ERR_INLET_SENSOR = 2;
 
-void set_pump1(uint8_t pwm) { pressure_pump1_set(pwm); status.pump1_pwm = pwm; }
-void set_pump2(uint8_t pwm) { pressure_pump2_set(pwm); status.pump2_pwm = pwm; }
-void set_compressor(uint8_t pwm) { pressure_compressor_set(pwm); status.compressor_pwm = pwm; }
+uint8_t clamp_pwm(uint8_t pwm) { return pwm > 100 ? 100 : pwm; }
+void set_pump1(uint8_t pwm) { pwm = clamp_pwm(pwm); pressure_pump1_set(pwm); status.pump1_pwm = pwm; }
+void set_pump2(uint8_t pwm) { pwm = clamp_pwm(pwm); pressure_pump2_set(pwm); status.pump2_pwm = pwm; }
+void set_compressor(uint8_t pwm) { pwm = clamp_pwm(pwm); pressure_compressor_set(pwm); status.compressor_pwm = pwm; }
 void set_valve(bool open) { pressure_valve_set(open); status.valve_open = open; }
 void set_relay(uint8_t relay, bool on) {
     pressure_relay_set(relay, on);
@@ -27,6 +29,13 @@ void set_relay(uint8_t relay, bool on) {
 void clear_overrides() { manual_pump1 = manual_pump2 = manual_compressor = manual_valve = false; relay_manual = false; }
 void set_measurement_outputs() {
     set_pump1(100); set_pump2(100); set_compressor(100);
+}
+void stop_pressure_train(bool open_valve) {
+    clear_overrides();
+    set_pump1(0);
+    set_pump2(0);
+    set_compressor(0);
+    set_valve(open_valve);
 }
 void safe_off() {
     if (!manual_pump1) set_pump1(0);
@@ -38,8 +47,18 @@ void mode_changed(uint8_t mode) {
     if (mode == applied_mode) return;
     applied_mode = mode;
     clear_overrides();
-    if (mode == PRESSURE_MODE_MEASUREMENTS) { set_relay(2, true); set_relay(3, true); set_measurement_outputs(); }
-    else if (mode == PRESSURE_MODE_STANDBY) { set_relay(2, false); set_relay(3, false); safe_off(); }
+    status.error = ERR_NONE;
+    if (mode == PRESSURE_MODE_MEASUREMENTS) {
+        status.state = PRESSURE_PREPRESSURISATION;
+        set_relay(2, true);
+        set_relay(3, true);
+        set_measurement_outputs();
+    } else if (mode == PRESSURE_MODE_STANDBY) {
+        status.state = PRESSURE_STANDBY;
+        set_relay(2, false);
+        set_relay(3, false);
+        safe_off();
+    }
 }
 }
 
@@ -75,9 +94,34 @@ void pressure_execute_command(uint8_t command, uint8_t info) {
         case PRESSURE_CMD_VALVE_CLOSE: manual_valve = true; set_valve(false); break;
         case PRESSURE_CMD_SET_MODE:
             mode_changed(info);
-            status.state = info == PRESSURE_MODE_STANDBY ? PRESSURE_STANDBY : PRESSURE_PREPRESSURISATION;
+            break;
+        case PRESSURE_CMD_START_PRESSURISATION:
+            clear_overrides();
+            status.state = PRESSURE_PREPRESSURISATION;
             status.error = ERR_NONE;
-            if (status.state == PRESSURE_STANDBY) safe_off();
+            set_valve(false);
+            set_measurement_outputs();
+            break;
+        case PRESSURE_CMD_STOP_PRESSURISATION:
+            stop_pressure_train(false);
+            status.state = PRESSURE_STANDBY;
+            status.error = ERR_NONE;
+            break;
+        case PRESSURE_CMD_FLUSH_CHAMBER:
+            clear_overrides();
+            status.state = PRESSURE_FLUSHING;
+            status.error = ERR_NONE;
+            set_pump1(100);
+            set_pump2(100);
+            set_compressor(0);
+            set_valve(true);
+            break;
+        case PRESSURE_CMD_SAFE_SHUTDOWN:
+            stop_pressure_train(true);
+            set_relay(2, false);
+            set_relay(3, false);
+            status.state = PRESSURE_STANDBY;
+            status.error = ERR_NONE;
             break;
         case PRESSURE_CMD_RELAY1_ON: relay_manual = true; set_relay(1, true); break;
         case PRESSURE_CMD_RELAY1_OFF: relay_manual = true; set_relay(1, false); break;
@@ -112,9 +156,9 @@ void pressure_update() {
             return;
         }
         if (!manual_valve) set_valve(false);
-        if (!manual_compressor) set_compressor(255);
-        if (!manual_pump1) set_pump1(255);
-        if (!manual_pump2) set_pump2(255);
+        if (!manual_compressor) set_compressor(100);
+        if (!manual_pump1) set_pump1(100);
+        if (!manual_pump2) set_pump2(100);
         if (status.compressor_inlet_pressure >= inlet_upper) {
             if (!manual_pump1) set_pump1(0);
             if (!manual_pump2) set_pump2(0);
@@ -124,11 +168,21 @@ void pressure_update() {
         if (!manual_pump1) set_pump1(0);
         if (!manual_pump2) set_pump2(0);
         if (!manual_valve) set_valve(true);
-        if (!manual_compressor) set_compressor(255);
+        if (!manual_compressor) set_compressor(100);
         if (status.compressor_inlet_pressure <= inlet_lower) {
             if (!manual_compressor) set_compressor(0);
             if (!manual_valve) set_valve(false);
             status.state = PRESSURE_PREPRESSURISATION;
+        }
+    } else if (status.state == PRESSURE_FLUSHING) {
+        set_pump1(100);
+        set_pump2(100);
+        set_compressor(0);
+        set_valve(true);
+        if (external_sensors_valid && status.chamber_pressure <= FLUSH_COMPLETE_PRESSURE_BAR) {
+            stop_pressure_train(false);
+            status.state = PRESSURE_STANDBY;
+            ESP_LOGI("pressure", "chamber flush complete at %.3f bar", status.chamber_pressure);
         }
     } else if (status.state == PRESSURE_ERROR) {
         safe_off();

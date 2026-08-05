@@ -6,6 +6,8 @@
 #include <cctype>
 #include <forward_list>
 
+#include "esp_system.h"
+
 #include "Settings.h"
 #include "ConnectionLoss.h"
 #include "EthernetCom.h"
@@ -69,6 +71,8 @@ static uint8_t active_heater_mask = 0x00;
 static bool pressure_system_active = false;
 static bool status_update_requested = false;
 static bool status_packet_sent_this_loop = false;
+static MainControllerState controller_state = MAIN_CONTROLLER_BOOTING;
+static bool restart_requested = false;
 static std::string ethernet_command_text;
 bool manual_mode_overwrite = false; // To track if manual mode overwrite is active
 
@@ -95,25 +99,32 @@ static const CommandMapping pressure_commands[] =
     {"VALVE OPEN", PRESSURE_CMD_VALVE_OPEN}, {"VALVE CLOSE", PRESSURE_CMD_VALVE_CLOSE},
     {"PUMP 1 ON", PRESSURE_CMD_PUMP1_ON}, {"PUMP 1 OFF", PRESSURE_CMD_PUMP1_OFF},
     {"PUMP 2 ON", PRESSURE_CMD_PUMP2_ON}, {"PUMP 2 OFF", PRESSURE_CMD_PUMP2_OFF},
-    {"COMPRESSOR ON", PRESSURE_CMD_COMPRESSOR_ON}, {"COMPRESSOR OFF", PRESSURE_CMD_COMPRESSOR_OFF}
+    {"COMPRESSOR ON", PRESSURE_CMD_COMPRESSOR_ON}, {"COMPRESSOR OFF", PRESSURE_CMD_COMPRESSOR_OFF},
+    {"PRESSURE ON", PRESSURE_CMD_START_PRESSURISATION},
+    {"PRESSURE OFF", PRESSURE_CMD_STOP_PRESSURISATION},
+    {"FLUSH CHAMBER", PRESSURE_CMD_FLUSH_CHAMBER}
 };
 
-static bool queue_pwm_command(const std::string &command)
+enum class CommandParseResult { NotMatched, Accepted, Rejected };
+
+static CommandParseResult queue_pwm_command(const std::string &command)
 {
     int pump = 0;
     int pwm = 0;
     char extra = '\0';
-    if (std::sscanf(command.c_str(), "PWM%d %d %c", &pump, &pwm, &extra) != 2) return false;
+    if (std::sscanf(command.c_str(), "PWM%d %d %c", &pump, &pwm, &extra) != 2) {
+        return CommandParseResult::NotMatched;
+    }
     if (pump < 1 || pump > 3 || pwm < 0 || pwm > 100) {
         ESP_LOGW(TAG, "PWM must be pwm1/pwm2/pwm3 with a value from 0 to 100");
-        return true;
+        return CommandParseResult::Rejected;
     }
     const uint8_t commands[] = {
         PRESSURE_CMD_PUMP1_PWM, PRESSURE_CMD_PUMP2_PWM, PRESSURE_CMD_COMPRESSOR_PWM
     };
     pressure_slave_commands.push_front({commands[pump - 1], static_cast<uint8_t>(pwm)});
     ESP_LOGI(TAG, "Queued PWM%d = %d%%", pump, pwm);
-    return true;
+    return CommandParseResult::Accepted;
 }
 
 static void set_heater_bit(uint8_t heater_index, bool enabled)
@@ -160,19 +171,31 @@ static void trim_in_place(std::string &text)
         text.pop_back();
     }
 }
-void handle_command()
+static void enter_safe_shutdown(MainControllerState state)
+{
+    mode = 2;
+    manual_mode_overwrite = true;
+    active_heater_mask = 0x00;
+    pressure_slave_commands.push_front({PRESSURE_CMD_SAFE_SHUTDOWN, 0});
+    controller_state = state;
+}
+
+bool handle_command()
 {
     ethernet_command_text = to_upper_copy(ethernet_recieve_buf, ethernet_recieve_buf_bytes_read);
 
     if (ethernet_command_text.empty())
     {
         ESP_LOGW(TAG, "Received empty ethernet command");
-        return;
+        return false;
     }
 
     trim_in_place(ethernet_command_text);
 
-    if (queue_pwm_command(ethernet_command_text)) return;
+    const CommandParseResult pwm_result = queue_pwm_command(ethernet_command_text);
+    if (pwm_result != CommandParseResult::NotMatched) {
+        return pwm_result == CommandParseResult::Accepted;
+    }
 
     int heater_index = 0;
 
@@ -188,7 +211,7 @@ void handle_command()
         mode = 3;
         manual_mode_overwrite = true;
         ESP_LOGI(TAG, "Mode changed to MEASUREMENTS");
-        return;
+        return true;
     }
 
     if (ethernet_command_text == "MODE STANDBY")
@@ -196,28 +219,28 @@ void handle_command()
         mode = 2;
         manual_mode_overwrite = true;
         ESP_LOGI(TAG, "Mode changed to STANDBY");
-        return;
+        return true;
     }
 
     if (ethernet_command_text == "MODE OVERRIDE RESET")
     {
         manual_mode_overwrite = false;
         ESP_LOGI(TAG, "Manual mode overwrite reset");
-        return;
+        return true;
     }
 
     if (ethernet_command_text == "HEATER ON")
     {
         set_heater_bit(0, true);
         ESP_LOGI(TAG, "Heater 1 turned ON. Mask now 0x%02X", active_heater_mask);
-        return;
+        return true;
     }
 
     if (ethernet_command_text == "HEATER OFF")
     {
         set_heater_bit(0, false);
         ESP_LOGI(TAG, "Heater 1 turned OFF. Mask now 0x%02X", active_heater_mask);
-        return;
+        return true;
     }
 
     if (sscanf(ethernet_command_text.c_str(), "HEATER ON %d", &heater_index) == 1)
@@ -231,7 +254,7 @@ void handle_command()
         {
             ESP_LOGW(TAG, "Invalid heater index in command: %s", ethernet_command_text.c_str());
         }
-        return;
+        return heater_index >= 1 && heater_index <= 8;
     }
 
     if (sscanf(ethernet_command_text.c_str(), "HEATER OFF %d", &heater_index) == 1)
@@ -245,21 +268,37 @@ void handle_command()
         {
             ESP_LOGW(TAG, "Invalid heater index in command: %s", ethernet_command_text.c_str());
         }
-        return;
+        return heater_index >= 1 && heater_index <= 8;
     }
 
     if (ethernet_command_text == "HEATER ALL ON")
     {
         active_heater_mask = 0xFF;
         ESP_LOGI(TAG, "All heaters turned ON");
-        return;
+        return true;
     }
 
     if (ethernet_command_text == "HEATER ALL OFF")
     {
         active_heater_mask = 0x00;
         ESP_LOGI(TAG, "All heaters turned OFF");
-        return;
+        return true;
+    }
+
+    if (ethernet_command_text == "EMERGENCY STOP" || ethernet_command_text == "SAFE SHUTDOWN" || ethernet_command_text == "SHUTDOWN")
+    {
+        enter_safe_shutdown(MAIN_CONTROLLER_SAFE_SHUTDOWN);
+        buffer_SD_data_flush();
+        ESP_LOGW(TAG, "Safe shutdown commanded from ground");
+        return true;
+    }
+
+    if (ethernet_command_text == "REBOOT" || ethernet_command_text == "RESTART MAIN")
+    {
+        enter_safe_shutdown(MAIN_CONTROLLER_RESTARTING);
+        restart_requested = true;
+        ESP_LOGW(TAG, "Main controller restart scheduled after acknowledgement telemetry");
+        return true;
     }
 
     for (const auto &entry : pressure_commands)
@@ -268,12 +307,13 @@ void handle_command()
         {
             ESP_LOGI(TAG, "%s command received", entry.text);
             pressure_slave_commands.push_front({entry.cmd, 0});
-            return;
+            return true;
         }
     }
     
 
     ESP_LOGW(TAG, "Unrecognized ethernet command: %.*s", (int)ethernet_recieve_buf_bytes_read, ethernet_recieve_buf);
+    return false;
 }
 
 static esp_err_t send_system_status_packet()
@@ -297,6 +337,11 @@ static esp_err_t send_system_status_packet()
     system_status_packet.pressure_compressor_pwm = pressure_status.compressor_pwm;
     system_status_packet.pressure_manual_override = pressure_status.manual_override ? 1 : 0;
     system_status_packet.pressure_valve_open = pressure_status.valve_open ? 1 : 0;
+    uint8_t storage_free_pct = 0;
+    const bool storage_available = sd_get_free_percent(&storage_free_pct);
+    system_status_packet.onboard_logging = sd_is_mounted() ? 1 : 0;
+    system_status_packet.storage_free_pct = storage_available ? storage_free_pct : 0;
+    system_status_packet.controller_state = static_cast<uint8_t>(controller_state);
     system_status_packet.captured_errors = captured_errors;
 
     return wiz_send((uint8_t *)&system_status_packet, sizeof(system_status_packet));
@@ -337,8 +382,7 @@ static void handle_ethernet_receive_status(esp_err_t esp_err_status)
             mode = 2;
         }
 
-        handle_command();
-        command_received = true;
+        command_received = handle_command();
         con_lost = false;
         status_ok = true;
         loops_since_connection = 0; // Reset connection loss buffer
@@ -550,6 +594,7 @@ extern "C" void app_main()
     init_uart();
     init_sensors();
     sd_mount();
+    controller_state = MAIN_CONTROLLER_READY;
     printf("Initialization done\n");
 
     //int8_t s = wizsocket(WIZ_SOCKET, Sn_MR_TCP, LOCAL_PORT, 0);
@@ -859,6 +904,13 @@ void loop()
     {
         esp_err_t esp_err_status_send = send_system_status_packet();
         handle_ethernet_send_status(esp_err_status_send);
+    }
+    if (restart_requested)
+    {
+        buffer_SD_data_flush();
+        sd_unmount();
+        vTaskDelay(pdMS_TO_TICKS(100));
+        esp_restart();
     }
     // Delay only the remaining time so the full loop period stays near 1 second.
     TickType_t current_time_stop = xTaskGetTickCount();

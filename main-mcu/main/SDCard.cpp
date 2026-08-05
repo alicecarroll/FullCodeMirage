@@ -287,6 +287,32 @@ void sd_unmount(void)
     ESP_LOGI(TAG, "SD card unmounted");
 }
 
+bool sd_is_mounted(void)
+{
+    return s_mounted;
+}
+
+bool sd_get_free_percent(uint8_t *free_percent)
+{
+    if (!s_mounted || free_percent == NULL)
+    {
+        return false;
+    }
+
+    uint64_t total_bytes = 0;
+    uint64_t free_bytes = 0;
+    esp_err_t err = esp_vfs_fat_info(SD_MOUNT_POINT, &total_bytes, &free_bytes);
+    if (err != ESP_OK || total_bytes == 0)
+    {
+        ESP_LOGW(TAG, "Failed to read SD capacity: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    const uint64_t percentage = (free_bytes * 100U + total_bytes / 2U) / total_bytes;
+    *free_percent = static_cast<uint8_t>(percentage > 100U ? 100U : percentage);
+    return true;
+}
+
 esp_err_t sd_write(const char *filename, const uint8_t *data, size_t length)
 {
     char path[SD_MAX_PATH_LEN];

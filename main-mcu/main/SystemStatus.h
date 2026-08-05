@@ -4,6 +4,13 @@
 
 #include "read_sensors.h"
 
+enum MainControllerState : uint8_t {
+    MAIN_CONTROLLER_BOOTING = 0,
+    MAIN_CONTROLLER_READY = 1,
+    MAIN_CONTROLLER_SAFE_SHUTDOWN = 2,
+    MAIN_CONTROLLER_RESTARTING = 3,
+};
+
 #pragma pack(push, 1)
 typedef struct {
     SensorData sensor_data;
@@ -24,8 +31,11 @@ typedef struct {
     uint8_t pressure_compressor_pwm;
     uint8_t pressure_manual_override;
     uint8_t pressure_valve_open;
+    uint8_t onboard_logging;
+    uint8_t storage_free_pct;
+    uint8_t controller_state;
     CapturedErrors captured_errors;
 } MainSystemStatusPacket;
 #pragma pack(pop)
 
-static_assert(sizeof(MainSystemStatusPacket) == 213, "Groundstation packet size changed");
+static_assert(sizeof(MainSystemStatusPacket) == 216, "Groundstation packet size changed");
