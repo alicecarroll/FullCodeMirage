@@ -72,7 +72,11 @@ static bool status_packet_sent_this_loop = false;
 static std::string ethernet_command_text;
 bool manual_mode_overwrite = false; // To track if manual mode overwrite is active
 
-std::forward_list <int> pressure_slave_commands; // List of commands to send to the pressure slave in the current loop iteration
+struct QueuedPressureCommand {
+    uint8_t command;
+    uint8_t info;
+};
+std::forward_list<QueuedPressureCommand> pressure_slave_commands;
 
 
 struct CommandMapping
@@ -93,6 +97,24 @@ static const CommandMapping pressure_commands[] =
     {"PUMP 2 ON", PRESSURE_CMD_PUMP2_ON}, {"PUMP 2 OFF", PRESSURE_CMD_PUMP2_OFF},
     {"COMPRESSOR ON", PRESSURE_CMD_COMPRESSOR_ON}, {"COMPRESSOR OFF", PRESSURE_CMD_COMPRESSOR_OFF}
 };
+
+static bool queue_pwm_command(const std::string &command)
+{
+    int pump = 0;
+    int pwm = 0;
+    char extra = '\0';
+    if (std::sscanf(command.c_str(), "PWM%d %d %c", &pump, &pwm, &extra) != 2) return false;
+    if (pump < 1 || pump > 3 || pwm < 0 || pwm > 100) {
+        ESP_LOGW(TAG, "PWM must be pwm1/pwm2/pwm3 with a value from 0 to 100");
+        return true;
+    }
+    const uint8_t commands[] = {
+        PRESSURE_CMD_PUMP1_PWM, PRESSURE_CMD_PUMP2_PWM, PRESSURE_CMD_COMPRESSOR_PWM
+    };
+    pressure_slave_commands.push_front({commands[pump - 1], static_cast<uint8_t>(pwm)});
+    ESP_LOGI(TAG, "Queued PWM%d = %d%%", pump, pwm);
+    return true;
+}
 
 static void set_heater_bit(uint8_t heater_index, bool enabled)
 // Currently, this function is not used to pass information to the thermal mcu. This should be added (Jonathan, 26.7.)
@@ -149,6 +171,8 @@ void handle_command()
     }
 
     trim_in_place(ethernet_command_text);
+
+    if (queue_pwm_command(ethernet_command_text)) return;
 
     int heater_index = 0;
 
@@ -243,7 +267,7 @@ void handle_command()
         if (ethernet_command_text == entry.text)
         {
             ESP_LOGI(TAG, "%s command received", entry.text);
-            pressure_slave_commands.push_front(entry.cmd);
+            pressure_slave_commands.push_front({entry.cmd, 0});
             return;
         }
     }
@@ -457,26 +481,23 @@ static void comms_pressure_sensor(SensorData &sensor_data, uint32_t current_time
 
     // Send the actual Main-MCU mode, including its numeric value. The
     // pressure MCU uses mode 3/2 to control relay 2/3 automatically.
-    pressure_slave_commands.push_front(PRESSURE_CMD_SET_MODE);
+    pressure_slave_commands.push_front({PRESSURE_CMD_SET_MODE, static_cast<uint8_t>(mode)});
 
     // Check if there are any commands to send to the pressure slave
     auto commands = pressure_slave_commands;
     pressure_slave_commands.clear();
-    for (int command : commands)
+    for (const auto &queued : commands)
     {
-        ESP_LOGI(TAG, "Sending command 0x%02X to Pressure MCU", command);
-        // Send the command to the pressure slave
-        const bool is_mode_command = command == PRESSURE_CMD_SET_MODE;
+        ESP_LOGI(TAG, "Sending command 0x%02X to Pressure MCU", queued.command);
         const bool sent = pressure_send_command(
-            pressure_mcu, static_cast<uint8_t>(command),
-            is_mode_command ? static_cast<uint8_t>(mode) : 0);
+            pressure_mcu, queued.command, queued.info);
         if (sent)
         {
-            ESP_LOGI(TAG, "Command 0x%02X sent successfully to Pressure MCU", command);
+            ESP_LOGI(TAG, "Command 0x%02X sent successfully to Pressure MCU", queued.command);
         }
         else
         {
-            ESP_LOGE_CAPTURED(ERROR_BIT_52, TAG, "Failed to send command 0x%02X to Pressure MCU", command);
+            ESP_LOGE_CAPTURED(ERROR_BIT_52, TAG, "Failed to send command 0x%02X to Pressure MCU", queued.command);
         }
     }
 

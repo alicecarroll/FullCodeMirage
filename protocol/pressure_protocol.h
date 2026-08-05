@@ -30,6 +30,9 @@ enum PressureCommand : uint8_t {
     PRESSURE_CMD_RELAY3_OFF   = 0x12,
     PRESSURE_CMD_RELAY4_ON    = 0x13,
     PRESSURE_CMD_RELAY4_OFF   = 0x14,
+    PRESSURE_CMD_PUMP1_PWM    = 0x16,
+    PRESSURE_CMD_PUMP2_PWM    = 0x17,
+    PRESSURE_CMD_COMPRESSOR_PWM = 0x18,
 };
 
 enum PressureMode : uint8_t {

@@ -25,6 +25,9 @@ void set_relay(uint8_t relay, bool on) {
     status.relay_mask = on ? status.relay_mask | bit : status.relay_mask & ~bit;
 }
 void clear_overrides() { manual_pump1 = manual_pump2 = manual_compressor = manual_valve = false; relay_manual = false; }
+void set_measurement_outputs() {
+    set_pump1(100); set_pump2(100); set_compressor(100);
+}
 void safe_off() {
     if (!manual_pump1) set_pump1(0);
     if (!manual_pump2) set_pump2(0);
@@ -35,8 +38,8 @@ void mode_changed(uint8_t mode) {
     if (mode == applied_mode) return;
     applied_mode = mode;
     clear_overrides();
-    if (mode == PRESSURE_MODE_MEASUREMENTS) { set_relay(2, true); set_relay(3, true); }
-    else if (mode == PRESSURE_MODE_STANDBY) { set_relay(2, false); set_relay(3, false); }
+    if (mode == PRESSURE_MODE_MEASUREMENTS) { set_relay(2, true); set_relay(3, true); set_measurement_outputs(); }
+    else if (mode == PRESSURE_MODE_STANDBY) { set_relay(2, false); set_relay(3, false); safe_off(); }
 }
 }
 
@@ -57,12 +60,17 @@ void pressure_update_external_sensors(const float sensors[7]) {
 
 void pressure_execute_command(uint8_t command, uint8_t info) {
     switch (command) {
-        case PRESSURE_CMD_PUMP1_ON: manual_pump1 = true; set_pump1(info); break;
+        // Legacy ON commands do not carry a PWM value. They must mean full
+        // speed; explicit partial duty cycles use the *_PWM commands below.
+        case PRESSURE_CMD_PUMP1_ON: manual_pump1 = true; set_pump1(100); break;
         case PRESSURE_CMD_PUMP1_OFF: manual_pump1 = true; set_pump1(0); break;
-        case PRESSURE_CMD_PUMP2_ON: manual_pump2 = true; set_pump2(info); break;
+        case PRESSURE_CMD_PUMP2_ON: manual_pump2 = true; set_pump2(100); break;
         case PRESSURE_CMD_PUMP2_OFF: manual_pump2 = true; set_pump2(0); break;
-        case PRESSURE_CMD_COMPRESSOR_ON: manual_compressor = true; set_compressor(info); break;
+        case PRESSURE_CMD_COMPRESSOR_ON: manual_compressor = true; set_compressor(100); break;
         case PRESSURE_CMD_COMPRESSOR_OFF: manual_compressor = true; set_compressor(0); break;
+        case PRESSURE_CMD_PUMP1_PWM: manual_pump1 = true; set_pump1(info > 100 ? 100 : info); break;
+        case PRESSURE_CMD_PUMP2_PWM: manual_pump2 = true; set_pump2(info > 100 ? 100 : info); break;
+        case PRESSURE_CMD_COMPRESSOR_PWM: manual_compressor = true; set_compressor(info > 100 ? 100 : info); break;
         case PRESSURE_CMD_VALVE_OPEN: manual_valve = true; set_valve(true); break;
         case PRESSURE_CMD_VALVE_CLOSE: manual_valve = true; set_valve(false); break;
         case PRESSURE_CMD_SET_MODE:
@@ -97,6 +105,12 @@ void pressure_update() {
         status.compressor_inlet_pressure = fake_inlet;
     }
     if (status.state == PRESSURE_PREPRESSURISATION) {
+        if (applied_mode == PRESSURE_MODE_MEASUREMENTS) {
+            if (!manual_pump1) set_pump1(100);
+            if (!manual_pump2) set_pump2(100);
+            if (!manual_compressor) set_compressor(100);
+            return;
+        }
         if (!manual_valve) set_valve(false);
         if (!manual_compressor) set_compressor(255);
         if (!manual_pump1) set_pump1(255);
