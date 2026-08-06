@@ -86,7 +86,7 @@ static bool K96_read_ram(
         UART_PORT,
         response,
         expected_len,
-        pdMS_TO_TICKS(100)); // Reduced timeout for faster recovery if a frame drops
+        pdMS_TO_TICKS(10)); // Reduced timeout for faster recovery if a frame drops
 
     // Return false if expected number of bytes were not received
     if (len != expected_len)

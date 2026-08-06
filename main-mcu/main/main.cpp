@@ -62,6 +62,7 @@ bool command_received = false;
 bool con_lost = false; // To track connection status
 bool status_ok = true;
 CapturedErrors captured_errors = {};
+CapturedErrors captured_errors_for_k96 = {}; // To store the captured errors for K96 before clearing them
 int32_t LOOP_RETRY_CONNECTION = 10; // Number of loops to wait before retrying connection
 int64_t loss_timestamp_us = -1; // To track when connection was lost for termination
 int loops_since_connection = 0; // To buffer short con losses for stable running
@@ -439,6 +440,7 @@ uint8_t status_thermal;
 uint8_t error_thermal;
 uint16_t thermal_current_temperatures[8];
 int32_t OUTLET_TEMPERATURE_THRESHOLD = 50; // Threshold for outlet temperature in Celsius
+int32_t INLET_TEMPERATURE_THRESHOLD = 0; // Threshold for inlet temperature in Celsius
 
 
 static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_ms){
@@ -519,7 +521,23 @@ bool shutters_open = false; // To track if shutters are open
 int16_t pressure_watchdog_tolerance=3000; // 1 according to SEDv3. Number of subsequent times where the pressure slave is reset. If reset more than this number of times, the pressure MCU will be considered lost.
 bool pressure_mcu_lost=false; // To track if the pressure slave is lost.
 
-static void comms_pressure_sensor(SensorData &sensor_data, uint32_t current_time_ms)
+static void commands_comms_pressure_mcu(uint8_t cmd, uint8_t info_bit=0)
+{
+    ESP_LOGI(TAG, "Sending command 0x%02X to Pressure MCU", cmd);
+    const bool sent = pressure_send_command(
+    pressure_mcu, cmd, info_bit);
+    if (sent)
+    {
+        ESP_LOGI(TAG, "Command 0x%02X sent successfully to Pressure MCU", cmd);
+    }
+    else
+    {
+        ESP_LOGE_CAPTURED(ERROR_BIT_52, TAG, "Failed to send command 0x%02X to Pressure MCU", cmd);
+    }
+}
+
+
+static void comms_pressure_default(SensorData &sensor_data, uint32_t current_time_ms)
 {
     pressure_send_sensors(pressure_mcu, sensor_data);
 
@@ -532,17 +550,7 @@ static void comms_pressure_sensor(SensorData &sensor_data, uint32_t current_time
     pressure_slave_commands.clear();
     for (const auto &queued : commands)
     {
-        ESP_LOGI(TAG, "Sending command 0x%02X to Pressure MCU", queued.command);
-        const bool sent = pressure_send_command(
-            pressure_mcu, queued.command, queued.info);
-        if (sent)
-        {
-            ESP_LOGI(TAG, "Command 0x%02X sent successfully to Pressure MCU", queued.command);
-        }
-        else
-        {
-            ESP_LOGE_CAPTURED(ERROR_BIT_52, TAG, "Failed to send command 0x%02X to Pressure MCU", queued.command);
-        }
+        commands_comms_pressure_mcu(queued.command, queued.info);
     }
 
     if (pressure_receive_package(pressure_mcu, &pressure_status))
@@ -650,6 +658,10 @@ void loop()
     handle_ethernet_receive_status(esp_err_status_receive);
     printf("check for commands done\n");
 
+    // After the errors are sent to the ground, we can clear the captured errors for the next loop. This is done here to ensure that the errors are not cleared before they are sent to the ground.
+    captured_errors_for_k96 = captured_errors; // Store the captured errors for K96 before clearing them
+    captured_errors = {};
+
 
     // Read I2C Data Block
     read_sensors();
@@ -691,152 +703,7 @@ void loop()
 
     // I (Jonathan) skipped the current checks, because the current PDB has no functioning current sensor. 
 
-    // The error messages for the sensors are handled in read_sensors() and read_k96(). To be able to collect the K96 errors, actions based on these errors are taken after the mode switch.
-    
-    
-
-    // Mode dependent actions
-    printf("mode %d\n", mode);
-    switch (mode)
-    {
-    // Test loop
-    case 1:
-        {
-            // Repeated workflow for Pressure MCU (Keeping lines cleanly separated)
-            //slave_send_complex_state(pressure_mcu, false, false, true, 0x00);
-            //SlaveStatus pressure_status;
-            //if (slave_read_status(pressure_mcu, &pressure_status)) {
-            //    last_pressure_ping_time = current_time_ms;
-            //}
-            //if ((current_time_ms - last_pressure_ping_time) > SLAVE_WATCHDOG_TIMEOUT_MS) {
-            //    ESP_LOGE(TAG, "!!! Watchdog Triggered: Pressure MCU timed out. Resetting device via Pin %d !!!", Preassure_reset_PIN);
-            //    slave_reset(pressure_mcu);
-            //    last_pressure_ping_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
-            //}
-
-            // Bark at pressure subsystem
-            if (not pressure_mcu_lost)
-            {
-                comms_pressure_sensor(sensor_data, current_time_ms);
-            }
-
-            //Bark at thermal subsystem
-            if (not thermal_mcu_lost)
-            {  
-                comms_thermal_sensor(sensor_data, current_time_ms);
-            }
-            // Enter IP when given by ESA
-            // Ping ground that status is OK.
-            esp_err_t esp_err_status_ping = wiz_ping(targetip, "No command received. Status: OK.");
-        }
-        break;
-
-    // Standby
-    case 2:
-        // Deactivate K96
-        K96_off();
-
-        //Reset overrides
-
-        //Pressure communication
-        if (not pressure_mcu_lost)
-        {
-            comms_pressure_sensor(sensor_data, current_time_ms);
-        }
-        
-        //Thermal communication
-        if (not thermal_mcu_lost)
-        {  
-        comms_thermal_sensor(sensor_data, current_time_ms);
-        }
-        break;
-
-    // measurement
-    case 3:
-
-        // Activate K96
-        K96_on();
-
-
-        // Pressure check block to see if pressure in chamber is too high 
-        //Check if pressure in chamber is below threshold, if so, increase pressure first.
-        if (sensor_data.Pp2 < CHAMBER_P_SHUTTER_THRESHOLD)
-        {
-            //Pressure communication: increase p in chamber.
-        } 
-        //Open shutters if close
-        //Skip data collection to ensure proper pressure in chamber.
-        if (shutters_open == false)
-        {
-            //Pressure communication: open shutters
-            shutters_open = true;
-        }
-        //Check if pressure in chamber is above threshold, if so, take meassurements.
-        if (sensor_data.Pp2 < CHAMBER_P_CHAMBER_THRESHOLD)
-        {
-            //Pressure communication: increase p in chamber.
-        }
-
-        // Thermal check block to see if temperatures are out of limits 
-        // Check if inlet temperature is above threshold, if so, take meassurements. If not, decrease inlet temperature.
-        //if (sensor_data.Tt3 < INLET_TEMPERATURE_THRESHOLD)
-        //{
-        //    //Thermal communication: increase inlet temperature
-        //    break;
-        //}
-
-        // Pressure communication block 
-        if (not pressure_mcu_lost)
-        {
-            comms_pressure_sensor(sensor_data, current_time_ms);
-        }
-
-        // Thermal communication block
-        if (not thermal_mcu_lost)
-        {
-        comms_thermal_sensor(sensor_data, current_time_ms);
-        }
-
-        // Elevation check in terms of pressure
-        if (sensor_data.Pa1 < P_STRATOSPHERE)
-        {
-            if (loops_since_connection > LOOP_WO_CONNECTION) // If connection lost for more than LOOP_WO_CONNECTION loops, enter safe mode
-            {
-                mode = 2; // Standby
-                ESP_LOGE_CAPTURED(ERROR_BIT_55, TAG, "Connection lost for more than %d loops. Entering standby mode.", LOOP_WO_CONNECTION);
-                //con_lost = true;
-                //connection_lost(&con_lost, &loss_timestamp_us);
-                //wiz_ping(targetip, "Connection lost. Entering safe mode."); // Why are we pinging when the connection is lost? This seems counterintuitive. If the connection is lost, how can we ping? This might be a logic error or a misunderstanding of the system's state.
-                break;
-            }
-            //else: high altidude but have connection.
-        }
-        
-
-        // Take meassurements!!!
-        read_k96();
-        //buffer_SD_data_csv(sensor_data); 
-        break;
-
-    // Leave for now as stated by Anna
-    // Humidity
-    case 4:
-        
-        ESP_LOGI(TAG, "Humidity loop not implemented");
-        break;
-
-    default:
-        mode = 1;
-        //std::string msg = "Unknown mode. Returning to test loop.";
-        //wiz_send(msg, sizeof(msg));
-        break;
-    }
-
-    // Decode after mode work so this includes K96 errors raised by read_k96().
-    // Add actions as cases in this switch.
-
-    // Manual overrides of all settings here needs to be done, so that the system is not overriding these decisions here.
-    // Every loop these override values should be reset, so that the system can take over again if sensors are coming back online.
+    // The error messages for the sensors are handled in read_sensors() and read_k96(). To be able to collect the K96 errors, we are checking the old captured errors from last loop.
     for (uint8_t bit = 0; bit < 75; ++bit)
     {
         if (!captured_error_is_set(captured_errors, bit)) continue;
@@ -861,16 +728,165 @@ void loop()
             case PP2:
                 // Turn pressurisation system off or set target pressure to low value so that K96 pressure readings can be used as fallback.
                 break;
+            default:
+                break;
+        }
+    }
+    for (uint8_t bit = 0; bit < 75; ++bit)
+    {
+        if (!captured_error_is_set(captured_errors_for_k96, bit)) continue;
+        switch (decode_captured_error(bit))
+        {
             case K96_FATAL:
                 // Turn pressurisation system off and go into standby.
                 break;
             default:
                 break;
+
         }
+    }
+    
+    captured_errors_for_k96 = {}; // Clear the captured errors for K96 after handling them
+
+    // Mode dependent actions
+    printf("mode %d\n", mode);
+    switch (mode)
+    {
+    // Test loop
+    case 1:
+        {
+            // Repeated workflow for Pressure MCU (Keeping lines cleanly separated)
+            //slave_send_complex_state(pressure_mcu, false, false, true, 0x00);
+            //SlaveStatus pressure_status;
+            //if (slave_read_status(pressure_mcu, &pressure_status)) {
+            //    last_pressure_ping_time = current_time_ms;
+            //}
+            //if ((current_time_ms - last_pressure_ping_time) > SLAVE_WATCHDOG_TIMEOUT_MS) {
+            //    ESP_LOGE(TAG, "!!! Watchdog Triggered: Pressure MCU timed out. Resetting device via Pin %d !!!", Preassure_reset_PIN);
+            //    slave_reset(pressure_mcu);
+            //    last_pressure_ping_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
+            //}
+
+            // Bark at pressure subsystem
+            if (not pressure_mcu_lost)
+            {
+                comms_pressure_default(sensor_data, current_time_ms);
+            }
+
+            //Bark at thermal subsystem
+            if (not thermal_mcu_lost)
+            {  
+                comms_thermal_sensor(sensor_data, current_time_ms);
+            }
+            // Enter IP when given by ESA
+            // Ping ground that status is OK.
+            esp_err_t esp_err_status_ping = wiz_ping(targetip, "No command received. Status: OK.");
+        }
+        break;
+
+    // Standby
+    case 2:
+        // Deactivate K96
+        K96_off();
+
+        //Reset overrides
+
+        //Pressure communication
+        if (not pressure_mcu_lost)
+        {
+            comms_pressure_default(sensor_data, current_time_ms);
+        }
+        
+        //Thermal communication
+        if (not thermal_mcu_lost)
+        {  
+        comms_thermal_sensor(sensor_data, current_time_ms);
+        }
+        break;
+
+    // measurement
+    case 3:
+
+        // Pressure communication block 
+        if (not pressure_mcu_lost)
+        {
+            comms_pressure_default(sensor_data, current_time_ms);
+        }
+
+        // Thermal communication block
+        if (not thermal_mcu_lost)
+        {
+        comms_thermal_sensor(sensor_data, current_time_ms);
+        }
+
+        // Elevation check in terms of pressure
+        if (sensor_data.Pa1 < P_STRATOSPHERE)
+        {
+            if (loops_since_connection > LOOP_WO_CONNECTION) // If connection lost for more than LOOP_WO_CONNECTION loops, enter safe mode
+            {
+                mode = 2; // Standby
+                ESP_LOGE_CAPTURED(ERROR_BIT_55, TAG, "Connection lost for more than %d loops. Entering standby mode.", LOOP_WO_CONNECTION);
+                //con_lost = true;
+                //connection_lost(&con_lost, &loss_timestamp_us);
+                //wiz_ping(targetip, "Connection lost. Entering safe mode."); // Why are we pinging when the connection is lost? This seems counterintuitive. If the connection is lost, how can we ping? This might be a logic error or a misunderstanding of the system's state.
+                break;
+            }
+            //else: high altidude but have connection.
+        }
+
+
+        // Pressure check block to see if pressure in chamber is too high 
+        //Check if pressure in chamber is below threshold, if so, increase pressure first.
+        if (sensor_data.Pp2 + sensor_data.Pa1 < CHAMBER_P_CHAMBER_THRESHOLD)
+        {
+            commands_comms_pressure_mcu(PRESSURE_CMD_START_PREPRESSURISATION); // Needs to be implemented on the pressure slave. This command should close the valve and start the pumps to increase the pressure to the minimum safe level for the measurements
+            // This might be redundant, because the pressure mcu should automatically increase the pressure if it is below the threshold.
+            // Pressure communication: increase p in chamber, close valve
+            ESP_LOGE(TAG, "Pressure in chamber below threshold. Starting pre-pressurisation.");
+        } 
+        //Check if pressure in chamber is above threshold, if so, stop pressurisation system. 
+        if (sensor_data.Pp2 + sensor_data.Pa1 > CHAMBER_P_SHUTTER_THRESHOLD)
+        {
+            commands_comms_pressure_mcu(PRESSURE_CMD_STOP_PRESSURISATION);
+            commands_comms_pressure_mcu(PRESSURE_CMD_VALVE_OPEN);
+            ESP_LOGE(TAG, "Pressure in chamber above threshold. Stopping pressurisation and opening valve.");
+            break;
+        }
+
+        // Thermal check block to see if temperatures are out of limits 
+        // Check if inlet temperature is below threshold. If so, stop the pressurisation system and increase inlet temperature first.
+        if (sensor_data.Tt3 < INLET_TEMPERATURE_THRESHOLD)
+        {
+            //Thermal communication: increase inlet temperature
+            commands_comms_pressure_mcu(PRESSURE_CMD_STOP_PRESSURISATION);
+            ESP_LOGE(TAG, "Inlet temperature below threshold. Stopping pressurisation.");
+
+            break;
+        }
+        
+
+        // Activate K96
+        K96_on();
+        // Take meassurements!!!
+        read_k96();
+        //buffer_SD_data_csv(sensor_data); 
+        break;
+
+    // Leave for now as stated by Anna
+    // Humidity
+    case 4:
+        
+        ESP_LOGI(TAG, "Humidity loop not implemented");
+        break;
+
+    default:
+        mode = 1;
+        //std::string msg = "Unknown mode. Returning to test loop.";
+        //wiz_send(msg, sizeof(msg));
+        break;
     }
 
 
-    captured_errors = {};
     printf("mode %d\n", mode);
 
     //Transmit data over E-Link
