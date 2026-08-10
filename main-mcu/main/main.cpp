@@ -230,21 +230,21 @@ bool handle_command()
         return true;
     }
 
-    if (ethernet_command_text == "HEATER ON")
+    if (ethernet_command_text == "HEATER ON") // Should be remove for more heaters
     {
         set_heater_bit(0, true);
         ESP_LOGI(TAG, "Heater 1 turned ON. Mask now 0x%02X", active_heater_mask);
         return true;
     }
 
-    if (ethernet_command_text == "HEATER OFF")
+    if (ethernet_command_text == "HEATER OFF") // Should be remove for more heaters
     {
         set_heater_bit(0, false);
         ESP_LOGI(TAG, "Heater 1 turned OFF. Mask now 0x%02X", active_heater_mask);
         return true;
     }
 
-    if (sscanf(ethernet_command_text.c_str(), "HEATER ON %d", &heater_index) == 1)
+    if (sscanf(ethernet_command_text.c_str(), "HEATER ON %d", &heater_index) == 1) // Should be updated to allow for target temperature settings
     {
         if (heater_index >= 1 && heater_index <= 8)
         {
@@ -272,7 +272,7 @@ bool handle_command()
         return heater_index >= 1 && heater_index <= 8;
     }
 
-    if (ethernet_command_text == "HEATER ALL ON")
+    if (ethernet_command_text == "HEATER ALL ON") 
     {
         active_heater_mask = 0xFF;
         ESP_LOGI(TAG, "All heaters turned ON");
@@ -631,7 +631,7 @@ void loop()
     // Common actions
     TickType_t current_time_start = xTaskGetTickCount();
     uint32_t current_time_ms = current_time_start * portTICK_PERIOD_MS;
-    status_packet_sent_this_loop = false;
+    status_packet_sent_this_loop = false; // Could be removed
     //feed_watchdog(system_ok);
     //wiz_connect(targetip, REMOTE_PORT);
 
@@ -739,6 +739,7 @@ void loop()
         {
             case K96_FATAL:
                 // Turn pressurisation system off and go into standby.
+                // Make sure that the code tries to connect to the K96 in standby to see if it is alive.
                 break;
             default:
                 break;
@@ -916,7 +917,7 @@ void loop()
 
     //printf("ethernet3\n");
 
-    if (!status_packet_sent_this_loop)
+    if (!status_packet_sent_this_loop) // This variable can be removed
     {
         esp_err_t esp_err_status_send = send_system_status_packet();
         handle_ethernet_send_status(esp_err_status_send);

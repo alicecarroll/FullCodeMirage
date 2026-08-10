@@ -60,7 +60,7 @@ static bool select_slave(
 }
 
 // Send telemetry/data
-bool slave_send_data(
+bool slave_send_data( // Legacy function, can be removed
     SlaveDevice slave,
     SlaveData data_id,
     float value
@@ -94,7 +94,7 @@ bool slave_send_data(
 }
 
 // Send command
-bool slave_send_command(
+bool slave_send_command( // Old legacy function, can be removed
     SlaveDevice slave,
     SlaveCommands command
 )
@@ -128,7 +128,7 @@ bool slave_send_command(
  * Sends combined operating state parameters to a slave via the standard command packet system.
  * Packs Mode, Emergency status, Pressure Status, and an 8-bit heater selection mask.
  */
-bool slave_send_complex_state(
+bool slave_send_complex_state( // old legacy function, can be removed
     SlaveDevice slave,
     bool emergency_stop,
     bool autonomous_mode,
@@ -171,7 +171,7 @@ bool slave_send_complex_state(
 }
 
 // Update persistent setting
-bool slave_update_setting(
+bool slave_update_setting( // old legacy function, can be removed
     SlaveDevice slave,
     uint8_t setting,
     float value)
@@ -214,7 +214,7 @@ void recover_i2c_driver() {
 }
 
 // Read slave status (Modified to capture the ping counter byte)
-bool slave_read_status(
+bool slave_read_status( // Old legacy function, can be removed
     SlaveDevice slave,
     SlaveStatus* status)
 {
