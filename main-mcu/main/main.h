@@ -20,13 +20,6 @@ extern "C"
     void loop(void);
 
     /**
-     * @brief  Process received Ethernet data and react to the receive status.
-     *
-     * @param[in] esp_err_status  ESP-IDF error status returned by wiz_receive().
-     */
-    void handle_ethernet_status(esp_err_t esp_err_status);
-
-    /**
      * @brief  Interpret and execute a received command from the Ethernet buffer.
      */
     bool handle_command(void);
