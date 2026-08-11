@@ -230,20 +230,6 @@ bool handle_command()
         return true;
     }
 
-    if (ethernet_command_text == "HEATER ON") // Should be remove for more heaters
-    {
-        set_heater_bit(0, true);
-        ESP_LOGI(TAG, "Heater 1 turned ON. Mask now 0x%02X", active_heater_mask);
-        return true;
-    }
-
-    if (ethernet_command_text == "HEATER OFF") // Should be remove for more heaters
-    {
-        set_heater_bit(0, false);
-        ESP_LOGI(TAG, "Heater 1 turned OFF. Mask now 0x%02X", active_heater_mask);
-        return true;
-    }
-
     if (sscanf(ethernet_command_text.c_str(), "HEATER ON %d", &heater_index) == 1) // Should be updated to allow for target temperature settings
     {
         if (heater_index >= 1 && heater_index <= 8)
@@ -756,6 +742,7 @@ void loop()
     // Test loop
     case 1:
         {
+            //This is old but should something similar be here? /LLL
             // Repeated workflow for Pressure MCU (Keeping lines cleanly separated)
             //slave_send_complex_state(pressure_mcu, false, false, true, 0x00);
             //SlaveStatus pressure_status;
