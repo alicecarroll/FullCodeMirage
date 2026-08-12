@@ -5,19 +5,18 @@
     "board/esp32s3-builtin.cfg"
   ],
   "idf.portWin": "COM6",
-  "idf.currentSetup": "/Users/jonathan/esp/esp-idf",
+  "idf.currentSetup": "C:\\esp\\v6.0.1\\esp-idf",
   "idf.customExtraVars": {
     "IDF_TARGET": "esp32s3",
-    "IDF_PATH": "/Users/jonathan/esp/esp-idf",
+    "IDF_PATH": "/esp/v6.0.1/esp-idf",
     "OPENOCD_USB_ADAPTER_LOCATION": "0-1.2.1"
   },
-  "idf.pythonBinPath": "/Users/jonathan/.espressif/python_env/idf6.2_py3.13_env/bin/python",
-  "idf.toolsPath": "/Users/jonathan/.espressif",
+  "idf.toolsPath": "C:\\Espressif",
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
-    "--compile-commands-dir=/Users/jonathan/Documents/RexusBexus/code/FullCodeMirage/pressure-mcu/build"
+    "--compile-commands-dir=c:\\Users\\atsch\\Desktop\\REXUSBEXUS\\Software\\FullCodeMirage\\pressure-mcu\\build"
   ],
   "idf.flashType": "UART",
-  "clangd.path": "/Users/jonathan/.espressif/tools/esp-clangd/esp-21.1.3_20260408/esp-clangd/bin/clangd"
+  "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-20.1.1_20250829\\esp-clang\\bin\\clangd.exe"
 }
