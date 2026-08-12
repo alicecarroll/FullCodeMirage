@@ -103,7 +103,7 @@ static const CommandMapping pressure_commands[] =
     {"COMPRESSOR ON", PRESSURE_CMD_COMPRESSOR_ON}, {"COMPRESSOR OFF", PRESSURE_CMD_COMPRESSOR_OFF},
     {"PRESSURE ON", PRESSURE_CMD_START_PRESSURISATION},
     {"PRESSURE OFF", PRESSURE_CMD_STOP_PRESSURISATION},
-    {"FLUSH CHAMBER", PRESSURE_CMD_FLUSH_CHAMBER}
+    {"PREPRESSURISE", PRESSURE_CMD_START_PREPRESSURISATION}
 };
 
 enum class CommandParseResult { NotMatched, Accepted, Rejected };
@@ -425,9 +425,6 @@ uint16_t received_target_thermal;
 uint8_t status_thermal;
 uint8_t error_thermal;
 uint16_t thermal_current_temperatures[8];
-int32_t OUTLET_TEMPERATURE_THRESHOLD = 50; // Threshold for outlet temperature in Celsius
-int32_t INLET_TEMPERATURE_THRESHOLD = 0; // Threshold for inlet temperature in Celsius
-
 
 static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_ms){
     uint8_t chosen_channel_id_thermal=0x00; //0x00- 0x07
@@ -681,6 +678,7 @@ void loop()
             if (!manual_mode_overwrite) // If manual mode overwrite is not active, enter measurement mode if pressure is above threshold
             {
                 mode = 3; // Enter measurement mode if pressure is above threshold
+                
             }
         }
     }
@@ -804,7 +802,7 @@ void loop()
         // Thermal communication block
         if (not thermal_mcu_lost)
         {
-        comms_thermal_sensor(sensor_data, current_time_ms);
+            comms_thermal_sensor(sensor_data, current_time_ms);
         }
 
         // Elevation check in terms of pressure
@@ -821,19 +819,19 @@ void loop()
             }
             //else: high altidude but have connection.
         }
-
+        
 
         // Pressure check block to see if pressure in chamber is too high 
         //Check if pressure in chamber is below threshold, if so, increase pressure first.
-        if (sensor_data.Pp2 + sensor_data.Pa1 < CHAMBER_P_CHAMBER_THRESHOLD)
-        {
-            commands_comms_pressure_mcu(PRESSURE_CMD_START_PREPRESSURISATION); // Needs to be implemented on the pressure slave. This command should close the valve and start the pumps to increase the pressure to the minimum safe level for the measurements
-            // This might be redundant, because the pressure mcu should automatically increase the pressure if it is below the threshold.
-            // Pressure communication: increase p in chamber, close valve
-            ESP_LOGE(TAG, "Pressure in chamber below threshold. Starting pre-pressurisation.");
-        } 
+        //if (sensor_data.Pp2 + sensor_data.Pa1 < CHAMBER_P_CHAMBER_THRESHOLD)
+        //{
+        //    commands_comms_pressure_mcu(PRESSURE_CMD_START_PREPRESSURISATION); // Needs to be implemented on the pressure slave. This command should close the valve and start the pumps to increase the pressure to the minimum safe level for the measurements
+        //    // This might be redundant, because the pressure mcu should automatically increase the pressure if it is below the threshold.
+        //    // Pressure communication: increase p in chamber, close valve
+        //    ESP_LOGE(TAG, "Pressure in chamber below threshold. Starting pre-pressurisation.");
+        //} 
         //Check if pressure in chamber is above threshold, if so, stop pressurisation system. 
-        if (sensor_data.Pp2 + sensor_data.Pa1 > CHAMBER_P_SHUTTER_THRESHOLD)
+        if (sensor_data.Pp2 + sensor_data.Pa1 > CHAMBER_P_SHUTTER_THRESHOLD) //Why adding the ambient pressure?
         {
             commands_comms_pressure_mcu(PRESSURE_CMD_STOP_PRESSURISATION);
             commands_comms_pressure_mcu(PRESSURE_CMD_VALVE_OPEN);
@@ -928,8 +926,9 @@ void loop()
     {
         time_loop = 0;
     }
-    if (time_loop > 0)
-    {
-        vTaskDelay(time_loop);
-    }
+    vTaskDelay(pdMS_TO_TICKS(200));
+    //if (time_loop > 0)
+    //{
+    //    vTaskDelay(time_loop);
+    //}
 }

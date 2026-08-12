@@ -25,6 +25,7 @@ typedef struct
     float compressor_inlet_pressure;  // pressure on the suction side of
                                        // the compressor, between the
                                        // vacuum pumps and the compressor
+    float ambient_pressure; //and is1 pressure should be also received
 
     uint8_t error;
 
