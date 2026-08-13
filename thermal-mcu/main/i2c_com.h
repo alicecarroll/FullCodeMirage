@@ -8,12 +8,12 @@ Structs
 
 //For receiving data for indvidual switches
 struct individual_switch_data_rx {
-uint8_t regist;  //register/command determines packettype
-uint8_t switchID; //which switch
-uint8_t mode; //mode 0 Hysteris 1 PID 155-255 manual with duty cycle 0-100%
-int16_t temperature; //current temperature
-int16_t target;  //target temperature
-uint8_t crc8; //checksum
+    uint8_t regist;  //register/command determines packettype 0x01== default
+    uint8_t switchID; //which switch
+    uint8_t mode; //mode 0 Hysteris 1 PID 155-255 manual with duty cycle 0-100%
+    int16_t temperature; //current temperature
+    int16_t target;  //target temperature
+    uint8_t crc8; //checksum
 };
 
 //For sending data for indvidual switches
@@ -34,7 +34,10 @@ Enums
 */
 //For the register/command byte in all packages
 typedef enum{
-    packet_type_indvidual_switch=0x01
+    packet_type_indvidual_switch=0x01,
+    packet_stop_all=0x15,
+    packet_resume_all=0x31
+
 
 }packet_types_t;
 

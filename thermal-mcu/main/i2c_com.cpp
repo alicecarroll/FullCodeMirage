@@ -1,11 +1,17 @@
 //libaries
+#include <cstdint>
+#include <cstring>
+
 #include "string.h"
 #include "driver/i2c.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 //other parts of project
 #include "config.h"
 #include "i2c_com.h"
+
 
 //numbers for functions
 constexpr size_t INDIVIDUAL_SWITCH_RX_LEN = 8;
@@ -36,24 +42,33 @@ uint8_t computeCRC8(
 }
 
 //This one should be in its own freertos task which will run paralell to the controller task
+//Fix sending stuff to main
 void i2c_loop_task(void *pvParameters)
 {
 
+    const individual_switch_data_rx default_off_package = {
+        .regist=0x01,
+        .switchID=0x00,
+        .mode=155,
+        .temperature=20,
+        .target=20,
+        .crc8=0}; //crc8 should get actual calue but doesnt really matter
     individual_switch_data_rx receive_indvidual_switch_packet;
     uint8_t dataBuffer[rx_buffer_len]; //data buffer for incoming i2c communication
-    uint8_t controllerData[number_switches*6]={}; // Data array for controller
+    individual_switch_data_rx controllerData;
+    //uint8_t controllerData[number_switches*packet_size_to_paralell_task]={}; // Data array for controller
 
-    for(int i=0; i<number_switches*6;i++) //initilizes controllerData with start values (0% dutycycle for all switches)
-    {
-        switch(i%6){
-            case 0:
-                controllerData[i]= static_cast<uint8_t>(i/6);
-                break;
-            case 1: 
-                controllerData[i]=155; //0% dutycycle
-                break;
-        }
-    }
+    // for(int i=0; i<number_switches*packet_size_to_paralell_task;i++) //initilizes controllerData with start values (0% dutycycle for all switches)
+    // {
+    //     switch(i%6){
+    //         case 0:
+    //             controllerData[i]= static_cast<uint8_t>(i/packet_size_to_paralell_task);
+    //             break;
+    //         case 1: 
+    //             controllerData[i]=155; //0% dutycycle
+    //             break;
+    //     }
+    // }
 
     while(1){
         //non-blocking read //This should be changed such that it wont get partial messages
@@ -70,16 +85,25 @@ void i2c_loop_task(void *pvParameters)
                     {
                         if(!data_unpack_indvidual_switch(dataBuffer,&receive_indvidual_switch_packet)){
                             ESP_LOGE("ERROR", "CRC8 failed for indvidual switch packet %d",regi);
-                        }
-                        //implement clear of databuffer after read message
+                        }//implement clear of databuffer after read message
+                        //Add timeout for specific packages ie replace crc8 with time since this package has last been received
+                        controllerData = receive_indvidual_switch_packet;
+                        
                     }
                     break;
+                case packet_stop_all:  //Emergency stop
+                    controllerData=default_off_package;
+                    controllerData.regist=packet_stop_all;
+                    break;
+                case packet_resume_all: //Resume normal operations
+                    controllerData=default_off_package;
+                    controllerData.regist=packet_resume_all;
                 default:
                         ESP_LOGW("I2C", "Unknown packet register: 0x%02X", regi);
                     break;
             }
             //here it should send data to another freertos task
-
+            xQueueOverwrite(dataQueue,&controllerData); //Data to control
         }
     }   
 
@@ -133,8 +157,10 @@ bool data_pack_indvidual_switch(
 
 //xTaskCreate stuff to handle parallelization
 //Send data to paralell task
-void send_data_parallel_tasks(uint8_t *data, size_t len){
+bool send_data_parallel_tasks(uint8_t *data, size_t len){
 
+    i2c_reset_tx_fifo(I2C_PORT);
+    i2c_slave_write_buffer(I2C_PORT,data,len,0);
 }
 
 //recieve data from paralell task
