@@ -7,7 +7,7 @@
 enum PressurePacketType : uint8_t {
     PRESSURE_PACKET_SENSORS  = 0x01,
     PRESSURE_PACKET_COMMANDS = 0x02,
-    PRESSURE_PACKET_SETTINGS = 0x03,
+    PRESSURE_PACKET_SETTINGS = 0x03, // I don't think this is used, so it could be removed. (Jonathan, 06.8.)
 };
 
 enum PressureCommand : uint8_t {
@@ -35,8 +35,9 @@ enum PressureCommand : uint8_t {
     PRESSURE_CMD_COMPRESSOR_PWM = 0x18,
     PRESSURE_CMD_START_PRESSURISATION = 0x19,
     PRESSURE_CMD_STOP_PRESSURISATION = 0x1A,
-    PRESSURE_CMD_FLUSH_CHAMBER = 0x1B,
-    PRESSURE_CMD_SAFE_SHUTDOWN = 0x1C,
+    PRESSURE_CMD_START_PREPRESSURISATION = 0x1B,
+    PRESSURE_CMD_FLUSH_CHAMBER = 0x1D,
+    PRESSURE_CMD_SAFE_SHUTDOWN = 0x1E,
 };
 
 enum PressureMode : uint8_t {

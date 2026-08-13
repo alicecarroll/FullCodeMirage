@@ -9,7 +9,10 @@ typedef enum
     PRESSURE_PREPRESSURISATION,
     PRESSURE_AIR_EXCHANGE,
     PRESSURE_ERROR,
-    PRESSURE_FLUSHING
+    PRESSURE_FLUSHING, //not used 
+    PRESSURE_COMPRESSION,
+    PRESSURE_MEASUREMENT,
+    PRESSURE_CORRECTION
 
 } PressureState;
 
@@ -22,6 +25,7 @@ typedef struct
     float compressor_inlet_pressure;  // pressure on the suction side of
                                        // the compressor, between the
                                        // vacuum pumps and the compressor
+    float ambient_pressure; //and is1 pressure should be also received
 
     uint8_t error;
 

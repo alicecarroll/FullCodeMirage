@@ -35,8 +35,8 @@ static float target_pressure = 3.0f;       // chamber target (air exchange phase
 
 // Bug 2 fix: the old hardcoded 1.0f and the missing inlet lower limit
 // are now named, settable values instead of magic numbers.
-static float compressor_inlet_upper_limit = 1.0f;  // ends prepressurisation
-static float compressor_inlet_lower_limit = 0.2f;   // ends air exchange — PLACEHOLDER, confirm real value
+static float compressor_inlet_upper_limit = 1.5f;  // ends prepressurisation
+static float compressor_inlet_lower_limit = 0.7f;   // ends air exchange — PLACEHOLDER, confirm real value
 
 // Bug 4 fix: simple error codes so pressure_update() can report *why*
 // it went into PRESSURE_ERROR.

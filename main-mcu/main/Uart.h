@@ -17,4 +17,6 @@ int K96_request(const char *command,
                 size_t response_size,
                 uint32_t timeout_ms);
 
+void check_k96_errors();
+
 void read_k96();
