@@ -96,7 +96,7 @@ void slave_reset(SlaveDevice slave)
 
 bool thermal_test_send_package(
     SlaveDevice slave, 
-    uint8_t channel_id, //0x00- 0x07
+    uint8_t channel_id, //0x00- 0x07    
     uint8_t mode, //0 bang bang 1 PID 155-255 D_cycle
     int16_t currentTemp, // 5000 = 50,0C 
     int16_t target  
@@ -127,9 +127,9 @@ bool thermal_test_send_package(
     const int package_Length=8;
     uint8_t package[package_Length];
 
-    package[0]=0x01; 
+    package[0]= 0x01; 
     package[1]= channel_id;
-    package[2]=mode;
+    package[2]= mode;
     package[3]= static_cast<uint8_t>((currentTemp >> 8) & 0xFF); //MSB data
     package[4]= static_cast<uint8_t>(currentTemp & 0xFF);   //LSB data
     package[5]= static_cast<uint8_t>((target >> 8) & 0xFF); //MSB target
@@ -263,8 +263,6 @@ bool pressure_send_sensors(
 
     return (err == ESP_OK);
 }
-
-
 
 
 bool pressure_send_command(

@@ -35,7 +35,7 @@ uint16_t time_loop;
  * 3: Measurement
  * 4: Humidity
  */
-int mode = 1;//DEFAULT_MODE; // 1
+int mode = 1;//DEFAULT_MODE 1
 
 // Watchdog
 bool system_ok;
@@ -412,9 +412,12 @@ static void handle_ethernet_receive_status(esp_err_t esp_err_status)
 //Values for thermal slave
 uint8_t number_channels_thermal=8;  //0-8 depending on the number of switches used
 //Variables for thermal under this comment will need to have value assigned in loop. Currently using placeholders (Remove comment when this has changed)
+// TEST3: Remove and change to arrays (!!!Change where these are used in the code as well!!!)
 uint8_t thermal_mode=1; //0 bang bang 1 PID 155-255 D_cycle
 int16_t thermal_currentTemp=2000; // 5000 = 50,0C  
 int16_t thermal_target=5000;
+// uint8_t thermal_mode[8]={1,1,1,1,1,1,1,1}; //0 bang bang 1 PID 155-255 D_cycle
+// int16_t thermal_target[8]={5000,5000,5000,5000,5000,5000,5000,5000};
 int16_t thermal_watchdog_tolerance=3000; // 1 according to SEDv3. Number of subsequent times where the thermal slave is reset. If reset more than this number of times, the thermal MCU will be considered lost.
 bool thermal_mcu_lost=false; // To track if the thermal slave is lost.
 //Data recieved from thermal
@@ -426,6 +429,7 @@ uint8_t status_thermal;
 uint8_t error_thermal;
 uint16_t thermal_current_temperatures[8];
 
+//TEST2: Change name to comms_thermal
 static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_ms){
     uint8_t chosen_channel_id_thermal=0x00; //0x00- 0x07
     //temperature array used for temperature data for thermal
@@ -439,17 +443,18 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
     thermal_current_temperatures[7]=static_cast<uint16_t>(sensor_data.Tt2*100);
 
     bool thermal_tx_ok = false;
-
+    //TEST5: remove -1 from while statemnt
     while (chosen_channel_id_thermal!=(number_channels_thermal-1)){
         thermal_tx_ok = thermal_test_send_package(
             thermal_mcu, 
             chosen_channel_id_thermal, //0x00- 0x07
             thermal_mode, //0 bang bang 1 PID 155-255 D_cycle
-            thermal_current_temperatures[chosen_channel_id_thermal], // 5000 = 50,0C 
+            thermal_current_temperatures[chosen_channel_id_thermal], // 5000 = 50,00C 
             thermal_target);
         chosen_channel_id_thermal++;
     }
-        
+    
+    // TEST1: Remove this line
     chosen_channel_id_thermal=0;
 
     if (thermal_tx_ok)
@@ -497,6 +502,40 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
         }
     }
 }
+
+//TEST4: test this function (Remember to change according to test 3)
+/* static void commands_comms_thermal(uint8_t channel_id, uint8_t mode)
+{
+    const float thermal_temp_sources[] = {
+        sensor_data.Tt2,
+        sensor_data.Tp2,
+        sensor_data.Tp3,
+        sensor_data.Tp4,
+        sensor_data.Tp5,
+        sensor_data.Tp6,
+        sensor_data.Tt1,
+        sensor_data.Tt2
+    };
+
+    current_temp = static_cast<uint16_t>(thermal_temp_sources[channel_id] * 100); // Convert to the expected format for the thermal MCU
+    ESP_LOGI(TAG, "Sending command to Thermal MCU - Channel: %u, Mode: %u, Current Temp: %d, Target: %d",
+             channel_id, mode, currentTemp, thermal_target);
+    const bool sent = thermal_test_send_package(
+        thermal_mcu,
+        channel_id,
+        mode,
+        currentTemp,
+        thermal_target);
+    if (sent)
+    {
+        ESP_LOGI(TAG, "Command sent successfully to Thermal MCU");
+    }
+    else
+    {
+        ESP_LOGE_CAPTURED(ERROR_BIT_50, TAG, "Failed to send command to Thermal MCU");
+    }
+} */
+
 
 
 //Pressure
@@ -648,6 +687,7 @@ void loop()
 
     // Read I2C Data Block
     read_sensors();
+    //Options for storing to SD. Decided on last one /LLL
     //buffer_SD_data_binary_single(); //est time: 1.5 ms
     //buffer_SD_data_csv_single();      //est time: 3 ms
     //buffer_SD_data_binary(sensor_data); //4k - est time: 1.5 ms every 8th loop
@@ -786,7 +826,7 @@ void loop()
         //Thermal communication
         if (not thermal_mcu_lost)
         {  
-        comms_thermal_sensor(sensor_data, current_time_ms);
+            comms_thermal_sensor(sensor_data, current_time_ms);
         }
         break;
 
