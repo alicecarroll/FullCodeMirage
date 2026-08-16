@@ -1,4 +1,11 @@
 #pragma once 
+#include "driver/i2c.h"
+#include "esp_log.h"
+#include "driver/gpio.h"
+#include "driver/uart.h"
+#include "driver/i2c_slave.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 //Pin definitions
 #define SDA_PIN GPIO_NUM_13
@@ -23,6 +30,20 @@
 
 #define control_timeout_us 5000000 //5 seconds
 
-
+//Global variables
 extern QueueHandle_t dataQueue;
+extern QueueHandle_t dataQueue_slave_rx;
+extern QueueHandle_t dataQueue_slave_tx;
+extern TaskHandle_t i2c_send_task_handle;
+extern TaskHandle_t control_loop_task_handle;
+extern i2c_slave_dev_handle_t slave_handle;
 
+
+
+
+/*
+Functions
+*/
+esp_err_t init_i2c_slave();
+esp_err_t init_write_pins();
+void startup();
