@@ -15,8 +15,8 @@ void heater_system_init(HeaterSystem* system)
     // Initialize all 8 heaters with default settings
     for (int i = 0; i < 8; i++) {
         system->heaters[i].heater_id = i;
-        system->heaters[i].mode = HEATER_MODE_BANGBANG;  // Default to bang-bang control
-        system->heaters[i].target_temp = 2000;           // Default to 20.00°C
+        system->heaters[i].mode = HEATER_MODE_PID;  // Default to PID control
+        system->heaters[i].target_temp = 5000;           // Default to 20.00°C
         system->heaters[i].manual_duty_cycle = 0;
         system->heaters[i].enabled = false;
     }
