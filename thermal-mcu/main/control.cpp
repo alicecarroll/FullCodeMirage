@@ -28,9 +28,10 @@ class Controller{
 class Bang : public Controller // ON/OFF controller
 {   
   private: 
-    float dutyOn;
+    float dutyOn;  //Max dutyCycle
     float deadZone; //The distance from desired temp before turning things on/off
-    bool cooler;
+    bool cooler;  
+    float duty_Cycle=0;  //Current dutyCycle
 
   public: 
     Bang(float D_cycle, float dead_zone, bool cool){
@@ -39,19 +40,27 @@ class Bang : public Controller // ON/OFF controller
 
     float update(float desired_value, float meas, float duty_cycle_on) override{  
       dutyOn=duty_cycle_on;
+      //Cooler
         if(cooler && (meas>=(desired_value+deadZone))){ //with cooler
-          return dutyOn;
+          duty_Cycle=dutyOn;
         }
-
-        if(!cooler && (meas<=desired_value-deadZone)){ // with heater
-          return dutyOn;
+        else if(cooler && (meas<=(desired_value-deadZone))){
+          duty_Cycle=0;
         }
-        return 0;
+        
+      //heater
+        if(!cooler && (meas<=(desired_value-deadZone))){ // with heater
+          duty_Cycle=dutyOn;
+        }
+        else if(!cooler && (meas>=(desired_value+deadZone))){
+          duty_Cycle=0;
+        }
+        return duty_Cycle;
       }
     
 
     void reset() override{
-      //Think this should be empty
+      duty_Cycle=0;
     }
 
     void changeParams(float D_cycle, float dead_zone, bool cool){ //changes the parameters for Bang controller
@@ -63,9 +72,13 @@ class PID_control : public Controller{
   private: 
     float kp, ki, kd;
     float integral=0;
-    float prev_error = 0;  // 
     float dt; // in seconds
     bool cooler;
+    //Derivative part variables
+    float prev_error=0;
+    float filteredDerivative=0;  //Used to reduce noise impace on derivative
+    bool firstLoop=true; //Used to make proper values for derivative
+    
 
   public: 
     PID_control(float p, float i, float d, float timestep, bool cool){
@@ -77,46 +90,90 @@ class PID_control : public Controller{
     void reset() override{
       integral=0;
       prev_error=0;
+      filteredDerivative=0;
+      firstLoop=true;
+      
+
     }
 
-    float update(float desired_value, float meas, float max_duty_cycle) override{  //Runs the PID control. 
-      const int windup_limit=100;  //The windup limit needs to be dimensioned properly !! 
+    float update(float desired_value, float meas, float max_duty_cycle) override{  //Runs the PID control.
+
+      float windup_limit;  //The windup limit needs to be dimensioned properly !! 
+      const float tau=2;
       float derivative,error;
-      if (dt==0) //makes sure dt isnt 0
+
+      //makes sure dt isnt 0 or less than 0 because negative time is made up by mathematicians
+      if (dt<=0) 
       {  
         return 0;
       }
 
-      error=desired_value-meas;
-      if (cooler){
+      //Makes sure windup limit is properly dimensioned. This implementation ensures that ki*I<=max_duty_cycle
+      if(ki>0) { 
+        windup_limit=max_duty_cycle/ki;  //The windup limit needs to be dimensioned properly !! 
+      }
+      else{
+        windup_limit=0;
+      }
+
+      error=desired_value-meas; //Error
+      //Switches error so that positive output always is equivilant to ON for actuator
+      if (cooler){ 
         error=-error;
       }
-      
-      integral+= error * dt;
 
-      //Anti windup. // This can be implemented better if needed
-      if (integral>windup_limit){  
-        integral=windup_limit;
-        }
-      else if(integral<-windup_limit){
-        integral=-windup_limit;
-        }
+      //Used for derivative part //Makes sure proper derivative values if in first loop
+      if(firstLoop) 
+      {
+        filteredDerivative=0;
+        prev_error=error;
+        firstLoop=false;
+      }
 
       derivative=(error-prev_error)/dt;
       prev_error=error;
+      filteredDerivative+=dt/(tau+dt)*(derivative-filteredDerivative); //Filtering of derivative to reduce noise 
+      
+      float newIntegral=integral+ error * dt;
+           
+      //Anti windup. // This can be implemented better if needed
+      if (newIntegral>windup_limit){  
+        newIntegral=windup_limit;
+        }
+      else if(newIntegral<-windup_limit){
+        newIntegral=-windup_limit;
+        }
 
-      float PID_output=kp*error+ki*integral+kd*derivative; 
+      float PID_output=kp*error+ki*newIntegral+kd*filteredDerivative;  //Actual PID calculation
+       
+      
+      //Converts output to duty cyvle and conditional integral (Conditional integral prevents integral from increasing if we've reached saturation)
+      if (PID_output>max_duty_cycle)
+      {
+        PID_output=max_duty_cycle;
+        if(error<0){
+          integral=newIntegral;
+        }
+      } // This part might be changed such that it handles negatives to be able to use cooler on same PID
+      else if( PID_output<0)
+      {
 
-      //Converts output to duty cyvle
-      if (PID_output>max_duty_cycle){PID_output=max_duty_cycle;} // This part might be changed such that it handles negatives to be able to use cooler on same PID
-      else if( PID_output<0){PID_output=0;}  // IE returns 100- (-100) where negative corresponds to cooler
+        PID_output=0;
+        if(error>0){
+          integral=newIntegral;
+        }
+      }  // IE returns 100- (-100) where negative corresponds to cooler
+      else
+      {
+        integral=newIntegral;
+      }
 
       return PID_output;
     }
 
     void changeParams(float p, float i, float d, float timestep, bool cool){ //Changeng the values for PID control
       kp=p; ki=i; kd=d; dt=timestep; cooler=cool;
-      //reset();  //The reset may be removed here depending on what we want from chagneParams i think we'll want it here
+      reset();  //The reset may be removed here depending on what we want from chagneParams i think we'll want it here
     }
 
     void set_dt(float timestep){
@@ -159,29 +216,32 @@ class manual_control : public Controller {
 //   }
 
 const int number_controllers=number_switches;
+int64_t timestep_us= 1000000; //1 second  Need to make sure we recieve temperature data such that timestep>=measuring period otherwise PID doesnt work properly
+float timestep_s=static_cast<float>(timestep_us)/1000000.0f;
 //useful things
+//These controllers could probably be initilized better
 Bang bangPool[number_controllers]{
-  Bang(100,1,false),
-  Bang(100,1,false), 
-  Bang(100,1,false),
-  Bang(100,1,false),
-  Bang(100,1,false),
-  Bang(100,1,false),
-  Bang(100,1,false),
-  Bang(100,1,false)
+  Bang(100,3,false),  //Maxdutycycle, deadzone+-, iscooler t/f
+  Bang(100,3,false), 
+  Bang(100,3,false),
+  Bang(100,3,false),
+  Bang(100,3,false),
+  Bang(100,3,true),
+  Bang(100,3,true),
+  Bang(100,3,false)
 };
 
 
 //Some things for controllers
 PID_control PIDPool[number_controllers]{
-  PID_control(0.1,0.1,1.5,1,false), //0
-  PID_control(0.1,0.1,1.5,1,false),
-  PID_control(0.1,0.1,1.5,1,false),
-  PID_control(0.1,0.1,1.5,1,false),
-  PID_control(0.1,0.1,1.5,1,false),
-  PID_control(0.1,0.1,1.5,1,false),
-  PID_control(0.1,0.1,1.5,1,false),
-  PID_control(0.1,0.1,1.5,1,false) //7
+  PID_control(2,0.1,3,timestep_s,false), //0 //P, I , D, timestep (s) 
+  PID_control(2,0.1,3,timestep_s,false),
+  PID_control(2,0.1,3,timestep_s,false),
+  PID_control(2,0.1,3,timestep_s,false),
+  PID_control(2,0.1,3,timestep_s,false),
+  PID_control(2,0.1,3,timestep_s,true),
+  PID_control(2,0.1,3,timestep_s,true),
+  PID_control(2,0.1,3,timestep_s,false), //7
 };
 
 manual_control manualPool[number_controllers]{
@@ -267,7 +327,7 @@ void packet_conversion(individual_switch_data_rx input_packat){
 //   controllers[switchID] ->update(controllerData[switchID].target,
 //     controllerData[switchID].temperature,0);
 // }
-void control_loop(){
+void control_loop(void *pvParameters){
 
   bool all_switches_off =false; 
   const individual_switch_data_rx default_off_package = {
@@ -280,6 +340,7 @@ void control_loop(){
   individual_switch_data_rx recievedData; //Data from i2c task will be recieved in this variable
   
   controller_data_struct controllerData[number_switches];
+
   controllerData[0].pin=SD_Card_PIN; // 5
   controllerData[1].pin=pressure_ch_PIN; //6
   controllerData[2].pin=outlet_PIN; //7
@@ -290,10 +351,24 @@ void control_loop(){
   controllerData[7].pin=backup_PIN;// 18
 
   //Timeout stuff 
-  int64_t timestep_us= 1000000; //1 second  Need to make sure we recieve temperature data such that timestep>=measuring period otherwise PID doesnt work properly
   int64_t current_time = esp_timer_get_time();
   int64_t last_recieved_time = esp_timer_get_time();
-
+  int64_t last_comtroller_activation=esp_timer_get_time();
+  //Used for sending data back to master
+  uint8_t error[number_switches]={};
+  uint8_t lastSwitch=7;
+  bool newData=false;
+  
+  static uint8_t dataBuffer[8];
+  individual_switch_data_tx sendPacket={
+    .switchID=8,
+    .mode=155,
+    .D_cycle=100,
+    .target=-99.0f,
+    .status=0,
+    .global_mode=0x01
+  };
+  
 
   for(int i=0; i<number_switches;i++){
 
@@ -301,25 +376,28 @@ void control_loop(){
   while(1){
 
     current_time=esp_timer_get_time();
+
+    //receiving part of the program
     //gets data from i2c receive task
-    if(xQueueReceive(dataQueue,&recievedData,0)==pdTRUE){
+    if(xQueueReceive(dataQueue,&recievedData,pdMS_TO_TICKS(10))==pdTRUE){ //This needs some delay to be able to yield to other tasks otherwise error
       last_recieved_time=esp_timer_get_time();
+      newData=true;
       //Handles different packets
       switch(recievedData.regist){ 
         case packet_type_indvidual_switch:{ //Default case ie normal data packet
-          controllerData[recievedData.switchID]={
-            .temperature = recievedData.temperature/100.0f,
-            .target      = recievedData.target/100.0f,
-          };
+          controllerData[recievedData.switchID].temperature = recievedData.temperature/100.0f;
+          controllerData[recievedData.switchID].target      = recievedData.target/100.0f;
+          
+          lastSwitch=recievedData.switchID;
 
           //sets up various controllers
-          if(controllerData[recievedData.switchID].mode==0) //bangbang
+          if(recievedData.mode==0) //bangbang
           {
             controllerData[recievedData.switchID].mode=recievedData.mode;
             controllers[recievedData.switchID]=&bangPool[recievedData.switchID];
             controllerData[recievedData.switchID].max_duty_cycle=100; //This should be changed to a variable or array
           }
-          else if(controllerData[recievedData.switchID].mode==1)//PID
+          else if(recievedData.mode==1)//PID
           {
             controllers[recievedData.switchID]=&PIDPool[recievedData.switchID];
             //Resets PID if you've changed to it will otherwise mess things up
@@ -331,7 +409,7 @@ void control_loop(){
             
             controllerData[recievedData.switchID].max_duty_cycle=100; //This should be changed to a variable or array        
           }
-          else if(controllerData[recievedData.switchID].mode>=155) //manual //recievedData[i].mode<=255 not needed as its always true for uint8
+          else if(recievedData.mode>=155) //manual //recievedData[i].mode<=255 not needed as its always true for uint8
           {
             controllerData[recievedData.switchID].mode=recievedData.mode; //Sets mode for the controllerDta
             controllers[recievedData.switchID]=&manualPool[recievedData.switchID];
@@ -339,7 +417,7 @@ void control_loop(){
             controllers[recievedData.switchID]->update(0,0,controllerData[recievedData.switchID].max_duty_cycle); //Sets dutycycle to the proper one
           }
           else{
-            //error case
+            //error case mode is in range from 2-154
             break;
           }
           controllerData[recievedData.switchID].last_updated=esp_timer_get_time(); //For timeout later
@@ -360,40 +438,90 @@ void control_loop(){
       }
     }
 
-
-    //Stuff below this needs fixing
-    //Need to add if so that PID only triggers once every x ms (is dependant on how often you get data but needs to be constant)
-    //Main control stuff
     
-    for(int i=0;i<number_switches;i++)
-    {
-      //If timeout or off set dutycycle to 0 else call controller class and set dutycycle
-      if(
-        abs(current_time-last_recieved_time)>control_timeout_us || //Global i2c timeout no packat has been recieved in a while
-        abs(current_time-controllerData[i].last_updated)>control_timeout_us || //Local timeout no data for this switch has been recieved
-        all_switches_off //All switches off
-      )
-      { //Error case/Off case
-        controllerData[i].duty_cycle=0; 
-      }
-      //This is a case in case that temperature is out of bounds ie assuming sensor is broken
-      else if(controllerData[i].temperature<temperature_lower_bound || //<-50C
-        controllerData[i].temperature>temperature_higher_bound || //>120C
-        recievedData.temperature==-9999)  //Idunno i believe its error code
+    
+    //Need to add if so that PID only triggers once every x ms (is dependant on how often you get data but needs to be constant)
+    //Main control stuff //TODO implement staggered dutyCycles
+    
+    
+      
+      //Loops through switches
+      if(current_time-last_comtroller_activation>timestep_us) //Makes sure controllers arent running faster than once every timestep us
       {
-        controllerData[i].duty_cycle=0;
-      }
-      else
-      {
-        controllerData[i].duty_cycle=controllers[i]->update(controllerData[i].target,controllerData[i].temperature,controllerData[i].max_duty_cycle);
+        last_comtroller_activation=esp_timer_get_time();
+        for(int i=0;i<number_switches;i++)
+        {
+          
+            
+            //If timeout or off set dutycycle to 0 else call controller class and set dutycycle
+            if(
+              (current_time-last_recieved_time)>control_timeout_us || //Global i2c timeout no packat has been recieved in a while
+              (current_time-controllerData[i].last_updated)>control_timeout_us || //Local timeout no data for this switch has been recieved
+              controllerData[i].last_updated==0 ||
+              all_switches_off //All switches off 
+            )
+            { //Error case/Off case
+              controllerData[i].duty_cycle=0; 
+            }
+            //This is a case in case that temperature is out of bounds ie assuming sensor is broken
+            else if(controllerData[i].temperature<temperature_lower_bound || //<-80C
+              controllerData[i].temperature>temperature_higher_bound || //>120C
+              controllerData[i].temperature==-99.0f)  //Idunno i believe its error code
+            {
+              controllerData[i].duty_cycle=0;
+            }
+            else
+            {
+              controllerData[i].duty_cycle=controllers[i]->update(controllerData[i].target,controllerData[i].temperature,controllerData[i].max_duty_cycle);
+            }
+        }
       }
 
-      bool is_on = duty_cycle_to_on_off(controllerData[i].duty_cycle, timestep_us, current_time); //should add proper timestep that syncs with looptime
-      gpio_set_level(controllerData[i].pin, is_on);
+      //sets level of output pins
+      for(int i=0;i<number_switches;i++) 
+      {
+        //Sets on/off for pin
+          bool is_on = duty_cycle_to_on_off(controllerData[i].duty_cycle, timestep_us, current_time); //should add proper timestep that syncs with looptime
+          gpio_set_level(controllerData[i].pin, is_on);
+      }
+      
+    
+    
+    //Packet with data to send
+    sendPacket={
+    .switchID=lastSwitch,
+    .mode=controllerData[lastSwitch].mode,
+    .D_cycle=controllerData[lastSwitch].duty_cycle,
+    .target=controllerData[lastSwitch].target,
+    .status=error[lastSwitch], //Fix so this error thing actually does its job should be done with giving error corresponding with numbers 2^x and then using or on error ie error1 |error2 (basically does the same as adding them but with safety)
+    .global_mode=0x00
+    };
+
+    if(all_switches_off){
+      sendPacket.global_mode=packet_stop_all;
+    }
+    else if(recievedData.regist==packet_resume_all)
+    {
+      sendPacket.global_mode=packet_resume_all;
+    }
+    else if(recievedData.regist==packet_type_indvidual_switch)
+    {
+      sendPacket.global_mode=packet_type_indvidual_switch;
+    }
+    else{
+      sendPacket.global_mode=0;
     }
     
+    data_pack_indvidual_switch(&sendPacket,dataBuffer);
+    i2c_data_evt send;
+    send.length=8;
+    memcpy(send.data,dataBuffer,send.length);
     
-    vTaskDelay(1); //Otherwise will cause error //Doesnt need to be delay but needs to be something that can pass task to other task
+    if(newData){ //Only does a write to master if data has been received maybe add condition if control loop has ran also in case of failure
+      xQueueOverwrite(dataQueue_slave_tx, &send);  //Writes to send task
+      newData=false;
+    }
+    
   }
 }
 

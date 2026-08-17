@@ -1,7 +1,10 @@
 #pragma once
 #include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
 
-
+#include "driver/i2c_slave.h"
 /*
 Structs
 */
@@ -21,10 +24,15 @@ struct individual_switch_data_tx{
 uint8_t switchID;   //which switch 
 uint8_t mode;   //Mode for switch  
 uint8_t D_cycle; //WHich duty cycle is it using
-int16_t target; // which target temp is it
+float target; // which target temp is it
 uint8_t status; //status/error codes
-uint8_t padding; // future use
+uint8_t global_mode; //Global Mode is if its in emergency mode or not ie mode not specific to a switch
 //Crc8 will be added to send buffer later (it is not in this struct intentionally)
+};
+
+struct i2c_data_evt{
+    uint8_t data[16];
+    size_t length;
 };
 
 
@@ -41,6 +49,8 @@ typedef enum{
 
 }packet_types_t;
 
+
+
 /*
 functions
 */ 
@@ -51,3 +61,22 @@ uint8_t computeCRC8(
 bool data_unpack_indvidual_switch(
     const uint8_t *dataBuffer, 
     individual_switch_data_rx *packet);
+
+bool data_pack_indvidual_switch(
+    const individual_switch_data_tx *packet,
+    uint8_t *data // data should be 1 byte more than packet due to crc8
+);
+
+bool  i2c_slave_on_receive_cb(
+    i2c_slave_dev_handle_t slave_handle,
+     const i2c_slave_rx_done_event_data_t *edata, 
+     void *arg);
+
+bool i2c_slave_on_request_cb(
+    i2c_slave_dev_handle_t slave_handle,
+     const i2c_slave_request_event_data_t *evt_data,
+      void *arg);
+void i2c_loop_send_task(void *pvParameters);
+
+void i2c_loop_task(void *pvParameters);
+
