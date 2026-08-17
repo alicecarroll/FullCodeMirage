@@ -290,6 +290,76 @@ bool handle_command()
         return true;
     }
 
+    // Combined heater config command: "HEATER <id> MODE <mode> TARGET <temp>" for BANGBANG/PID
+    // or "HEATER <id> MODE MANUAL DUTY <0-100>" for MANUAL mode
+    int heater_id_config = 0;
+    char config_mode_str[20] = {0};
+    float config_target_temp = 0.0f;
+    int config_duty = 0;
+    
+    // Try BANGBANG or PID with TARGET
+    if (sscanf(ethernet_command_text.c_str(), "HEATER %d MODE %19s TARGET %f", &heater_id_config, config_mode_str, &config_target_temp) == 3)
+    {
+        if (heater_id_config >= 1 && heater_id_config <= 8)
+        {
+            HeaterControlMode config_mode = HEATER_MODE_BANGBANG;  // default
+            if (std::string(config_mode_str) == "BANGBANG" || std::string(config_mode_str) == "BANG-BANG")
+            {
+                config_mode = HEATER_MODE_BANGBANG;
+            }
+            else if (std::string(config_mode_str) == "PID")
+            {
+                config_mode = HEATER_MODE_PID;
+            }
+            else if (std::string(config_mode_str) == "MANUAL")
+            {
+                ESP_LOGW(TAG, "MANUAL mode requires DUTY parameter, not TARGET. Use: HEATER %d MODE MANUAL DUTY <0-100>", heater_id_config);
+                return false;
+            }
+            else
+            {
+                ESP_LOGW(TAG, "Invalid heater mode: %s (use BANGBANG, PID, or MANUAL)", config_mode_str);
+                return false;
+            }
+            
+            int16_t config_target_scaled = static_cast<int16_t>(config_target_temp * 100);
+            heater_set_mode(heater_system_get_global(), static_cast<uint8_t>(heater_id_config - 1), config_mode);
+            heater_set_target(heater_system_get_global(), static_cast<uint8_t>(heater_id_config - 1), config_target_scaled);
+            ESP_LOGI(TAG, "Heater %d configured: mode=%s, target=%.2f°C", heater_id_config, config_mode_str, config_target_temp);
+            return true;
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Invalid heater index in config command: %s", ethernet_command_text.c_str());
+            return false;
+        }
+    }
+    
+    // Try MANUAL with DUTY
+    if (sscanf(ethernet_command_text.c_str(), "HEATER %d MODE MANUAL DUTY %d", &heater_id_config, &config_duty) == 2)
+    {
+        if (heater_id_config >= 1 && heater_id_config <= 8)
+        {
+            if (config_duty >= 0 && config_duty <= 100)
+            {
+                heater_set_mode(heater_system_get_global(), static_cast<uint8_t>(heater_id_config - 1), HEATER_MODE_MANUAL);
+                heater_set_manual_duty(heater_system_get_global(), static_cast<uint8_t>(heater_id_config - 1), static_cast<uint8_t>(config_duty));
+                ESP_LOGI(TAG, "Heater %d configured: mode=MANUAL, duty=%d%%", heater_id_config, config_duty);
+                return true;
+            }
+            else
+            {
+                ESP_LOGW(TAG, "Invalid duty cycle value: %d (must be 0-100)", config_duty);
+                return false;
+            }
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Invalid heater index in manual config command: %s", ethernet_command_text.c_str());
+            return false;
+        }
+    }
+
     // Heater control mode commands: "HEATER <id> MODE <mode>" where mode is BANGBANG, PID, or MANUAL
     int heater_id_mode = 0;
     char mode_str[20] = {0};
