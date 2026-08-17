@@ -24,7 +24,8 @@
 #include "watchdog.h"
 #include "main.h"
 #include "w5500.h"
-#include "Slaves.h" 
+#include "Slaves.h"
+#include "HeaterControl.h" 
 
 bool loop_exp = true;
 uint16_t time_loop;
@@ -129,7 +130,6 @@ static CommandParseResult queue_pwm_command(const std::string &command)
 }
 
 static void set_heater_bit(uint8_t heater_index, bool enabled)
-// Currently, this function is not used to pass information to the thermal mcu. This should be added (Jonathan, 26.7.)
 {
     if (heater_index >= 8)
     {
@@ -140,10 +140,12 @@ static void set_heater_bit(uint8_t heater_index, bool enabled)
     if (enabled)
     {
         active_heater_mask |= mask;
+        heater_set_enabled(heater_system_get_global(), heater_index, true);
     }
     else
     {
         active_heater_mask &= static_cast<uint8_t>(~mask);
+        heater_set_enabled(heater_system_get_global(), heater_index, false);
     }
 }
 
@@ -286,6 +288,87 @@ bool handle_command()
         restart_requested = true;
         ESP_LOGW(TAG, "Main controller restart scheduled after acknowledgement telemetry");
         return true;
+    }
+
+    // Heater control mode commands: "HEATER <id> MODE <mode>" where mode is BANGBANG, PID, or MANUAL
+    int heater_id_mode = 0;
+    char mode_str[20] = {0};
+    if (sscanf(ethernet_command_text.c_str(), "HEATER %d MODE %19s", &heater_id_mode, mode_str) == 2)
+    {
+        if (heater_id_mode >= 1 && heater_id_mode <= 8)
+        {
+            HeaterControlMode mode = HEATER_MODE_BANGBANG;  // default
+            if (std::string(mode_str) == "BANGBANG" || std::string(mode_str) == "BANG-BANG")
+            {
+                mode = HEATER_MODE_BANGBANG;
+            }
+            else if (std::string(mode_str) == "PID")
+            {
+                mode = HEATER_MODE_PID;
+            }
+            else if (std::string(mode_str) == "MANUAL")
+            {
+                mode = HEATER_MODE_MANUAL;
+            }
+            else
+            {
+                ESP_LOGW(TAG, "Invalid heater mode: %s (use BANGBANG, PID, or MANUAL)", mode_str);
+                return false;
+            }
+            heater_set_mode(heater_system_get_global(), static_cast<uint8_t>(heater_id_mode - 1), mode);
+            ESP_LOGI(TAG, "Heater %d mode set to %s", heater_id_mode, mode_str);
+            return true;
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Invalid heater index in mode command: %s", ethernet_command_text.c_str());
+            return false;
+        }
+    }
+
+    // Heater target temperature command: "HEATER <id> TARGET <temp_in_C>"
+    int heater_id_target = 0;
+    float target_temp_c = 0.0f;
+    if (sscanf(ethernet_command_text.c_str(), "HEATER %d TARGET %f", &heater_id_target, &target_temp_c) == 2)
+    {
+        if (heater_id_target >= 1 && heater_id_target <= 8)
+        {
+            int16_t target_temp_scaled = static_cast<int16_t>(target_temp_c * 100);  // Convert to 0.01°C units
+            heater_set_target(heater_system_get_global(), static_cast<uint8_t>(heater_id_target - 1), target_temp_scaled);
+            ESP_LOGI(TAG, "Heater %d target temperature set to %.2f°C", heater_id_target, target_temp_c);
+            return true;
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Invalid heater index in target command: %s", ethernet_command_text.c_str());
+            return false;
+        }
+    }
+
+    // Heater manual duty cycle command: "HEATER <id> DUTY <0-100>"
+    int heater_id_duty = 0;
+    int duty_val = 0;
+    if (sscanf(ethernet_command_text.c_str(), "HEATER %d DUTY %d", &heater_id_duty, &duty_val) == 2)
+    {
+        if (heater_id_duty >= 1 && heater_id_duty <= 8)
+        {
+            if (duty_val >= 0 && duty_val <= 100)
+            {
+                heater_set_manual_duty(heater_system_get_global(), static_cast<uint8_t>(heater_id_duty - 1), static_cast<uint8_t>(duty_val));
+                ESP_LOGI(TAG, "Heater %d manual duty cycle set to %d%%", heater_id_duty, duty_val);
+                return true;
+            }
+            else
+            {
+                ESP_LOGW(TAG, "Invalid duty cycle value: %d (must be 0-100)", duty_val);
+                return false;
+            }
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Invalid heater index in duty command: %s", ethernet_command_text.c_str());
+            return false;
+        }
     }
 
     for (const auto &entry : pressure_commands)
@@ -444,13 +527,20 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
 
     bool thermal_tx_ok = false;
     //TEST5: remove -1 from while statemnt
-    while (chosen_channel_id_thermal!=(number_channels_thermal-1)){
-        thermal_tx_ok = thermal_test_send_package(
-            thermal_mcu, 
-            chosen_channel_id_thermal, //0x00- 0x07
-            thermal_mode, //0 bang bang 1 PID 155-255 D_cycle
-            thermal_current_temperatures[chosen_channel_id_thermal], // 5000 = 50,00C 
-            thermal_target);
+    while (chosen_channel_id_thermal!=(number_channels_thermal)){
+        HeaterConfig* heater_config = heater_get_config(heater_system_get_global(), chosen_channel_id_thermal);
+        if (heater_config && heater_config->enabled)
+        {
+            uint8_t mode_to_send = (heater_config->mode == HEATER_MODE_MANUAL) 
+                                   ? heater_config->manual_duty_cycle 
+                                   : static_cast<uint8_t>(heater_config->mode);
+            thermal_tx_ok = thermal_test_send_package(
+                thermal_mcu, 
+                chosen_channel_id_thermal, //0x00- 0x07
+                mode_to_send, //0 bang bang 1 PID 155-255 D_cycle
+                thermal_current_temperatures[chosen_channel_id_thermal], // 5000 = 50,00C 
+                heater_config->target_temp);
+        }
         chosen_channel_id_thermal++;
     }
     
@@ -636,6 +726,9 @@ extern "C" void app_main()
     wiz_ensure_connected(targetip, REMOTE_PORT);
     wiz_ping(targetip, "h\n");
 
+    // Initialize heater control system
+    heater_system_init(heater_system_get_global());
+    
     // Set baseline slave watchdog timestamps here, AFTER Ethernet blocks!
     uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
     last_thermal_ping_time = current_time;
