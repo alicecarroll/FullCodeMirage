@@ -2,7 +2,36 @@
 
 ## Command Syntax
 
-### 1. Set Heater Control Mode
+### 1. Configure Heater (Combined Mode + Settings) - RECOMMENDED
+
+#### For Bang-Bang and PID modes:
+```
+HEATER <heater_number> MODE <mode_type> TARGET <temperature_celsius>
+```
+- **heater_number**: 1-8
+- **mode_type**: BANGBANG | BANG-BANG | PID
+- **temperature_celsius**: Any decimal value (e.g., 25, 50.5, 100.25)
+
+**Examples:**
+```
+HEATER 1 MODE PID TARGET 50        # PID control at 50°C
+HEATER 2 MODE BANGBANG TARGET 30.5 # Bang-Bang control at 30.5°C
+```
+
+#### For Manual mode:
+```
+HEATER <heater_number> MODE MANUAL DUTY <percentage>
+```
+- **heater_number**: 1-8
+- **percentage**: 0-100
+
+**Examples:**
+```
+HEATER 3 MODE MANUAL DUTY 75       # Manual mode at 75% power
+HEATER 4 MODE MANUAL DUTY 100      # Manual mode at full power
+```
+
+### 2. Set Heater Control Mode (Separate)
 ```
 HEATER <heater_number> MODE <mode_type>
 ```
@@ -16,7 +45,7 @@ HEATER 2 MODE PID        # PID control for heater 2
 HEATER 3 MODE MANUAL     # Manual control for heater 3
 ```
 
-### 2. Set Target Temperature
+### 3. Set Target Temperature (Separate)
 ```
 HEATER <heater_number> TARGET <temperature_celsius>
 ```
@@ -30,7 +59,7 @@ HEATER 2 TARGET 30.5     # Set heater 2 to 30.5°C
 HEATER 5 TARGET 100      # Set heater 5 to 100°C
 ```
 
-### 3. Set Manual Duty Cycle
+### 4. Set Manual Duty Cycle (Separate)
 ```
 HEATER <heater_number> DUTY <percentage>
 ```
@@ -44,7 +73,7 @@ HEATER 4 DUTY 100        # Full power for heater 4
 HEATER 1 DUTY 0          # Off for heater 1
 ```
 
-### 4. Enable/Disable Heater (Existing Commands)
+### 5. Enable/Disable Heater
 ```
 HEATER ON <heater_number>
 HEATER OFF <heater_number>
@@ -62,7 +91,15 @@ HEATER ALL OFF           # Disable all heaters
 
 ## Typical Usage Sequences
 
-### Scenario 1: PID-Controlled Temperature Chamber
+### Scenario 1: PID-Controlled Temperature Chamber (Combined Commands - RECOMMENDED)
+```
+HEATER 1 MODE PID TARGET 50
+HEATER 1 ON
+HEATER 2 MODE PID TARGET 50
+HEATER 2 ON
+```
+
+**Or with separate commands:**
 ```
 HEATER 1 MODE PID
 HEATER 1 TARGET 50
@@ -72,14 +109,26 @@ HEATER 2 TARGET 50
 HEATER 2 ON
 ```
 
-### Scenario 2: Manual Power Control
+### Scenario 2: Manual Power Control (Combined Commands - RECOMMENDED)
+```
+HEATER 3 MODE MANUAL DUTY 75
+HEATER 3 ON
+```
+
+**Or with separate commands:**
 ```
 HEATER 3 MODE MANUAL
 HEATER 3 DUTY 75
 HEATER 3 ON
 ```
 
-### Scenario 3: Bang-Bang Control
+### Scenario 3: Bang-Bang Control (Combined Commands - RECOMMENDED)
+```
+HEATER 4 MODE BANGBANG TARGET 25
+HEATER 4 ON
+```
+
+**Or with separate commands:**
 ```
 HEATER 4 MODE BANGBANG
 HEATER 4 TARGET 25

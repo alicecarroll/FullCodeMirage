@@ -85,7 +85,15 @@ On startup, `heater_system_init()` sets defaults:
 - All targets set to 20°C
 
 ### Step 2: Configure Heaters via Commands
-Ground station sends configuration commands:
+Ground station sends configuration commands (combined or separate):
+
+**Combined (RECOMMENDED):**
+```
+HEATER 1 MODE PID TARGET 50
+HEATER 1 ON
+```
+
+**Or separate:**
 ```
 HEATER 1 MODE PID
 HEATER 1 TARGET 50

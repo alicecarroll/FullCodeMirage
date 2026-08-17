@@ -62,7 +62,38 @@ Returns the global heater system instance used by main.cpp.
 
 ## Ethernet Command Interface
 
-### Set Heater Control Mode
+### Configure Heater (Combined Mode + Settings) - RECOMMENDED
+
+**For Bang-Bang and PID modes:**
+**Command Format:** `HEATER <id> MODE <mode> TARGET <temperature_C>`
+
+**Parameters:**
+- `<id>` - Heater number (1-8)
+- `<mode>` - Control mode: `BANGBANG`, `BANG-BANG`, or `PID`
+- `<temperature_C>` - Temperature in degrees Celsius (can include decimals)
+
+**Examples:**
+```
+HEATER 1 MODE PID TARGET 50.5
+HEATER 3 MODE BANGBANG TARGET 25
+HEATER 7 MODE PID TARGET 30.75
+```
+
+**For Manual mode:**
+**Command Format:** `HEATER <id> MODE MANUAL DUTY <0-100>`
+
+**Parameters:**
+- `<id>` - Heater number (1-8)
+- `<0-100>` - Duty cycle percentage
+
+**Examples:**
+```
+HEATER 2 MODE MANUAL DUTY 75
+HEATER 6 MODE MANUAL DUTY 100
+HEATER 4 MODE MANUAL DUTY 0
+```
+
+### Set Heater Control Mode (Separate)
 **Command Format:** `HEATER <id> MODE <mode>`
 
 **Parameters:**
@@ -76,7 +107,7 @@ HEATER 5 MODE PID
 HEATER 8 MODE MANUAL
 ```
 
-### Set Target Temperature
+### Set Target Temperature (Separate)
 **Command Format:** `HEATER <id> TARGET <temperature_C>`
 
 **Parameters:**
@@ -90,7 +121,7 @@ HEATER 3 TARGET 25
 HEATER 7 TARGET 30.75
 ```
 
-### Set Manual Duty Cycle
+### Set Manual Duty Cycle (Separate)
 **Command Format:** `HEATER <id> DUTY <0-100>`
 
 **Parameters:**
@@ -115,6 +146,26 @@ HEATER ALL OFF     # Disable all heaters
 
 ## Usage Example Sequence
 
+### Combined Commands (RECOMMENDED)
+To set up Heater 1 for PID control at 50°C:
+```
+HEATER 1 MODE PID TARGET 50.0
+HEATER 1 ON
+```
+
+To set up Heater 2 for manual control at 75% duty cycle:
+```
+HEATER 2 MODE MANUAL DUTY 75
+HEATER 2 ON
+```
+
+To set up Heater 3 for Bang-Bang control at 30°C:
+```
+HEATER 3 MODE BANGBANG TARGET 30.0
+HEATER 3 ON
+```
+
+### Separate Commands (Alternative)
 To set up Heater 1 for PID control at 50°C:
 ```
 HEATER 1 MODE PID

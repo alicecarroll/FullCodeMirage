@@ -37,7 +37,10 @@ MODE_NAMES = {
 
 
 def command_sender(conn, stop_event):
-    print("Type heater commands like: HEATER ON 1, HEATER OFF 1, HEATER ALL ON, HEATER ALL OFF")
+    print("Type heater commands like:")
+    print("  Combined: HEATER 1 MODE PID TARGET 50, HEATER 1 MODE MANUAL DUTY 75")
+    print("  Separate: HEATER 1 MODE PID, HEATER 1 TARGET 50, HEATER 1 DUTY 75")
+    print("  Enable/Disable: HEATER ON 1, HEATER OFF 1, HEATER ALL ON, HEATER ALL OFF")
     while not stop_event.is_set():
         try:
             command = input()
