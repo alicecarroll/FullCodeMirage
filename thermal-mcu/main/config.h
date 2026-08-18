@@ -8,8 +8,8 @@
 #include "freertos/task.h"
 
 //Pin definitions
-#define SDA_PIN GPIO_NUM_13
-#define SCL_PIN GPIO_NUM_14
+#define SDA_PIN GPIO_NUM_11
+#define SCL_PIN GPIO_NUM_12
 
 //The names for these can be switched around. They are for consistency with the circuit board
 #define SD_Card_PIN GPIO_NUM_5
