@@ -1,15 +1,18 @@
 {
-  "idf.currentSetup": "C:\\esp\\v6.0.2\\esp-idf",
+  "idf.currentSetup": "C:\\esp\\v6.0.1\\esp-idf",
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
   ],
+  "idf.portWin": "COM7",
   "idf.customExtraVars": {
-    "IDF_TARGET": "esp32s3"
+    "IDF_TARGET": "esp32s3",
+    "IDF_PATH": "/esp/v6.0.1/esp-idf"
   },
   "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-20.1.1_20250829\\esp-clang\\bin\\clangd.exe",
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
-    "--compile-commands-dir=c:\\Users\\sixte\\Skrivbord\\arduino projekt\\FullCodeMirage\\thermal-mcu\\build"
-  ]
+    "--compile-commands-dir=c:\\Users\\atsch\\Desktop\\REXUSBEXUS\\Software\\FullCodeMirage\\thermal-mcu\\build"
+  ],
+  "idf.flashType": "UART"
 }

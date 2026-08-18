@@ -294,7 +294,7 @@ bool handle_command()
     // or "HEATER <id> MODE MANUAL DUTY <0-100>" for MANUAL mode
     int heater_id_config = 0;
     char config_mode_str[20] = {0};
-    float config_target_temp = 0.0f;
+    float config_target_temp = 29.0f;
     int config_duty = 0;
     
     // Try BANGBANG or PID with TARGET
@@ -398,7 +398,7 @@ bool handle_command()
 
     // Heater target temperature command: "HEATER <id> TARGET <temp_in_C>"
     int heater_id_target = 0;
-    float target_temp_c = 0.0f;
+    float target_temp_c = 29.0f;
     if (sscanf(ethernet_command_text.c_str(), "HEATER %d TARGET %f", &heater_id_target, &target_temp_c) == 2)
     {
         if (heater_id_target >= 1 && heater_id_target <= 8)
@@ -588,8 +588,8 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
     //temperature array used for temperature data for thermal
     thermal_current_temperatures[0]=static_cast<uint16_t> (sensor_data.Tt2*100); //thermal expect temp values where 5000=50.00 C
     thermal_current_temperatures[1]=static_cast<uint16_t>(sensor_data.Tp2*100);
-    thermal_current_temperatures[2]=static_cast<uint16_t>(sensor_data.Tp3*100);
-    thermal_current_temperatures[3]=static_cast<uint16_t>(sensor_data.Tp4*100);
+    thermal_current_temperatures[2]=static_cast<uint16_t>(sensor_data.Tt1*100);
+    thermal_current_temperatures[3]=static_cast<uint16_t>(sensor_data.Tt3*100);
     thermal_current_temperatures[4]=static_cast<uint16_t>(sensor_data.Tp5*100);
     thermal_current_temperatures[5]=static_cast<uint16_t>(sensor_data.Tp6*100);
     thermal_current_temperatures[6]=static_cast<uint16_t>(sensor_data.Tt1*100);
@@ -615,7 +615,7 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
     }
     
     // TEST1: Remove this line
-    chosen_channel_id_thermal=0;
+    //chosen_channel_id_thermal=0;
 
     if (thermal_tx_ok)
     {

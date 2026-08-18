@@ -54,7 +54,7 @@ void i2c_loop_task(void *pvParameters)
         .switchID=0x00,
         .mode=155,
         .temperature=20,
-        .target=20,
+        .target=0,
         .crc8=0}; //crc8 should get actual calue but doesnt really matter
     individual_switch_data_rx receive_indvidual_switch_packet;
     individual_switch_data_rx controllerData;
@@ -64,6 +64,7 @@ void i2c_loop_task(void *pvParameters)
         
         if(xQueueReceive(dataQueue_slave_rx,&evtData,portMAX_DELAY)) //is true if package has been recieved
         {
+            ESP_LOGI("I2C loop:", "First check");
             packet_error=false;
             uint8_t regi=evtData.data[0]; //regiester/command byte which determines packet type
 
@@ -83,6 +84,7 @@ void i2c_loop_task(void *pvParameters)
                         else
                         {
                             controllerData = receive_indvidual_switch_packet;
+                            ESP_LOGE("I2C loop:", "controller data? %d",regi);
                         }
                         //implement clear of databuffer after read message
                         //Add timeout for specific packages ie replace crc8 with time since this package has last been received
@@ -93,11 +95,11 @@ void i2c_loop_task(void *pvParameters)
                     break;
                 case packet_stop_all:  //Emergency stop
                     controllerData=default_off_package;
-                    controllerData.regist=packet_stop_all;
+                    controllerData.regist = packet_stop_all;
                     break;
                 case packet_resume_all: //Resume normal operations
                     controllerData=default_off_package;
-                    controllerData.regist=packet_resume_all;
+                    controllerData.regist = packet_resume_all;
                     break;
                 default:
                         ESP_LOGW("I2C", "Unknown packet register: 0x%02X", regi);
@@ -174,8 +176,8 @@ bool data_unpack_indvidual_switch(const uint8_t *dataBuffer, individual_switch_d
     //unpacks buffer into the packet
     packet -> regist    = dataBuffer[0]; //regiester/command determines packet type
     packet -> switchID  = dataBuffer[1]; //switch id 0-7
-    packet -> mode      = dataBuffer[2]; //mode 
-    packet ->temperature= static_cast<int16_t>(static_cast<uint16_t>(dataBuffer[3]) <<8 | static_cast<uint16_t>(dataBuffer[4]));
+    packet -> mode      = dataBuffer[2]; //mode 0 bang bang 1 PID 155-255 D_cycle
+    packet -> temperature= static_cast<int16_t>(static_cast<uint16_t>(dataBuffer[3]) <<8 | static_cast<uint16_t>(dataBuffer[4]));
     packet -> target    = static_cast<int16_t>(static_cast<uint16_t>(dataBuffer[5]) <<8 | static_cast<uint16_t>(dataBuffer[6]));
     packet -> crc8      = dataBuffer[7];
     
@@ -200,7 +202,6 @@ bool data_pack_indvidual_switch(    //input a struct and get ouy uint8array
     data[4]=static_cast<uint8_t>((unsigned_target) & 0xFF); //lsb
     data[5]=packet -> status; //Errors
     data[6]=packet->global_mode; //Which global mode its in
-
     data[7]=computeCRC8(data, INDIVIDUAL_SWITCH_TX_LEN-1);
     return true;
 }

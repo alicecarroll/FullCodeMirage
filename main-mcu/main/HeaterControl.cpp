@@ -16,7 +16,7 @@ void heater_system_init(HeaterSystem* system)
     for (int i = 0; i < 8; i++) {
         system->heaters[i].heater_id = i;
         system->heaters[i].mode = HEATER_MODE_PID;  // Default to PID control
-        system->heaters[i].target_temp = 5000;           // Default to 20.00°C
+        system->heaters[i].target_temp = 3000;           // Default to 20.00°C
         system->heaters[i].manual_duty_cycle = 0;
         system->heaters[i].enabled = false;
     }

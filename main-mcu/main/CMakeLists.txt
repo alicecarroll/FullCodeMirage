@@ -4,6 +4,7 @@ idf_component_register(
         "ConnectionLoss.cpp"
         "EthernetCom.cpp"
         #"Humidity.cpp"
+        "HeaterControl.cpp"
         "Initialize.cpp"
         "Multiplexer.cpp"
         "Neopixel.cpp"

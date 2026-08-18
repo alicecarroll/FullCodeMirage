@@ -1,4 +1,6 @@
 #include <string.h>
+#include "esp_system.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/i2c.h"
@@ -13,6 +15,8 @@
 
 // Shared slave address
 #define Slave_MCU_addr  0x10
+static const char *TAG = "Slaves";
+
 
 //Crc 8 table. Is a table to make algorithm more compute efficient
 uint8_t crc8_table[256] = {0, 7, 14, 9, 28, 27, 18, 21, 56, 63, 54, 49, 36, 35, 42, 45, 112, 119, 126, 121, 108, 107, 98, 101, 72, 79, 70, 65, 84, 83,
@@ -171,12 +175,15 @@ bool thermal_test_receive_package(  //when passing variable to this one remember
             &mux_channel,
             &reset_pin))
         {
+            ESP_LOGE_CAPTURED(ERROR_BIT_50, TAG, "No slave selected");
             return false;
         }
 
     //Purpose is to run selectmuxchannel "if" is just to handle errors
     if (sel_mux_channel(mux_channel) != ESP_OK)
     {
+        ESP_LOGE_CAPTURED(ERROR_BIT_50, TAG, "Thermal mux channel error");
+
         return false;
     }
     
@@ -198,11 +205,15 @@ bool thermal_test_receive_package(  //when passing variable to this one remember
     if (err != ESP_OK)
     {
         *error=1; //esp error
+        ESP_LOGE_CAPTURED(ERROR_BIT_50, TAG, "fatal error thermal");
+
         return false;
     }
 
     if(data[7]!=computeCRC8(data, dataLength-1)){  //Verifies packet integrity start value for crc is 0 so crc should return 0
         *error=2; //crc error packet has been corrupted
+        ESP_LOGE_CAPTURED(ERROR_BIT_50, TAG, "CRC error");
+
         return false; 
     }
 

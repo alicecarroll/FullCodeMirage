@@ -6,7 +6,7 @@
 struct controller_data_struct{
     uint8_t mode=155; //0 bangbang 1 pid 155-255 manual
     float temperature=0; 
-    float target=20;
+    float target=30;
     uint8_t duty_cycle=0;  //Used as actual dutyCycle for the switches
     uint8_t max_duty_cycle=0; //Used as max dutycycle and this equals dutyCycle in manual mode
     bool timeout=false;
