@@ -80,7 +80,7 @@ extern spi_device_handle_t WIZ_handle;
 #define LOCAL_PORT 6000
 #define REMOTE_PORT 5001 //port to  listen from pc
 // Socket 0 14KB TX + 14KB RX internal buffer
-// Socket 1  2KB TX +  2KB RX internal buffer
+// Socket 1// Heater 3 = bit index 2 (0-based)
 
 #define ETHERNET_BUF_SIZE 128 // 64 probly enough //datatype should be: size_t
 #define LOOP_WO_CONNECTION 50 // Number of loops to wait before entering safe mode when connection is lost

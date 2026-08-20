@@ -495,8 +495,7 @@ void control_loop(void *pvParameters){
     .target=controllerData[lastSwitch].target,
     .status=error[lastSwitch], //Fix so this error thing actually does its job should be done with giving error corresponding with numbers 2^x and then using or on error ie error1 |error2 (basically does the same as adding them but with safety)
     .global_mode=0x00
-    };
-
+    };    
     if(all_switches_off){
       sendPacket.global_mode=packet_stop_all;
     }
@@ -521,7 +520,10 @@ void control_loop(void *pvParameters){
       xQueueOverwrite(dataQueue_slave_tx, &send);  //Writes to send task
       newData=false;
     }
-    
+        // Heater 3 ON
+    gpio_set_level(inlet1_PIN, 1);   // set HIGH = ON
+    // gpio_set_level(controllerData[2].pin, 1);   // if Heater 3 is the 3rd switch/channel
+
   }
 }
 

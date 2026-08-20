@@ -61,6 +61,7 @@ void i2c_loop_task(void *pvParameters)
     i2c_data_evt evtData; //Data from i2c
 
     while(1){
+        ESP_LOGI("I2C loop:", "loop start");
         
         if(xQueueReceive(dataQueue_slave_rx,&evtData,portMAX_DELAY)) //is true if package has been recieved
         {
@@ -88,8 +89,10 @@ void i2c_loop_task(void *pvParameters)
                         //Add timeout for specific packages ie replace crc8 with time since this package has last been received
                        
                     }
+                    else{
                     packet_error=true;
                     ESP_LOGE("I2C loop:", "Incomplete packet");
+                    }
                     break;
                 case packet_stop_all:  //Emergency stop
                     controllerData=default_off_package;

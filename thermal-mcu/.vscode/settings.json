@@ -1,5 +1,5 @@
 {
-  "idf.currentSetup": "C:\\esp\\v6.0.2\\esp-idf",
+  "idf.currentSetup": "C:\\esp\\v6.0.1\\esp-idf",
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
   ],
@@ -11,5 +11,7 @@
     "--background-index",
     "--query-driver=**",
     "--compile-commands-dir=c:\\Users\\sixte\\Skrivbord\\arduino projekt\\FullCodeMirage\\thermal-mcu\\build"
-  ]
+  ],
+  "idf.flashType": "UART",
+  "idf.portWin": "COM7"
 }

@@ -72,6 +72,8 @@ void startup(){
         ESP_LOGE("TaskCreation", "Failed to create task! ControlTask");
     }
 
+    
+
 }
 
 // esp_err_t init_i2c_slave() //initilizes the i2c communication properly with correct pins
