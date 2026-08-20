@@ -62,6 +62,7 @@ uint8_t targetip[4] = {192, 168, 0, 3};
 bool command_received = false;
 bool con_lost = false; // To track connection status
 bool status_ok = true;
+bool thermal_tx_ok = true;
 CapturedErrors captured_errors = {};
 CapturedErrors captured_errors_for_k96 = {}; // To store the captured errors for K96 before clearing them
 int32_t LOOP_RETRY_CONNECTION = 10; // Number of loops to wait before retrying connection
@@ -595,7 +596,7 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
     thermal_current_temperatures[6]=static_cast<uint16_t>(sensor_data.Tt1*100);
     thermal_current_temperatures[7]=static_cast<uint16_t>(sensor_data.Tt2*100);
 
-    bool thermal_tx_ok = false;
+    
     //TEST5: remove -1 from while statemnt
     while (chosen_channel_id_thermal!=(number_channels_thermal)){
         HeaterConfig* heater_config = heater_get_config(heater_system_get_global(), chosen_channel_id_thermal);
@@ -604,6 +605,7 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
             uint8_t mode_to_send = (heater_config->mode == HEATER_MODE_MANUAL) 
                                    ? heater_config->manual_duty_cycle 
                                    : static_cast<uint8_t>(heater_config->mode);
+            ESP_LOGI("thermal comms", "before thermal_test_send_package");
             thermal_tx_ok = thermal_test_send_package(
                 thermal_mcu, 
                 chosen_channel_id_thermal, //0x00- 0x07

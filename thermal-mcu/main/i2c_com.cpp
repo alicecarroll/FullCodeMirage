@@ -90,8 +90,10 @@ void i2c_loop_task(void *pvParameters)
                         //Add timeout for specific packages ie replace crc8 with time since this package has last been received
                        
                     }
+                    else{
                     packet_error=true;
                     ESP_LOGE("I2C loop:", "Incomplete packet");
+                    }
                     break;
                 case packet_stop_all:  //Emergency stop
                     controllerData=default_off_package;

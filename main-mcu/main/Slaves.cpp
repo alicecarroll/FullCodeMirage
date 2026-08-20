@@ -117,6 +117,7 @@ bool thermal_test_send_package(
             &mux_channel,
             &reset_pin))
         {
+            ESP_LOGE("Thermal test send", "Slave could not be selected");
             return false;
         }
     
@@ -124,6 +125,7 @@ bool thermal_test_send_package(
     //Purpose us to run selectmuxchannel if is just to handle errors
     if (sel_mux_channel(mux_channel) != ESP_OK)
     {
+        ESP_LOGE("Thermal test send", "MUX channel selection failed");
         return false;
     }
     
@@ -149,6 +151,8 @@ bool thermal_test_send_package(
                 sizeof(package),
                 100 / portTICK_PERIOD_MS
             );
+    
+    ESP_LOGI("Thermal test send", "finished");
 
     return (err == ESP_OK); 
 
