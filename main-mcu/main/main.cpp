@@ -603,7 +603,7 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
         if (heater_config && heater_config->enabled)
         {
             uint8_t mode_to_send = (heater_config->mode == HEATER_MODE_MANUAL) 
-                                   ? heater_config->manual_duty_cycle 
+                                   ? static_cast<uint8_t>(155U + heater_config->manual_duty_cycle)
                                    : static_cast<uint8_t>(heater_config->mode);
             ESP_LOGI("thermal comms", "before thermal_test_send_package");
             thermal_tx_ok = thermal_test_send_package(

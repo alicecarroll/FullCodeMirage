@@ -117,10 +117,10 @@ bool heater_send_config_to_thermal(uint8_t heater_id, int16_t current_temp)
         return false;
     }
     
-    // Convert mode to appropriate value for thermal MCU
-    // If manual mode, send the duty cycle value (200-255), otherwise send mode
+    // Convert mode to the value expected by the thermal MCU.
+    // Manual duty 0-100 is encoded as 155-255; other modes keep their values.
     uint8_t mode_to_send = (config->mode == HEATER_MODE_MANUAL) 
-                          ? config->manual_duty_cycle 
+                          ? static_cast<uint8_t>(155U + config->manual_duty_cycle)
                           : static_cast<uint8_t>(config->mode);
     
     // Send to thermal MCU via I2C

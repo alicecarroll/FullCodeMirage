@@ -1,8 +1,3 @@
-//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-// 100% Calude.................
-// But I removed some stuff.
-//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
 /*
  * Ethernet_com.cpp
  *
@@ -38,6 +33,7 @@
 
 #include "wizchip_conf.h"
 #include "wizsocket.h"
+#include "lwip/def.h"
 
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
