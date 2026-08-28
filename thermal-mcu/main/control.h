@@ -12,7 +12,6 @@ struct controller_data_struct{
     bool timeout=false;
     gpio_num_t pin=GPIO_NUM_9;
     int64_t last_updated=0; //Used for indvidual switch timeout 
-
 };
 //Add controller class
 
