@@ -1,3 +1,6 @@
+//(!!!!!!!!!!!!!!!!!FOR TESTING PURPOSES ONLY!!!!!!!!!!!!!!!!)
+//Line 25
+
 #include "HeaterControl.h"
 #include "Slaves.h"
 #include "Settings.h"
@@ -8,6 +11,12 @@ static const char *TAG = "HeaterControl";
 
 // Global heater system instance
 static HeaterSystem global_heater_system;
+//This is an array of size 8 that holds the configuration for each heater. The configuration contains:
+// uint8_t heater_id;           // 0-7
+// HeaterControlMode mode;      // Current control mode
+// int16_t target_temp;         // Target temperature (in 0.01°C units, e.g., 5000 = 50.00°C)
+// uint8_t manual_duty_cycle;   // Only used when mode is HEATER_MODE_MANUAL (0-100)
+// bool enabled;                // Whether heater is enabled
 
 // Initialize heater system with default values
 void heater_system_init(HeaterSystem* system)
@@ -16,7 +25,7 @@ void heater_system_init(HeaterSystem* system)
     for (int i = 0; i < 8; i++) {
         system->heaters[i].heater_id = i;
         system->heaters[i].mode = HEATER_MODE_PID;  // Default to PID control
-        system->heaters[i].target_temp = 3000;           // Default to 20.00°C
+        system->heaters[i].target_temp = 3000;           // Default to 30.00°C (!!!!!!!!!!!!!!!!!FOR TESTING PURPOSES ONLY!!!!!!!!!!!!!!!!)
         system->heaters[i].manual_duty_cycle = 0;
         system->heaters[i].enabled = false;
     }
@@ -118,7 +127,7 @@ bool heater_send_config_to_thermal(uint8_t heater_id, int16_t current_temp)
     }
     
     // Convert mode to the value expected by the thermal MCU.
-    // Manual duty 0-100 is encoded as 155-255; other modes keep their values.
+    // Manual duty 0-100 is encoded as 155-255; Manual = 1, PID = 0.
     uint8_t mode_to_send = (config->mode == HEATER_MODE_MANUAL) 
                           ? static_cast<uint8_t>(155U + config->manual_duty_cycle)
                           : static_cast<uint8_t>(config->mode);
