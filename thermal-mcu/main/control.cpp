@@ -502,13 +502,13 @@ void control_loop(void *pvParameters) {
               controllerData[i].target, controllerData[i].temperature,
               controllerData[i].max_duty_cycle);
         }
-        //ESP_LOGI("Control:", "Switch: %d,  Mode: %d, DutyCycle %d", i, controllerData[i].mode, controllerData[i].duty_cycle);
+        ESP_LOGI("Control:", "Switch: %d,  Mode: %d, DutyCycle %d, Temperature: %g", i, controllerData[i].mode, controllerData[i].duty_cycle, controllerData[i].temperature);
         
       }
-      ESP_LOGI("Control:", "Switch 2. Mode: %d, DutyCycle: %d Target %g, Temperature %g", controllerData[2].mode, 
-        controllerData[2].duty_cycle,
-        controllerData[2].target,
-        controllerData[2].temperature);
+      //ESP_LOGI("Control:", "Switch 2. Mode: %d, DutyCycle: %d Target %g, Temperature %g", controllerData[2].mode, 
+      //  controllerData[2].duty_cycle,
+      //  controllerData[2].target,
+      //  controllerData[2].temperature);
     }
 
     // sets level of output pins
