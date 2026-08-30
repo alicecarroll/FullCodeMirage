@@ -232,7 +232,7 @@ bool handle_command()
         ESP_LOGI(TAG, "Manual mode overwrite reset");
         return true;
     }
-
+//FIX1
     if (sscanf(ethernet_command_text.c_str(), "HEATER ON %d", &heater_index) == 1) // Should be updated to allow for target temperature settings
     {
         if (heater_index >= 1 && heater_index <= 8)
@@ -857,7 +857,6 @@ void loop()
     //buffer_SD_data_csv_single();      //est time: 3 ms
     //buffer_SD_data_binary(sensor_data); //4k - est time: 1.5 ms every 8th loop
     buffer_SD_data_csv(&sensor_data);      //4k - est time: 3 ms every 8th loop
-    print_sensor_data(&sensor_data);
 
     // Status Check Block
     if (sensor_data.Pa1 < P_STRATOSPHERE)

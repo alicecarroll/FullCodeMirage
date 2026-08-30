@@ -6,7 +6,7 @@
 typedef enum {
     HEATER_MODE_BANGBANG = 0,    // Hysteresis/Bang-Bang control
     HEATER_MODE_PID = 1,          // PID control
-    HEATER_MODE_MANUAL = 200      // Manual control (200-255 can be manual with different duty cycles)
+    HEATER_MODE_MANUAL = 155      // Manual control (155-255 can be manual with different duty cycles)
 } HeaterControlMode;
 
 // Heater control configuration for a single heater
