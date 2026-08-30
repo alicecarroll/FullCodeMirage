@@ -1,15 +1,15 @@
 #pragma once 
-#include "driver/i2c.h"
+//#include "driver/i2c.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "driver/uart.h"
-#include "driver/i2c_slave.h"
+#include "driver/i2c.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 //Pin definitions
-#define SDA_PIN GPIO_NUM_11 //formerly 13
-#define SCL_PIN GPIO_NUM_12 //formerly 14
+#define SDA_PIN GPIO_NUM_11
+#define SCL_PIN GPIO_NUM_12
 
 //The names for these can be switched around. They are for consistency with the circuit board
 #define SD_Card_PIN GPIO_NUM_5
@@ -32,11 +32,10 @@
 
 //Global variables
 extern QueueHandle_t dataQueue;
-extern QueueHandle_t dataQueue_slave_rx;
 extern QueueHandle_t dataQueue_slave_tx;
 extern TaskHandle_t i2c_send_task_handle;
 extern TaskHandle_t control_loop_task_handle;
-extern i2c_slave_dev_handle_t slave_handle;
+
 
 
 

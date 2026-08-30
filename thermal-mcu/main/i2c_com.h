@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "driver/i2c_slave.h"
+#include "driver/i2c.h"
 /*
 Structs
 */
@@ -31,7 +31,7 @@ uint8_t global_mode; //Global Mode is if its in emergency mode or not ie mode no
 };
 
 struct i2c_data_evt{
-    uint8_t data[16];
+    uint8_t data[8];
     size_t length;
 };
 
@@ -45,8 +45,7 @@ typedef enum{
     packet_type_indvidual_switch=0x01,
     packet_stop_all=0x15,
     packet_resume_all=0x31
-
-
+    
 }packet_types_t;
 
 
@@ -67,15 +66,7 @@ bool data_pack_indvidual_switch(
     uint8_t *data // data should be 1 byte more than packet due to crc8
 );
 
-bool  i2c_slave_on_receive_cb(
-    i2c_slave_dev_handle_t slave_handle,
-     const i2c_slave_rx_done_event_data_t *edata, 
-     void *arg);
 
-bool i2c_slave_on_request_cb(
-    i2c_slave_dev_handle_t slave_handle,
-     const i2c_slave_request_event_data_t *evt_data,
-      void *arg);
 void i2c_loop_send_task(void *pvParameters);
 
 void i2c_loop_task(void *pvParameters);
