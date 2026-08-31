@@ -106,12 +106,11 @@ bool thermal_test_send_package(
     int16_t target  
 )
 {
-
     //From earlier
     uint8_t mux_channel; //multiplexer channel, defined in select_slave
     gpio_num_t reset_pin;//reset pin, defined in select_slave
 
-    //Purpose is to run selectskave if is just to handle error
+    //Purpose is to run select_slave if is just to handle error
     if (!select_slave(
             slave,
             &mux_channel,
@@ -121,8 +120,7 @@ bool thermal_test_send_package(
             return false;
         }
     
-
-    //Purpose us to run selectmuxchannel if is just to handle errors
+    //Purpose is to run selectmuxchannel if is just to handle errors
     if (sel_mux_channel(mux_channel) != ESP_OK)
     {
         ESP_LOGE("Thermal test send", "MUX channel selection failed");

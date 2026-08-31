@@ -232,8 +232,9 @@ bool handle_command()
         ESP_LOGI(TAG, "Manual mode overwrite reset");
         return true;
     }
-//FIX1
-    if (sscanf(ethernet_command_text.c_str(), "HEATER ON %d", &heater_index) == 1) // Should be updated to allow for target temperature settings
+//FIX1 Old code but could be used //Lydia
+    // Should be updated to allow for target temperature settings
+    if (sscanf(ethernet_command_text.c_str(), "HEATER ON %d", &heater_index) == 1) 
     {
         if (heater_index >= 1 && heater_index <= 8)
         {
@@ -275,7 +276,9 @@ bool handle_command()
         return true;
     }
 
-    if (ethernet_command_text == "EMERGENCY STOP" || ethernet_command_text == "SAFE SHUTDOWN" || ethernet_command_text == "SHUTDOWN")
+    if (ethernet_command_text == "EMERGENCY STOP" ||
+        ethernet_command_text == "SAFE SHUTDOWN" ||
+        ethernet_command_text == "SHUTDOWN")
     {
         enter_safe_shutdown(MAIN_CONTROLLER_SAFE_SHUTDOWN);
         buffer_SD_data_flush();
@@ -299,7 +302,8 @@ bool handle_command()
     int config_duty = 0;
     
     // Try BANGBANG or PID with TARGET
-    if (sscanf(ethernet_command_text.c_str(), "HEATER %d MODE %19s TARGET %f", &heater_id_config, config_mode_str, &config_target_temp) == 3)
+    if (sscanf(ethernet_command_text.c_str(), "HEATER %d MODE %19s TARGET %f",
+                &heater_id_config, config_mode_str, &config_target_temp) == 3)
     {
         if (heater_id_config >= 1 && heater_id_config <= 8)
         {
@@ -569,9 +573,7 @@ uint8_t number_channels_thermal=8;  //0-8 depending on the number of switches us
 // TEST3: Remove and change to arrays (!!!Change where these are used in the code as well!!!)
 uint8_t thermal_mode=1; //0 bang bang 1 PID 155-255 D_cycle
 int16_t thermal_currentTemp=2000; // 5000 = 50,0C  
-int16_t thermal_target=3000;
-// uint8_t thermal_mode[8]={1,1,1,1,1,1,1,1}; //0 bang bang 1 PID 155-255 D_cycle
-// int16_t thermal_target[8]={5000,5000,5000,5000,5000,5000,5000,5000};
+int16_t thermal_target=5000;
 int16_t thermal_watchdog_tolerance=3000; // 1 according to SEDv3. Number of subsequent times where the thermal slave is reset. If reset more than this number of times, the thermal MCU will be considered lost.
 bool thermal_mcu_lost=false; // To track if the thermal slave is lost.
 //Data recieved from thermal
@@ -596,19 +598,22 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
     thermal_current_temperatures[6]=static_cast<uint16_t>(sensor_data.Tt1*100);
     thermal_current_temperatures[7]=static_cast<uint16_t>(sensor_data.Tt2*100);
 
-    
-    //TEST5: remove -1 from while statemnt
+    // This is where data is gathered and sent to the thermal communication function.
+    // The loop will go through all channels and send data for each channel.
     while (chosen_channel_id_thermal!=(number_channels_thermal)){
         HeaterConfig* heater_config = heater_get_config(heater_system_get_global(), chosen_channel_id_thermal);
+        
+        // When heater is off, send as if manual with 0 duty cycle.
         if (heater_config && !heater_config->enabled)
         {
             thermal_tx_ok = thermal_test_send_package(
                 thermal_mcu, 
                 chosen_channel_id_thermal, //0x00- 0x07
                 155, //0 bang bang 1 PID 155-255 D_cycle
-                thermal_current_temperatures[chosen_channel_id_thermal], // 5000 = 50,00C 
+                thermal_current_temperatures[chosen_channel_id_thermal], 
                 heater_config->target_temp);
         }
+        // When heater is on, send the actual mode and target temperature.
         else if (heater_config && heater_config->enabled)
         {
             uint8_t mode_to_send = (heater_config->mode == HEATER_MODE_MANUAL) 
@@ -619,7 +624,7 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
                 thermal_mcu, 
                 chosen_channel_id_thermal, //0x00- 0x07
                 mode_to_send, //0 bang bang 1 PID 155-255 D_cycle
-                thermal_current_temperatures[chosen_channel_id_thermal], // 5000 = 50,00C 
+                thermal_current_temperatures[chosen_channel_id_thermal],
                 heater_config->target_temp);
         }
         chosen_channel_id_thermal++;
