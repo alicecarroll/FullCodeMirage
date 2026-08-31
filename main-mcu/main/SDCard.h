@@ -43,6 +43,13 @@ extern "C"
     bool sd_get_free_percent(uint8_t *free_percent);
     void buffer_SD_data_csv(SensorData *sensor_data);
     void buffer_SD_data_flush(void);
+    void log_metadata_event(const char *event_type,
+                            int mode,
+                            int flight_phase,
+                            uint8_t heater_mask,
+                            int pump_value,
+                            int secondary_value,
+                            int tertiary_value);
 
 
     /**

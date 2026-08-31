@@ -78,6 +78,7 @@ static MainControllerState controller_state = MAIN_CONTROLLER_BOOTING;
 static bool restart_requested = false;
 static std::string ethernet_command_text;
 bool manual_mode_overwrite = false; // To track if manual mode overwrite is active
+static int last_mode_default_heater_state = -1;
 
 struct QueuedPressureCommand {
     uint8_t command;
@@ -142,11 +143,13 @@ static void set_heater_bit(uint8_t heater_index, bool enabled)
     {
         active_heater_mask |= mask;
         heater_set_enabled(heater_system_get_global(), heater_index, true);
+        log_metadata_event("HEATER_ON", mode, flightphase, active_heater_mask, heater_index + 1, 1, 0);
     }
     else
     {
         active_heater_mask &= static_cast<uint8_t>(~mask);
         heater_set_enabled(heater_system_get_global(), heater_index, false);
+        log_metadata_event("HEATER_OFF", mode, flightphase, active_heater_mask, heater_index + 1, 0, 0);
     }
 }
 
@@ -184,6 +187,46 @@ static void enter_safe_shutdown(MainControllerState state)
     controller_state = state;
 }
 
+static void apply_mode_default_heaters(int active_mode)
+{
+    if (last_mode_default_heater_state == active_mode)
+    {
+        return;
+    }
+
+    switch (active_mode)
+    {
+        case 2:
+            //disable Inlet heater
+            set_heater_bit(3, false);
+            heater_set_enabled(heater_system_get_global(), 3, false);
+
+            //enable SD heater
+            set_heater_bit(0, true);
+            heater_set_mode(heater_system_get_global(), 0, HEATER_MODE_PID);
+            heater_set_target(heater_system_get_global(), 0, 3000);
+            set_heater_bit(0, true);
+            break;
+
+        case 3:
+            //disable SD heater
+            set_heater_bit(0, false);
+            heater_set_enabled(heater_system_get_global(), 0, false);
+
+            //enable Inlet heater
+            set_heater_bit(3, true);
+            heater_set_mode(heater_system_get_global(), 3, HEATER_MODE_PID);
+            heater_set_target(heater_system_get_global(), 3, 3000);
+            heater_set_enabled(heater_system_get_global(), 3, true);
+            break;
+
+        default:
+            break;
+    }
+
+    last_mode_default_heater_state = active_mode;
+}
+
 bool handle_command()
 {
     ethernet_command_text = to_upper_copy(ethernet_recieve_buf, ethernet_recieve_buf_bytes_read);
@@ -214,6 +257,8 @@ bool handle_command()
     {
         mode = 3;
         manual_mode_overwrite = true;
+        apply_mode_default_heaters(mode);
+        log_metadata_event("MODE", mode, flightphase, active_heater_mask, -1, 0, 0);
         ESP_LOGI(TAG, "Mode changed to MEASUREMENTS");
         return true;
     }
@@ -222,6 +267,8 @@ bool handle_command()
     {
         mode = 2;
         manual_mode_overwrite = true;
+        apply_mode_default_heaters(mode);
+        log_metadata_event("MODE", mode, flightphase, active_heater_mask, -1, 0, 0);
         ESP_LOGI(TAG, "Mode changed to STANDBY");
         return true;
     }
@@ -229,6 +276,7 @@ bool handle_command()
     if (ethernet_command_text == "MODE OVERRIDE RESET")
     {
         manual_mode_overwrite = false;
+        log_metadata_event("MODE_OVERRIDE_RESET", mode, flightphase, active_heater_mask, -1, 0, 0);
         ESP_LOGI(TAG, "Manual mode overwrite reset");
         return true;
     }
@@ -264,6 +312,7 @@ bool handle_command()
     if (ethernet_command_text == "HEATER ALL ON") 
     {
         active_heater_mask = 0xFF;
+        log_metadata_event("HEATER_ALL_ON", mode, flightphase, active_heater_mask, -1, 0, 0);
         ESP_LOGI(TAG, "All heaters turned ON");
         return true;
     }
@@ -271,6 +320,7 @@ bool handle_command()
     if (ethernet_command_text == "HEATER ALL OFF")
     {
         active_heater_mask = 0x00;
+        log_metadata_event("HEATER_ALL_OFF", mode, flightphase, active_heater_mask, -1, 0, 0);
         ESP_LOGI(TAG, "All heaters turned OFF");
         return true;
     }
@@ -287,6 +337,7 @@ bool handle_command()
     {
         enter_safe_shutdown(MAIN_CONTROLLER_RESTARTING);
         restart_requested = true;
+        log_metadata_event("RESTART_REQUESTED", mode, flightphase, active_heater_mask, -1, 0, 0);
         ESP_LOGW(TAG, "Main controller restart scheduled after acknowledgement telemetry");
         return true;
     }
@@ -448,13 +499,18 @@ bool handle_command()
         {
             ESP_LOGI(TAG, "%s command received", entry.text);
             pressure_slave_commands.push_front({entry.cmd, 0});
+            log_metadata_event("PUMP_CONTROL", mode, flightphase, active_heater_mask, entry.cmd, 0, 0);
             return true;
         }
     }
     
-
     ESP_LOGW(TAG, "Unrecognized ethernet command: %.*s", (int)ethernet_recieve_buf_bytes_read, ethernet_recieve_buf);
     return false;
+}
+
+static void log_phase_transition_metadata(const char *event_name, int new_phase)
+{
+    log_metadata_event(event_name, mode, new_phase, active_heater_mask, -1, 0, 0);
 }
 
 static esp_err_t send_system_status_packet()
@@ -873,25 +929,35 @@ void loop()
         if (flightphase == 0) // If flightphase was in ascent, switch it to float
         {
             flightphase = 1; // Update flightphase to float
+            log_phase_transition_metadata("FLIGHT_PHASE_FLOAT", flightphase);
             ESP_LOGI(TAG, "Flight phase updated to Float");
         }
         if (!manual_mode_overwrite) // If manual mode overwrite is not active, enter standby mode if pressure is below threshold
         {
-            mode = 2; // Enter standby mode if pressure is below threshold
+            if (mode != 2)
+            {
+                mode = 2; // Enter standby mode if pressure is below threshold
+                apply_mode_default_heaters(mode);
+            }
         }
     }
     else {
         if (flightphase == 1) // If flightphase was in float, switch it to descend
         {
             flightphase = 2; // Update flightphase to descend
+            log_phase_transition_metadata("FLIGHT_PHASE_DESCEND", flightphase);
             ESP_LOGI(TAG, "Flight phase updated to Descend");
         }
         else if (flightphase == 0) // If flightphase is in ascend, the mode should be measurement mode
         {
             if (!manual_mode_overwrite) // If manual mode overwrite is not active, enter measurement mode if pressure is above threshold
             {
-                mode = 3; // Enter measurement mode if pressure is above threshold
-                
+                if (mode != 3)
+                {
+                    mode = 3; // Enter measurement mode if pressure is above threshold
+                    apply_mode_default_heaters(mode);
+                    log_metadata_event("MODE", mode, flightphase, active_heater_mask, -1, 0, 0);
+                }
             }
         }
     }
@@ -1011,7 +1077,7 @@ void loop()
         {
             comms_pressure_default(sensor_data, current_time_ms);
         }
-
+        
         // Thermal communication block
         if (not thermal_mcu_lost)
         {
@@ -1130,7 +1196,7 @@ void loop()
     // Delay only the remaining time so the full loop period stays near 1 second.
     TickType_t current_time_stop = xTaskGetTickCount();
     TickType_t elapsed_ticks = current_time_stop - current_time_start;
-    TickType_t target_period_ticks = pdMS_TO_TICKS(1000);
+    TickType_t target_period_ticks = pdMS_TO_TICKS(100);
     if (elapsed_ticks < target_period_ticks)
     {
         time_loop = static_cast<uint16_t>(target_period_ticks - elapsed_ticks);
@@ -1139,7 +1205,7 @@ void loop()
     {
         time_loop = 0;
     }
-    vTaskDelay(pdMS_TO_TICKS(200));
+    //vTaskDelay(pdMS_TO_TICKS(200));
     //if (time_loop > 0)
     //{
     //    vTaskDelay(time_loop);
