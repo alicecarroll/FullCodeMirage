@@ -569,7 +569,7 @@ uint8_t number_channels_thermal=8;  //0-8 depending on the number of switches us
 // TEST3: Remove and change to arrays (!!!Change where these are used in the code as well!!!)
 uint8_t thermal_mode=1; //0 bang bang 1 PID 155-255 D_cycle
 int16_t thermal_currentTemp=2000; // 5000 = 50,0C  
-int16_t thermal_target=5000;
+int16_t thermal_target=3000;
 // uint8_t thermal_mode[8]={1,1,1,1,1,1,1,1}; //0 bang bang 1 PID 155-255 D_cycle
 // int16_t thermal_target[8]={5000,5000,5000,5000,5000,5000,5000,5000};
 int16_t thermal_watchdog_tolerance=3000; // 1 according to SEDv3. Number of subsequent times where the thermal slave is reset. If reset more than this number of times, the thermal MCU will be considered lost.
@@ -600,7 +600,16 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
     //TEST5: remove -1 from while statemnt
     while (chosen_channel_id_thermal!=(number_channels_thermal)){
         HeaterConfig* heater_config = heater_get_config(heater_system_get_global(), chosen_channel_id_thermal);
-        if (heater_config && heater_config->enabled)
+        if (heater_config && !heater_config->enabled)
+        {
+            thermal_tx_ok = thermal_test_send_package(
+                thermal_mcu, 
+                chosen_channel_id_thermal, //0x00- 0x07
+                155, //0 bang bang 1 PID 155-255 D_cycle
+                thermal_current_temperatures[chosen_channel_id_thermal], // 5000 = 50,00C 
+                heater_config->target_temp);
+        }
+        else if (heater_config && heater_config->enabled)
         {
             uint8_t mode_to_send = (heater_config->mode == HEATER_MODE_MANUAL) 
                                    ? static_cast<uint8_t>(155U + heater_config->manual_duty_cycle)

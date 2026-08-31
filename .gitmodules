@@ -4,3 +4,6 @@
 [submodule "main-mcu/components/ioLibrary_Driver"]
 	path = main-mcu/components/ioLibrary_Driver
 	url = https://github.com/Wiznet/ioLibrary_Driver.git
+[submodule "BX39_MIRAGE_GroundStation"]
+	path = BX39_MIRAGE_GroundStation
+	url = https://github.com/Abdullah-Alsakka/BX39_MIRAGE_GroundStation.git
