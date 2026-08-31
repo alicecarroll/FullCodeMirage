@@ -13,14 +13,21 @@ bool external_sensors_valid = false;
 bool manual_pump1 = false, manual_pump2 = false, manual_compressor = false, manual_valve = false;
 bool relay_manual = false;
 uint8_t applied_mode = 0;
-float target_pressure = 3.0f; //in pressure chamber
-float inlet_upper = 1.5f, inlet_lower = 0.7f; //inlet upper and lower boundaries for compressor inlet
+float target_pressure = 4.0f; //in pressure chamber
+float inlet_upper = 1.5f, inlet_lower = 1.0f; //inlet upper and lower boundaries for compressor inlet
 //constexpr float FLUSH_COMPLETE_PRESSURE_BAR = 0.05f; //Why so low?
 constexpr uint8_t ERR_NONE = 0, ERR_CHAMBER_SENSOR = 1, ERR_INLET_SENSOR = 2;
 
 TickType_t measurement_time_start;
+TickType_t flushstep_start;
+TickType_t flushstep_stop;
+TickType_t flushticks;
+
 float measure_time = 20.0f; //in s
-float flush_time = 8.0f; //in s upper value of simulation
+float flushsum = 0.0f; // sums up exchanged air
+float V = 0.075; //75 ml estimated chamber volume
+float Qout = 1.5; // l/min based on compressor out flow rate measured in test for lower end of pressure range
+float flushtarget = 0.225; // flushtarget = -Setup.V*np.log(0.05) which means that 95% of the air should be exchanged
 
 bool compressed = false;
 
@@ -83,26 +90,27 @@ void pressure_update_external_sensors(const float sensors[7]) {
     external_sensors_valid = true;
     status.chamber_pressure = sensors[2];
     status.ambient_pressure = sensors[3];
-    status.compressor_inlet_pressure = sensors[1];//+status.ambient_pressure;
+    status.compressor_inlet_pressure = (sensors[1]+status.ambient_pressure);
+    
 }
 
 void adjust_pressure_target(){
     //upper limit of compressor inlet pressure should depend on ambient pressure
     if ((status.ambient_pressure < 0.9) and (status.ambient_pressure>=0.7)){
-        inlet_upper = 1.7;
+        inlet_upper = 1.5;
         inlet_lower = 1.1;
     }
     else if ((status.ambient_pressure < 0.7) and (status.ambient_pressure>=0.5)){
-        inlet_upper = 1.5;
+        inlet_upper = 1.3;
         inlet_lower = 1.0;
     }
     else if ((status.ambient_pressure < 0.5) and (status.ambient_pressure>=0.2)){
-        inlet_upper = 1.2;
-        inlet_lower = 0.8;
+        inlet_upper = 1.1;
+        inlet_lower = 0.9;
     }
     else if (status.ambient_pressure < 0.2){
-        inlet_upper = 1.02;
-        inlet_lower = 0.7;
+        inlet_upper = 1.1;
+        inlet_lower = 0.9;
     }
 }
 
@@ -167,13 +175,15 @@ void pressure_execute_command(uint8_t command, uint8_t info) {
 
 void pressure_update() {
     adjust_pressure_target();
+    //ESP_LOGI("Sensors2: ", "Ambient pressure: %.3f, Inlet of Compressor %.3f, Chamber pressure: %.3f", status.ambient_pressure, status.compressor_inlet_pressure, status.chamber_pressure);
+
     if (!external_sensors_valid) {
         // Keep the existing bench/simulation behavior until real pressure
         // drivers are installed. The Main MCU sensor frame supersedes these
         // values as soon as one is received.
         static float fake_chamber = 0.0f;
         static float fake_inlet = 0.0f;
-        fake_chamber += 0.05f;
+        fake_chamber += 2.0f;
         fake_inlet += 0.05f;
         status.chamber_pressure = fake_chamber;
         status.compressor_inlet_pressure = fake_inlet;
@@ -188,40 +198,67 @@ void pressure_update() {
         //}
         if (!manual_valve) set_valve(false); 
         if (!manual_compressor) set_compressor(0); //should be 0 because compressor and pumps can't be on at the same time
-        if (!manual_pump1) set_pump1(100);
-        if (!manual_pump2) set_pump2(100);
+        if (!manual_pump1) set_pump1(50);
+        if (!manual_pump2) set_pump2(50);
         if (status.compressor_inlet_pressure >= inlet_upper) {
             if (!manual_pump1) set_pump1(0);
             if (!manual_pump2) set_pump2(0);
             status.state = PRESSURE_COMPRESSION;
+            flushstep_start = xTaskGetTickCount();
         }
     } else if (status.state == PRESSURE_COMPRESSION) {
         if (!manual_pump1) set_pump1(0);
         if (!manual_pump2) set_pump2(0);
         if (!manual_valve) set_valve(true);
-        if (!manual_compressor) set_compressor(100);
+        if (!manual_compressor) set_compressor(50);
+
+        flushstep_stop = xTaskGetTickCount();
+        flushticks = flushstep_stop-flushstep_start;
+        flushsum = flushsum + 1/V*Qout*flushticks*portTICK_PERIOD_MS/1000/60;
+        flushstep_start = xTaskGetTickCount();
+
         if ((status.compressor_inlet_pressure <= inlet_lower) 
-            & (abs(status.chamber_pressure - target_pressure) < 0.1)) {
-            if (!manual_compressor) set_compressor(0);
-            if (!manual_valve) set_valve(false);
-            status.state = PRESSURE_MEASUREMENT;
-            measurement_time_start = xTaskGetTickCount();
-        } else if ((status.compressor_inlet_pressure <= inlet_lower) and ((status.chamber_pressure - target_pressure) > 0)){
+            and (abs(status.chamber_pressure - target_pressure) < 0.1)) {
+                if (flushsum > flushtarget) {
+                    if (!manual_compressor) set_compressor(0);
+                    if (!manual_valve) set_valve(false);
+                    flushsum = 0;
+                    status.state = PRESSURE_MEASUREMENT;
+                    measurement_time_start = xTaskGetTickCount();
+                    ESP_LOGI("pressure", "Measurement started at %.3f bar", status.chamber_pressure);
+                }
+                else {
+                    if (!manual_compressor) set_compressor(0);
+                    if (!manual_valve) set_valve(false);
+                    status.state = PRESSURE_AIR_EXCHANGE;
+                }
+        } 
+        else if ((status.compressor_inlet_pressure <= inlet_lower) and ((status.chamber_pressure - target_pressure) > 0)){
             if (!manual_compressor) set_compressor(0);
             if (!manual_valve) set_valve(false); //to make sure its closed until Air exchange is started in next loop
             status.state = PRESSURE_AIR_EXCHANGE;
             ESP_LOGI("pressure", "Too large chamber pressure: %.3f bar", status.chamber_pressure);
-        } else if ((status.compressor_inlet_pressure <= inlet_lower) and ((status.chamber_pressure - target_pressure) < 0)){
+        } 
+        else if ((status.compressor_inlet_pressure <= inlet_lower) and ((status.chamber_pressure - target_pressure) < 0)){
             if (!manual_compressor) set_compressor(0);
             if (!manual_valve) set_valve(false);
             status.state = PRESSURE_PREPRESSURISATION;
             compressed = true;
-        } else if ((compressed == true) & (abs(status.chamber_pressure - target_pressure) < 0.1)){
-            if (!manual_compressor) set_compressor(0);
-            if (!manual_valve) set_valve(false);
-            status.state = PRESSURE_MEASUREMENT;
-            measurement_time_start = xTaskGetTickCount();
-            ESP_LOGI("pressure", "Measurement started at %.3f bar", status.chamber_pressure);
+        } 
+        else if ((compressed == true) & (abs(status.chamber_pressure - target_pressure) < 0.1)){
+            if (flushsum > flushtarget) {
+                if (!manual_compressor) set_compressor(0);
+                if (!manual_valve) set_valve(false);
+                flushsum = 0;
+                status.state = PRESSURE_MEASUREMENT;
+                measurement_time_start = xTaskGetTickCount();
+                ESP_LOGI("pressure", "Measurement started at %.3f bar", status.chamber_pressure);
+            }
+            else {
+                if (!manual_compressor) set_compressor(0);
+                if (!manual_valve) set_valve(false);
+                status.state = PRESSURE_AIR_EXCHANGE;
+            }
         } 
     } else if (status.state == PRESSURE_MEASUREMENT) {
         if (!manual_pump1) set_pump1(0);
@@ -240,16 +277,22 @@ void pressure_update() {
         set_pump2(0);
         set_compressor(0);
         set_valve(true);
-        if (status.chamber_pressure <= target_pressure+0.1) {
+        if ((status.chamber_pressure <= target_pressure+0.1) and (flushsum > flushtarget)) {
             status.state = PRESSURE_MEASUREMENT;
+            flushsum = 0.0;
             set_valve(false);
             TickType_t measurement_time_start = xTaskGetTickCount();
             ESP_LOGI("pressure", "Measurement started at %.3f bar", status.chamber_pressure);
         }
+        else if (status.chamber_pressure <= 2.0){
+            set_valve(false);
+            status.state = PRESSURE_PREPRESSURISATION;
+        }
+        
     } else if (status.state == PRESSURE_CORRECTION) {
         set_pump1(0);
         set_pump2(0);
-        set_compressor(100);
+        set_compressor(50);
         set_valve(false);
         if ((status.compressor_inlet_pressure <= inlet_lower) and (abs(status.chamber_pressure - target_pressure) > 0.1)){
             if (!manual_compressor) set_compressor(0);
@@ -261,6 +304,13 @@ void pressure_update() {
             status.state = PRESSURE_MEASUREMENT;
             TickType_t measurement_time_start = xTaskGetTickCount();
             ESP_LOGI("pressure", "Measurement started at %.3f bar", status.chamber_pressure);
+        }
+    } else if (status.state == PRESSURE_STANDBY) {
+        if (status.chamber_pressure < 3.0) {
+            safe_off();
+        }
+        else {
+            set_valve(true);
         }
     } else if (status.state == PRESSURE_ERROR) {
         safe_off();
