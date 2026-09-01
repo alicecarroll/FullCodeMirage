@@ -10,7 +10,7 @@
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
-    "--compile-commands-dir=c:\\Users\\sixte\\Skrivbord\\arduino projekt\\FullCodeMirage\\thermal-mcu\\build"
+    "--compile-commands-dir=c:\\Users\\atsch\\Desktop\\REXUSBEXUS\\Software\\FullCodeMirage\\thermal-mcu\\build"
   ],
   "idf.flashType": "UART",
   "idf.portWin": "COM7"
