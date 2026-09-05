@@ -20,6 +20,10 @@ typedef struct {
     uint8_t status_ok;
     uint8_t pressure_system_on;
     uint16_t heater_mask;
+    // Actual PWM duty reported by the thermal MCU for each output channel.
+    // The mask above describes the commanded enable state; it is not a duty
+    // value and must not be presented as one by the ground station.
+    uint8_t heater_applied_duty_pct[8];
     uint8_t thermal_online;
     uint8_t thermal_state;
     uint8_t thermal_error;
@@ -38,4 +42,4 @@ typedef struct {
 } MainSystemStatusPacket;
 #pragma pack(pop)
 
-static_assert(sizeof(MainSystemStatusPacket) == 216, "Groundstation packet size changed");
+static_assert(sizeof(MainSystemStatusPacket) == 224, "Groundstation packet size changed");

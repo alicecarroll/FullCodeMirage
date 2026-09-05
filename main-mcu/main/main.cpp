@@ -71,6 +71,8 @@ int loops_since_connection = 0; // To buffer short con losses for stable running
 static SlaveStatus thermal_status = {};
 static PressureStatusData pressure_status = {};
 static uint8_t active_heater_mask = 0x00;
+constexpr uint8_t HEATER_CHANNEL_COUNT = 8;
+static uint8_t heater_applied_duty_pct[HEATER_CHANNEL_COUNT] = {};
 static bool pressure_system_active = false;
 static bool status_update_requested = false;
 static bool status_packet_sent_this_loop = false;
@@ -150,6 +152,14 @@ static void set_heater_bit(uint8_t heater_index, bool enabled)
         active_heater_mask &= static_cast<uint8_t>(~mask);
         heater_set_enabled(heater_system_get_global(), heater_index, false);
         log_metadata_event("HEATER_OFF", mode, flightphase, active_heater_mask, heater_index + 1, 0, 0);
+    }
+}
+
+static void set_all_heater_bits(bool enabled)
+{
+    for (uint8_t heater_index = 0; heater_index < 8; ++heater_index)
+    {
+        set_heater_bit(heater_index, enabled);
     }
 }
 
@@ -312,7 +322,10 @@ bool handle_command()
 
     if (ethernet_command_text == "HEATER ALL ON") 
     {
-        active_heater_mask = 0xFF;
+        // The thermal MCU is driven from the per-channel HeaterConfig state,
+        // not from the telemetry mask.  Update every configuration so the
+        // I2C refresh loop actually enables each physical output.
+        set_all_heater_bits(true);
         log_metadata_event("HEATER_ALL_ON", mode, flightphase, active_heater_mask, -1, 0, 0);
         ESP_LOGI(TAG, "All heaters turned ON");
         return true;
@@ -320,7 +333,9 @@ bool handle_command()
 
     if (ethernet_command_text == "HEATER ALL OFF")
     {
-        active_heater_mask = 0x00;
+        // See HEATER ALL ON above.  This also makes the next I2C refresh use
+        // manual 0% duty for every channel, rather than only changing the UI.
+        set_all_heater_bits(false);
         log_metadata_event("HEATER_ALL_OFF", mode, flightphase, active_heater_mask, -1, 0, 0);
         ESP_LOGI(TAG, "All heaters turned OFF");
         return true;
@@ -527,6 +542,10 @@ static esp_err_t send_system_status_packet()
     system_status_packet.status_ok = status_ok ? 1 : 0;
     system_status_packet.pressure_system_on = pressure_system_active ? 1 : 0;
     system_status_packet.heater_mask = active_heater_mask;
+    for (uint8_t heater_index = 0; heater_index < HEATER_CHANNEL_COUNT; ++heater_index)
+    {
+        system_status_packet.heater_applied_duty_pct[heater_index] = heater_applied_duty_pct[heater_index];
+    }
     system_status_packet.thermal_online = thermal_status.online ? 1 : 0;
     system_status_packet.thermal_state = thermal_status.state;
     system_status_packet.thermal_error = thermal_status.error;
@@ -624,7 +643,6 @@ static void handle_ethernet_receive_status(esp_err_t esp_err_status)
 }
 
 //Values for thermal slave
-uint8_t number_channels_thermal=8;  //0-8 depending on the number of switches used
 //Variables for thermal under this comment will need to have value assigned in loop. Currently using placeholders (Remove comment when this has changed)
 // TEST3: Remove and change to arrays (!!!Change where these are used in the code as well!!!)
 uint8_t thermal_mode=1; //0 bang bang 1 PID 155-255 D_cycle
@@ -639,85 +657,112 @@ uint8_t received_power_thermal;
 uint16_t received_target_thermal;
 uint8_t status_thermal;
 uint8_t error_thermal;
-uint16_t thermal_current_temperatures[8];
+int16_t thermal_current_temperatures[8];
 
 //TEST2: Change name to comms_thermal
 static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_ms){
-    uint8_t chosen_channel_id_thermal=0x00; //0x00- 0x07
     //temperature array used for temperature data for thermal
-    thermal_current_temperatures[0]=static_cast<uint16_t> (sensor_data.Tt2*100); //thermal expect temp values where 5000=50.00 C
-    thermal_current_temperatures[1]=static_cast<uint16_t>(sensor_data.Tp2*100);
-    thermal_current_temperatures[2]=static_cast<uint16_t>(sensor_data.Tt1*100);
-    thermal_current_temperatures[3]=static_cast<uint16_t>(sensor_data.Tt3*100);
-    thermal_current_temperatures[4]=static_cast<uint16_t>(sensor_data.Tp5*100);
-    thermal_current_temperatures[5]=static_cast<uint16_t>(sensor_data.Tp6*100);
-    thermal_current_temperatures[6]=static_cast<uint16_t>(sensor_data.Tt1*100);
-    thermal_current_temperatures[7]=static_cast<uint16_t>(sensor_data.Tt2*100);
+    thermal_current_temperatures[0]=static_cast<int16_t>(sensor_data.Tt2*100); //thermal expects 5000 = 50.00 C
+    thermal_current_temperatures[1]=static_cast<int16_t>(sensor_data.Tp2*100);
+    thermal_current_temperatures[2]=static_cast<int16_t>(sensor_data.Tt1*100);
+    thermal_current_temperatures[3]=static_cast<int16_t>(sensor_data.Tt3*100);
+    thermal_current_temperatures[4]=static_cast<int16_t>(sensor_data.Tp5*100);
+    thermal_current_temperatures[5]=static_cast<int16_t>(sensor_data.Tp6*100);
+    thermal_current_temperatures[6]=static_cast<int16_t>(sensor_data.Tt1*100);
+    thermal_current_temperatures[7]=static_cast<int16_t>(sensor_data.Tt2*100);
 
-    // This is where data is gathered and sent to the thermal communication function.
-    // The loop will go through all channels and send data for each channel.
-    while (chosen_channel_id_thermal!=(number_channels_thermal)){
-        HeaterConfig* heater_config = heater_get_config(heater_system_get_global(), chosen_channel_id_thermal);
-        
-        // When heater is off, send as if manual with 0 duty cycle.
-        if (heater_config && !heater_config->enabled)
-        {
-            thermal_tx_ok = thermal_test_send_package(
-                thermal_mcu, 
-                chosen_channel_id_thermal, //0x00- 0x07
-                155, //0 bang bang 1 PID 155-255 D_cycle
-                thermal_current_temperatures[chosen_channel_id_thermal], 
-                heater_config->target_temp);
-        }
-        // When heater is on, send the actual mode and target temperature.
-        else if (heater_config && heater_config->enabled)
-        {
-            uint8_t mode_to_send = (heater_config->mode == HEATER_MODE_MANUAL) 
-                                   ? static_cast<uint8_t>(155U + heater_config->manual_duty_cycle)
-                                   : static_cast<uint8_t>(heater_config->mode);
-            ESP_LOGI("thermal comms", "before thermal_test_send_package");
-            thermal_tx_ok = thermal_test_send_package(
-                thermal_mcu, 
-                chosen_channel_id_thermal, //0x00- 0x07
-                mode_to_send, //0 bang bang 1 PID 155-255 D_cycle
-                thermal_current_temperatures[chosen_channel_id_thermal],
-                heater_config->target_temp);
-        }
-        chosen_channel_id_thermal++;
-    }
-    
-    // TEST1: Remove this line
-    //chosen_channel_id_thermal=0;
-
-    if (thermal_tx_ok)
+    // Refresh every output within the thermal MCU's five-second watchdog and
+    // read the corresponding applied PWM. A disabled channel is explicitly
+    // encoded as manual 0% duty (mode 155).
+    bool all_thermal_packets_sent = true;
+    bool all_thermal_responses_received = true;
+    uint8_t thermal_feedback_error = 0;
+    for (uint8_t chosen_channel_id_thermal = 0;
+         chosen_channel_id_thermal < HEATER_CHANNEL_COUNT;
+         ++chosen_channel_id_thermal)
     {
-        if (thermal_test_receive_package(  //when passing variable to this one remember to pass as &channel_id for all pointer
-    thermal_mcu,
-    &received_channel_id_thermal,
-    &received_mode_thermal,
-    &received_power_thermal,
-    &received_target_thermal,
-    &status_thermal,
-    &error_thermal))
+        HeaterConfig* heater_config = heater_get_config(heater_system_get_global(), chosen_channel_id_thermal);
+        if (!heater_config)
         {
-            //Info recieved from thermal Used for trouble-shooting
-            last_thermal_ping_time = current_time_ms;
-            ESP_LOGI(TAG, "Feedback from thermal slave - Channel: %u, Mode: %u, Power: %u, Target: %u, Status: %u, Error: %u",
-            received_channel_id_thermal, 
-            received_mode_thermal,
-            received_power_thermal,
-            received_target_thermal,
-            status_thermal,
-            error_thermal);
+            all_thermal_packets_sent = false;
+            continue;
+        }
+
+        uint8_t mode_to_send = 155;
+        if (heater_config->enabled)
+        {
+            mode_to_send = (heater_config->mode == HEATER_MODE_MANUAL)
+                               ? static_cast<uint8_t>(155U + heater_config->manual_duty_cycle)
+                               : static_cast<uint8_t>(heater_config->mode);
+        }
+
+        const bool sent = thermal_test_send_package(
+            thermal_mcu,
+            chosen_channel_id_thermal,
+            mode_to_send,
+            thermal_current_temperatures[chosen_channel_id_thermal],
+            heater_config->target_temp);
+        all_thermal_packets_sent = all_thermal_packets_sent && sent;
+
+        if (!sent)
+        {
+            all_thermal_responses_received = false;
+            thermal_feedback_error |= 1;
+            continue;
+        }
+
+        // The thermal slave updates its reply from separate FreeRTOS tasks.
+        // Give those tasks one scheduling interval before reading the reply.
+        vTaskDelay(pdMS_TO_TICKS(25));
+
+        if (thermal_test_receive_package(
+                thermal_mcu,
+                &received_channel_id_thermal,
+                &received_mode_thermal,
+                &received_power_thermal,
+                &received_target_thermal,
+                &status_thermal,
+                &error_thermal))
+        {
+            if (received_channel_id_thermal < HEATER_CHANNEL_COUNT)
+            {
+                heater_applied_duty_pct[received_channel_id_thermal] = received_power_thermal;
+                thermal_feedback_error |= static_cast<uint8_t>(status_thermal | error_thermal);
+            }
+            else
+            {
+                all_thermal_responses_received = false;
+                thermal_feedback_error |= 1;
+            }
         }
         else
         {
-            ESP_LOGW(TAG, "Thermal MCU failed to respond to state read status query");
+            all_thermal_responses_received = false;
+            thermal_feedback_error |= error_thermal;
         }
+    }
+
+    thermal_tx_ok = all_thermal_packets_sent;
+
+    if (thermal_tx_ok && all_thermal_responses_received)
+    {
+        last_thermal_ping_time = current_time_ms;
+        thermal_status.online = true;
+        thermal_status.state = received_mode_thermal;
+        thermal_status.error = thermal_feedback_error;
+        ESP_LOGI(TAG, "Thermal feedback - Channel: %u, Mode: %u, Power: %u, Target: %u, Status: %u, Error: %u",
+                 received_channel_id_thermal,
+                 received_mode_thermal,
+                 received_power_thermal,
+                 received_target_thermal,
+                 status_thermal,
+                 thermal_feedback_error);
     }
     else
     {
-        ESP_LOGE_CAPTURED(ERROR_BIT_50, TAG, "I2C Write transmission failed to Thermal MCU");
+        thermal_status.online = false;
+        thermal_status.error = thermal_feedback_error ? thermal_feedback_error : 1;
+        ESP_LOGE_CAPTURED(ERROR_BIT_50, TAG, "Thermal MCU did not acknowledge every channel refresh");
     }
 
     //Watchdog reset for thermal
@@ -842,7 +887,11 @@ extern "C" void app_main()
 {
     init_gpio_pins();
     init_spi();
-    wiz_init();
+    if (wiz_init() != ESP_OK)
+    {
+        ESP_LOGE_CAPTURED(ERROR_BIT_03, TAG,
+                          "W5500 initialization failed; Ethernet telemetry is unavailable");
+    }
     // Try to establish Ethernet for 5 seconds before proceeding. This is to ensure that the system can still run even if Ethernet is not available.
     TickType_t start_time = xTaskGetTickCount();
     while ((xTaskGetTickCount() - start_time) < pdMS_TO_TICKS(5000) && !wizphy_getphylink()){
@@ -851,7 +900,14 @@ extern "C" void app_main()
     }
         
 
-    ESP_LOGI(TAG,"Ethernet link up");
+    if (wizphy_getphylink())
+    {
+        ESP_LOGI(TAG, "Ethernet link up");
+    }
+    else
+    {
+        ESP_LOGW(TAG, "Ethernet link is down; telemetry will reconnect when the link returns");
+    }
     init_i2c();
     init_uart();
     init_sensors();
@@ -865,8 +921,12 @@ extern "C" void app_main()
     //wiz_connect(targetip, REMOTE_PORT);
     setSn_IR(WIZ_SOCKET, Sn_IR_CON);
 
-    wiz_ensure_connected(targetip, REMOTE_PORT);
-    wiz_ping(targetip, "h\n");
+    if (wiz_ensure_connected(targetip, REMOTE_PORT) != ESP_OK)
+    {
+        con_lost = true;
+        status_ok = false;
+        connection_lost(&con_lost, &loss_timestamp_us);
+    }
 
     // Initialize heater control system
     heater_system_init(heater_system_get_global());
@@ -875,7 +935,10 @@ extern "C" void app_main()
     uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
     last_thermal_ping_time = current_time;
     last_pressure_ping_time = current_time;
-    active_heater_mask = 0x01;
+    // Keep the commanded mask and the per-channel state used by the thermal
+    // I2C refresh loop in sync from boot.
+    active_heater_mask = 0x00;
+    set_heater_bit(0, true);
 
     while (loop_exp == true)
     {

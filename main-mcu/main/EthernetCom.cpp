@@ -191,15 +191,27 @@ esp_err_t wiz_init(void)
     }
 
     wiz_hw_reset();
-        uint8_t version = getVERSIONR();
+
+    // Register the callbacks before the first W5500 register access.  The
+    // version read below uses these callbacks, so doing this afterwards
+    // dereferences uninitialised ioLibrary function pointers at boot.
+    reg_wizchip_cs_cbfunc(wiz_cs_select, wiz_cs_deselect);
+    reg_wizchip_spi_cbfunc(wiz_spi_read_byte, wiz_spi_write_byte);
+    reg_wizchip_spiburst_cbfunc(wiz_spi_read_burst, wiz_spi_write_burst);
+
+    uint8_t version = getVERSIONR();
 
     ESP_LOGI(TAG,
             "W5500 version: 0x%02X",
             version);
 
-    reg_wizchip_cs_cbfunc(wiz_cs_select, wiz_cs_deselect);
-    reg_wizchip_spi_cbfunc(wiz_spi_read_byte, wiz_spi_write_byte);
-    reg_wizchip_spiburst_cbfunc(wiz_spi_read_burst, wiz_spi_write_burst);
+    if (version != 0x04)
+    {
+        ESP_LOGE_CAPTURED(ERROR_BIT_03, TAG,
+                          "W5500 was not detected (version register: 0x%02X)",
+                          version);
+        return ESP_FAIL;
+    }
 
     uint8_t tx_size[_WIZCHIP_SOCK_NUM_] = {8, 8, 0, 0, 0, 0, 0, 0}; //only takes 1, 2, 4, 8 or 16 kb
     uint8_t rx_size[_WIZCHIP_SOCK_NUM_] = {8, 8, 0, 0, 0, 0, 0, 0};
@@ -246,15 +258,16 @@ esp_err_t wiz_send(const uint8_t *data, size_t length)
     return ESP_OK;
 }
 
-esp_err_t wiz_sendto(uint8_t *target_ip, uint8_t *data, uint8_t length)
+esp_err_t wiz_sendto(const uint8_t *target_ip, const uint8_t *data, uint8_t length)
 {
-    if (!data || length == 0)
+    if (!target_ip || !data || length == 0)
         return ESP_ERR_INVALID_ARG;
 
     // send() writes data into the W5500's internal TX buffer.
     // The chip's hardwired TCP/IP stack handles segmentation and transmission.
     //uint8_t sn, uint8_t * buf, uint16_t len, uint8_t * addr, uint16_t port
-    int32_t sent = wizsendto(WIZ_SOCKET, (uint8_t *)data, (uint16_t)length, data, REMOTE_PORT);
+    int32_t sent = wizsendto(WIZ_SOCKET, (uint8_t *)data, (uint16_t)length,
+                             (uint8_t *)target_ip, REMOTE_PORT);
     if (sent != (int32_t)length)
     {
         ESP_LOGE_CAPTURED(ERROR_BIT_06, TAG, "send() failed, returned %ld", (long)sent);
@@ -294,7 +307,7 @@ esp_err_t wiz_receive(uint8_t *buf, size_t buf_size, size_t *bytes_read)
 
 // In main: if(wiz_ensure_connected(ip, port) == ESP_OK){reconected}
 // For reconnection also
-esp_err_t wiz_ensure_connected(uint8_t *ip, uint16_t port)
+esp_err_t wiz_ensure_connected(const uint8_t *ip, uint16_t port)
 {
     if (getSn_SR(WIZ_SOCKET) == SOCK_ESTABLISHED)
     {
@@ -318,7 +331,7 @@ esp_err_t wiz_ensure_connected(uint8_t *ip, uint16_t port)
 // ---------------------------------------------------------------------------
 // wiz_ping — fire and forget: send and return IMMEDIATELY, no reply checked
 // ---------------------------------------------------------------------------
-esp_err_t wiz_ping(uint8_t *target_ip, const char *message)
+esp_err_t wiz_ping(const uint8_t *target_ip, const char *message)
 {
     static uint16_t s_seq = 0;
     const uint16_t ID = 0xABCD;
@@ -342,7 +355,7 @@ esp_err_t wiz_ping(uint8_t *target_ip, const char *message)
             WIZ_PING_SOCKET,
             (uint8_t *)&request,
             sizeof(request),
-            target_ip,
+            (uint8_t *)target_ip,
             REMOTE_PORT);
 
     wizclose(WIZ_PING_SOCKET);
@@ -401,7 +414,7 @@ esp_err_t wiz_ping(uint8_t *target_ip, const char *message)
 // Connect/disconnet. This is for more than intitialize. It can also be used if
 // fro example ground station crfaches and connection has to be reestablished.
 // ---------------------------------------------------------------------------
-esp_err_t wiz_connect(uint8_t *remote_ip, uint16_t remote_port)
+esp_err_t wiz_connect(const uint8_t *remote_ip, uint16_t remote_port)
 {
     ESP_LOGI(TAG, "Opening TCP socket");
 
@@ -420,7 +433,7 @@ esp_err_t wiz_connect(uint8_t *remote_ip, uint16_t remote_port)
              getSn_SR(WIZ_SOCKET));
 
     // Open TCP socket
-    int8_t s = wizsocket(WIZ_SOCKET, Sn_MR_TCP, 5000, 0);
+    int8_t s = wizsocket(WIZ_SOCKET, Sn_MR_TCP, LOCAL_PORT, 0);
     wait_socket_command(WIZ_SOCKET);
     // Clear all pending socket interrupts
     setSn_IR(WIZ_SOCKET, 0xFF);
@@ -448,7 +461,7 @@ esp_err_t wiz_connect(uint8_t *remote_ip, uint16_t remote_port)
 getSn_SR(WIZ_SOCKET),
 getSn_CR(WIZ_SOCKET),
 getSn_IR(WIZ_SOCKET));
-    int8_t ret = wizconnect(WIZ_SOCKET, remote_ip, remote_port);
+    int8_t ret = wizconnect(WIZ_SOCKET, (uint8_t *)remote_ip, remote_port);
     ESP_LOGI(TAG,
 "After connect: SR=0x%02X CR=0x%02X IR=0x%02X",
 getSn_SR(WIZ_SOCKET),

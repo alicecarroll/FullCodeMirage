@@ -28,7 +28,7 @@ extern "C"
      *
      * @return ESP_OK on success, or an esp_err_t error code.
      */
-    esp_err_t wiz_connect(uint8_t *remote_ip, uint16_t remote_port);
+    esp_err_t wiz_connect(const uint8_t *remote_ip, uint16_t remote_port);
 
     /**
      * @brief  Send data over the open TCP connection.
@@ -52,7 +52,7 @@ extern "C"
      *
      * @return ESP_OK on success, or an esp_err_t error code.
      */
-    esp_err_t wiz_sendto(uint8_t *target_ip, const uint8_t *data, uint8_t length);
+    esp_err_t wiz_sendto(const uint8_t *target_ip, const uint8_t *data, uint8_t length);
 
     /**
      * @brief  Receive data from the W5500's internal RX buffer.
@@ -75,7 +75,7 @@ extern "C"
      * @return ESP_OK if already connected or successfully reconnected,
      *         or an esp_err_t on error.
      */
-    esp_err_t wiz_ensure_connected(uint8_t *ip, uint16_t port);
+    esp_err_t wiz_ensure_connected(const uint8_t *ip, uint16_t port);
 
     /**
      * @brief  Send an ICMP Echo Request and return IMMEDIATELY.
@@ -89,7 +89,7 @@ extern "C"
      * @return ESP_OK if the packet was handed to the W5500 TX buffer,
      *         or an esp_err_t on error.
      */
-    esp_err_t wiz_ping(uint8_t *target_ip, const char *message);
+    esp_err_t wiz_ping(const uint8_t *target_ip, const char *message);
 
     /**
      * @brief  Close the TCP connection and release the socket.

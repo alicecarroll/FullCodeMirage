@@ -126,11 +126,15 @@ bool heater_send_config_to_thermal(uint8_t heater_id, int16_t current_temp)
         return false;
     }
     
-    // Convert mode to the value expected by the thermal MCU.
-    // Manual duty 0-100 is encoded as 155-255; Manual = 1, PID = 0.
-    uint8_t mode_to_send = (config->mode == HEATER_MODE_MANUAL) 
-                          ? static_cast<uint8_t>(155U + config->manual_duty_cycle)
-                          : static_cast<uint8_t>(config->mode);
+    // A disabled output is encoded as manual 0% duty.  Otherwise manual duty
+    // 0-100% is encoded as 155-255, while bang-bang and PID use 0 and 1.
+    uint8_t mode_to_send = 155;
+    if (config->enabled)
+    {
+        mode_to_send = (config->mode == HEATER_MODE_MANUAL)
+                           ? static_cast<uint8_t>(155U + config->manual_duty_cycle)
+                           : static_cast<uint8_t>(config->mode);
+    }
     
     // Send to thermal MCU via I2C
     return thermal_test_send_package(
