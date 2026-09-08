@@ -7,7 +7,7 @@
 #include "driver/uart.h"
 #include "driver/spi_master.h"
 #include "Multiplexer.h"
-#include "initialize.h"
+#include "Initialize.h"
 #include "ErrorStatus.h"
 #include "read_sensors.h"
 #include "esp_log.h"
