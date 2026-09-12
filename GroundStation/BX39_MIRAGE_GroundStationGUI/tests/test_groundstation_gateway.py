@@ -21,6 +21,7 @@ def make_status_packet(
     status_ok=1,
     pressure_system_on=1,
     heater_mask=0x0D,
+    heater_applied_duty_pct=(37, 0, 85, 0, 0, 0, 0, 0),
     thermal_online=1,
     thermal_error=0,
     pressure_state=2,
@@ -72,6 +73,7 @@ def make_status_packet(
         status_ok,
         pressure_system_on,
         heater_mask,
+        *heater_applied_duty_pct,
         thermal_online,
         2,
         thermal_error,
@@ -119,6 +121,7 @@ class StatusPacketParserTest(unittest.TestCase):
         self.assertTrue(frame["peripherals"]["outletValve"])
         self.assertTrue(frame["pressureValveOpen"])
         self.assertEqual(frame["heaterMask"], 0x0D)
+        self.assertEqual(frame["heaterAppliedDutyPct"], [37, 0, 85, 0, 0, 0, 0, 0])
         self.assertTrue(frame["thermalOnline"])
         self.assertTrue(frame["onboardLogging"])
         self.assertEqual(frame["storageFreePct"], 73)
@@ -131,8 +134,20 @@ class StatusPacketParserTest(unittest.TestCase):
         frame = gateway.parse_status_packet(make_status_packet(pressure_state=4))
         self.assertEqual(frame["pressureStateName"], "FLUSH_CHAMBER")
         self.assertEqual(frame["activeTask"], "FLUSH_CHAMBER")
-        self.assertEqual(frame["heater1ActuationPct"], 100)
+        self.assertEqual(frame["heater1ActuationPct"], 37)
         self.assertEqual(frame["heater2ActuationPct"], 0)
+
+    def test_reports_applied_heater_pwm_not_enable_mask(self):
+        frame = gateway.parse_status_packet(
+            make_status_packet(
+                heater_mask=0x01,
+                heater_applied_duty_pct=(5, 0, 0, 0, 0, 0, 0, 0),
+            )
+        )
+
+        self.assertEqual(frame["heaterDutyPct"], 5)
+        self.assertEqual(frame["heater1ActuationPct"], 5)
+        self.assertEqual(frame["heaterAppliedDutyPct"], [5, 0, 0, 0, 0, 0, 0, 0])
 
     def test_decodes_captured_error_bits(self):
         frame = gateway.parse_status_packet(

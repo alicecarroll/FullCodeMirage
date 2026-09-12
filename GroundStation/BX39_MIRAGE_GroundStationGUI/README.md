@@ -8,7 +8,7 @@ For live ground-station operation, run the local gateway:
 python3 groundstation_gateway.py
 ```
 
-Then open `http://127.0.0.1:8080`. The gateway serves the GUI, listens for the main MCU's TCP status stream on port `5001`, decodes the packed 216-byte `MainSystemStatusPacket`, streams telemetry to the browser, and sends GUI/terminal commands back over the active payload TCP connection. A command is acknowledged only after a newer payload status packet reports that a recognized command was received.
+Then open `http://127.0.0.1:8080`. The gateway serves the GUI, listens for the main MCU's TCP status stream on port `5001`, decodes the packed 224-byte `MainSystemStatusPacket`, streams telemetry to the browser, and sends GUI/terminal commands back over the active payload TCP connection. A command is acknowledged only after a newer payload status packet reports that a recognized command was received.
 
 Each gateway run creates `logs/YYYY-MM-DD_HH-MM-SS.jsonl`. The file records every decoded telemetry frame, command lifecycle event, and payload connection event with a local ISO timestamp. The `logs/` directory is ignored by Git.
 

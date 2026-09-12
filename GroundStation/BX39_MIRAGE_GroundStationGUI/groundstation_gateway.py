@@ -39,11 +39,11 @@ SENSOR_STRUCT_FORMAT = (
     "HHfHH"     # LPL block: uflt_ir, flt_ir, uflt_conc, uflt_error, flt_error
     "HHfHH"     # SPL block: uflt_ir, flt_ir, uflt_conc, uflt_error, flt_error
     "H"         # K96_error (uint16_t)
-    "5BH14B16s" # Flags, subsystem status, SD/controller status, 128-bit captured_errors
+    "5BH8B14B16s" # Flags, heater PWM, subsystem status, SD/controller status, errors
 )
 
 STATUS_PACKET_SIZE = struct.calcsize(SENSOR_STRUCT_FORMAT)
-EXPECTED_STATUS_PACKET_SIZE = 216
+EXPECTED_STATUS_PACKET_SIZE = 224
 if STATUS_PACKET_SIZE != EXPECTED_STATUS_PACKET_SIZE:
     raise RuntimeError(
         f"groundstation packet layout is {STATUS_PACKET_SIZE} bytes; "
@@ -72,7 +72,11 @@ PRESSURE_STATES = {
     4: "FLUSH_CHAMBER",
 }
 
-ERROR_MANIFEST_PATH = Path(__file__).resolve().parents[2] / "main-mcu" / "main" / "ErrorBits.def"
+# The GUI is nested inside the repository, while main-mcu is a sibling of
+# BX39_MIRAGE_GroundStation. Resolve that workspace root from this file rather
+# than depending on the historical groundstation repository layout.
+WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
+ERROR_MANIFEST_PATH = WORKSPACE_ROOT / "main-mcu" / "main" / "ErrorBits.def"
 
 
 def load_error_messages() -> list[str]:
@@ -252,6 +256,7 @@ def parse_status_packet(data: bytes, seq: int = 0, timestamp_ms: int | None = No
         status_ok,
         pressure_system_on,
         heater_mask,
+        *heater_applied_duty_pct,
         thermal_online,
         thermal_state,
         thermal_error,
@@ -309,7 +314,7 @@ def parse_status_packet(data: bytes, seq: int = 0, timestamp_ms: int | None = No
         "pump1DutyPct": int(pressure_pump1_pwm),
         "pump2DutyPct": int(pressure_pump2_pwm),
         "compressorDutyPct": int(pressure_compressor_pwm),
-        "heaterDutyPct": 100 if heater_mask else 0,
+        "heaterDutyPct": max(heater_applied_duty_pct),
         "coolerDutyPct": 0,
         "outletValveOpen": bool(pressure_valve_open),
         "pressureSystemOn": bool(pressure_system_on),
@@ -326,14 +331,15 @@ def parse_status_packet(data: bytes, seq: int = 0, timestamp_ms: int | None = No
             "relay3": bool(pressure_relay_mask & 0x04),
             "relay4": bool(pressure_relay_mask & 0x08),
         },
-        "heater1ActuationPct": 100 if heater_mask & (1 << 0) else 0,
-        "heater2ActuationPct": 100 if heater_mask & (1 << 1) else 0,
-        "heater3ActuationPct": 100 if heater_mask & (1 << 2) else 0,
-        "heater4ActuationPct": 100 if heater_mask & (1 << 3) else 0,
-        "heater5ActuationPct": 100 if heater_mask & (1 << 4) else 0,
-        "heater6ActuationPct": 100 if heater_mask & (1 << 5) else 0,
-        "heater7ActuationPct": 100 if heater_mask & (1 << 6) else 0,
-        "heater8ActuationPct": 100 if heater_mask & (1 << 7) else 0,
+        "heaterAppliedDutyPct": list(heater_applied_duty_pct),
+        "heater1ActuationPct": heater_applied_duty_pct[0],
+        "heater2ActuationPct": heater_applied_duty_pct[1],
+        "heater3ActuationPct": heater_applied_duty_pct[2],
+        "heater4ActuationPct": heater_applied_duty_pct[3],
+        "heater5ActuationPct": heater_applied_duty_pct[4],
+        "heater6ActuationPct": heater_applied_duty_pct[5],
+        "heater7ActuationPct": heater_applied_duty_pct[6],
+        "heater8ActuationPct": heater_applied_duty_pct[7],
         "onboardLogging": bool(onboard_logging),
         "storageFreePct": int(storage_free_pct),
         "controller": CONTROLLER_STATES.get(controller_state, f"MAIN_MCU_STATE_{controller_state}"),
