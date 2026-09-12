@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MIRAGE Ground Station</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="src/app.js" defer></script>
+  </head>
+  <body>
+    <main class="console-grid" aria-label="MIRAGE mission control console">
+      <div class="console-column">
+      <section class="panel logs-panel" aria-labelledby="logs-title">
+        <header class="panel-header mission-header">
+          <div>
+            <p class="eyebrow">BX39 / E-Link</p>
+            <h1 id="logs-title">MIRAGE Mission Control</h1>
+          </div>
+          <div class="mission-chips" aria-label="Current MIRAGE state">
+            <span class="health-control">
+              <button id="overallHealth" class="chip chip-ok" type="button" aria-expanded="false" aria-controls="healthDetails">Healthy</button>
+              <span id="healthDetails" class="health-details" role="status" hidden>
+                <strong>Detected errors</strong>
+                <span class="health-empty">No captured errors</span>
+              </span>
+            </span>
+            <span id="missionMode" class="chip">No telemetry</span>
+            <span id="linkState" class="chip chip-ok">E-Link online</span>
+          </div>
+        </header>
+
+        <div class="status-strip" aria-label="Latest status">
+          <div>
+            <span>Last frame</span>
+            <strong id="lastFrameAge">--</strong>
+          </div>
+          <div>
+            <span>Onboard log</span>
+            <strong id="storageState">SD unavailable</strong>
+          </div>
+          <div>
+            <span>Controller</span>
+            <strong id="controllerState">No telemetry</strong>
+          </div>
+        </div>
+
+        <ol id="logFeed" class="log-feed" aria-label="Timestamped operations log"></ol>
+      </section>
+
+      <section class="panel command-panel" aria-labelledby="commands-title">
+        <div class="panel-resize-handle" id="commandResizeHandle" aria-label="Resize command pane"></div>
+        <header class="panel-header">
+          <div>
+            <p class="eyebrow">Command uplink</p>
+            <h2 id="commands-title">Mission Commands</h2>
+          </div>
+          <span id="commandStatus" class="command-status">Ready</span>
+        </header>
+
+        <div class="command-groups">
+          <section class="command-group" aria-labelledby="mode-commands">
+            <h3 id="mode-commands">Mission Mode</h3>
+            <div class="command-grid">
+              <button type="button" data-command="startExperiment">Start experiment</button>
+              <button type="button" data-command="enterStandby">Enter standby</button>
+              <button type="button" data-command="resetModeOverride">Reset mode override</button>
+            </div>
+          </section>
+
+          <section class="command-group" aria-labelledby="pressure-commands">
+            <h3 id="pressure-commands">Pressure / Flow</h3>
+            <div class="command-grid">
+              <button type="button" data-command="startPressurisation" data-task="PRESSURISATION">Start pressurisation</button>
+              <button type="button" data-command="stopPressurisation">Stop pressurisation</button>
+              <button type="button" data-command="openOutletValve">Open outlet valve</button>
+              <button type="button" data-command="closeOutletValve">Close outlet valve</button>
+              <button type="button" data-command="flushChamber" data-task="FLUSH_CHAMBER" data-confirm="Flush the measurement chamber now?">Flush chamber</button>
+            </div>
+          </section>
+
+          <section class="command-group" aria-labelledby="relay-commands">
+            <h3 id="relay-commands">Relay Lines</h3>
+            <div class="toggle-grid">
+              <button type="button" class="toggle-command" data-toggle="relay1" data-command-on="relay1On" data-command-off="relay1Off" aria-pressed="false" style="display: none;"><span>PDB relay 1</span><small>OFF</small></button>
+              <button type="button" class="toggle-command" data-toggle="relay2" data-command-on="relay2On" data-command-off="relay2Off" aria-pressed="false"><span>8V, 12V relay</span><small>OFF</small></button>
+              <button type="button" class="toggle-command" data-toggle="relay3" data-command-on="relay3On" data-command-off="relay3Off" aria-pressed="false"><span>24V relay</span><small>OFF</small></button>
+              <button type="button" class="toggle-command" data-toggle="relay4" data-command-on="relay4On" data-command-off="relay4Off" aria-pressed="false" style="display: none;"><span>PDB relay 4</span><small>OFF</small></button>
+            </div>
+          </section>
+
+          <section class="command-group" aria-labelledby="peripheral-commands">
+            <h3 id="peripheral-commands">Peripheral Overrides</h3>
+            <div class="toggle-grid">
+              <button type="button" class="toggle-command" data-toggle="pump1" data-command-on="pump1On" data-command-off="pump1Off" data-confirm-on="Turn vacuum pump 1 on manually?" aria-pressed="false"><span>Vacuum pump 1</span><small>OFF</small></button>
+              <button type="button" class="toggle-command" data-toggle="pump2" data-command-on="pump2On" data-command-off="pump2Off" data-confirm-on="Turn vacuum pump 2 on manually?" aria-pressed="false"><span>Vacuum pump 2</span><small>OFF</small></button>
+              <button type="button" class="toggle-command" data-toggle="compressor" data-command-on="compressorOn" data-command-off="compressorOff" data-confirm-on="Turn compressor on manually?" aria-pressed="false"><span>Compressor</span><small>OFF</small></button>
+              <button type="button" class="toggle-command" data-toggle="outletValve" data-command-on="outletValveOpen" data-command-off="outletValveClose" data-confirm-on="Open the normally closed outlet valve?" aria-pressed="false"><span>Outlet valve</span><small>CLOSED</small></button>
+            </div>
+          </section>
+
+          <section class="command-group" aria-labelledby="thermal-commands">
+            <h3 id="thermal-commands">Thermal Control</h3>
+            <fieldset class="heater-selection">
+              <legend>Select heaters</legend>
+              <div class="heater-selection-actions">
+                <button type="button" data-heater-select="all">Select all</button>
+                <button type="button" data-heater-select="none">Deselect</button>
+              </div>
+              <div class="heater-checkbox-grid">
+                <label><input type="checkbox" data-heater-checkbox="1"><span>H1</span><small>SD-card heater</small></label>
+                <label><input type="checkbox" data-heater-checkbox="2"><span>H2</span><small>Peltier chamber cooler</small></label>
+                <label><input type="checkbox" data-heater-checkbox="3"><span>H3</span><small>outlet heater</small></label>
+                <label><input type="checkbox" data-heater-checkbox="4"><span>H4</span><small>intake preheater</small></label>
+                <label><input type="checkbox" data-heater-checkbox="5"><span>H5</span><small>secondary inlet heater</small></label>
+                <label><input type="checkbox" data-heater-checkbox="6"><span>H6</span><small>Peltier stage 1</small></label>
+                <label><input type="checkbox" data-heater-checkbox="7"><span>H7</span><small>Peltier stage 2</small></label>
+                <label><input type="checkbox" data-heater-checkbox="8"><span>H8</span><small>backup thermal channel</small></label>
+              </div>
+            </fieldset>
+
+            <form class="heater-config-form" id="heaterConfigForm">
+              <div class="heater-config-row heater-config-main">
+                <label>
+                  <span>Mode</span>
+                  <select id="heaterConfigMode" aria-label="Heater control mode">
+                    <option value="PID">PID</option>
+                    <option value="BANGBANG">Bang-Bang</option>
+                    <option value="MANUAL">Manual</option>
+                  </select>
+                </label>
+                <div class="heater-config-value-group">
+                  <label>
+                    <span>Target °C</span>
+                    <input id="heaterConfigTarget" type="number" step="1" min="-100" max="200" value="50" aria-label="Target temperature in Celsius">
+                  </label>
+                  <label>
+                    <span>Duty %</span>
+                    <input id="heaterConfigDuty" type="number" step="5" min="0" max="100" value="75" aria-label="Manual duty cycle percent">
+                  </label>
+                </div>
+              </div>
+              <button type="submit" class="heater-config-submit">Apply heater config</button>
+            </form>
+
+            <div class="command-grid">
+              <button type="button" data-heater-action="on">Turn selected heaters ON</button>
+              <button type="button" data-heater-action="off">Turn selected heaters OFF</button>
+            </div>
+
+            <div class="heater-shortcut-grid">
+              <button type="button" data-heater-shortcut="all-heaters-on">All heaters ON</button>
+              <button type="button" data-heater-shortcut="all-heaters-off">All heaters OFF</button>
+              <button type="button" data-heater-shortcut="all-coolers-on">All coolers ON</button>
+              <button type="button" data-heater-shortcut="all-coolers-off">All coolers OFF</button>
+            </div>
+          </section>
+
+          <section class="command-group recovery-group" aria-labelledby="recovery-commands">
+            <h3 id="recovery-commands">Recovery</h3>
+            <div class="command-grid">
+              <button type="button" class="warning-command" data-command="restartController" data-confirm="Restart the main controller? Telemetry may pause during reboot.">Restart main controller</button>
+              <button type="button" class="danger-command" data-command="emergencyStop" data-confirm="Send emergency stop and safe shutdown?">Emergency stop / safe shutdown</button>
+            </div>
+          </section>
+        </div>
+      </section>
+      </div>
+
+      <div class="column-resize-handle" id="columnResizeHandle" role="separator" aria-label="Resize console columns" aria-orientation="vertical" tabindex="0"></div>
+
+      <div class="console-column">
+      <section class="panel telemetry-panel" aria-labelledby="telemetry-title">
+        <header class="panel-header">
+          <div>
+            <p class="eyebrow">1 Hz downlink</p>
+            <h2 id="telemetry-title">Live Telemetry</h2>
+          </div>
+          <div class="telemetry-header-tools">
+            <div class="view-switch" aria-label="Telemetry panel view">
+              <button id="telemetryViewButton" type="button" class="active" data-view="telemetry" aria-pressed="true">Telemetry</button>
+              <button id="overviewViewButton" type="button" data-view="overview" aria-pressed="false">System</button>
+            </div>
+            <div class="telemetry-counters">
+              <span>Frame <strong id="frameNumber">--</strong></span>
+              <span>Latency <strong id="latencyValue">--</strong></span>
+            </div>
+          </div>
+        </header>
+
+        <div id="telemetryView" class="telemetry-view">
+          <div class="quick-metrics" aria-label="Key live telemetry values">
+            <article class="metric" id="metricMethane">
+              <span>CH4</span>
+              <strong id="methaneValue">--</strong>
+              <small>raw counts</small>
+            </article>
+            <article class="metric" id="metricPressure">
+              <span>Chamber pressure</span>
+              <strong id="chamberPressureValue">--</strong>
+              <small>bar</small>
+            </article>
+            <article class="metric" id="metricTemperature">
+              <span>Chamber temp</span>
+              <strong id="chamberTempValue">--</strong>
+              <small>deg C</small>
+            </article>
+            <article class="metric" id="metricHumidity">
+              <span>Humidity</span>
+              <strong id="humidityValue">--</strong>
+              <small>% RH</small>
+            </article>
+            <article class="metric" id="metricLink">
+              <span>Link quality</span>
+              <strong id="linkQualityValue">--</strong>
+              <small>%</small>
+            </article>
+          </div>
+
+          <div class="chart-grid">
+            <article class="chart-card">
+              <div class="chart-head">
+                <h3>Raw Light Detector Output</h3>
+                <span><i class="legend-dot methane"></i>CH4 <i class="legend-dot co2"></i>CO2 <i class="legend-dot water"></i>H2O</span>
+              </div>
+              <canvas id="gasChart" aria-label="Raw gas light detector output trend"></canvas>
+            </article>
+            <article class="chart-card">
+              <div class="chart-head">
+                <h3>Internal Pressures</h3>
+                <span><i class="legend-dot interstage-1"></i>IS 1 <i class="legend-dot interstage-2"></i>IS 2<i class="legend-dot chamber-pressure"></i>Chamber</span>
+              </div>
+              <canvas id="pressureChart" aria-label="Pressure trend"></canvas>
+            </article>
+            <article class="chart-card">
+              <div class="chart-head">
+                <h3>Internal Temperatures</h3>
+                <div class="chart-legend">
+                  <span class="legend-item" title="SD card Temperature">
+                    <i class="legend-dot SD-temp"></i>SD
+                  </span>
+                  <span class="legend-item" title="Inlet Temperature">
+                    <i class="legend-dot inlet-temp"></i>IN
+                  </span>
+                  <span class="legend-item" title="Outlet Temperature">
+                    <i class="legend-dot outlet-temp"></i>OUT
+                  </span>
+                  <span class="legend-item" title="Vacuum Pump 1 Temperature">
+                    <i class="legend-dot pump1-temp"></i>VP1
+                  </span>
+                  <span class="legend-item" title="Vacuum Pump 2 Temperature">
+                    <i class="legend-dot pump2-temp"></i>VP2
+                  </span>
+                  <span class="legend-item" title="Piston Pump Temperature">
+                    <i class="legend-dot pump3-temp"></i>PP
+                  </span>
+                  <span class="legend-item" title="Interstage 1 Temperature">
+                    <i class="legend-dot interstage1-temp"></i>IS 1
+                  </span>
+                  <span class="legend-item" title="Interstage 2 Temperature">
+                    <i class="legend-dot interstage2-temp"></i>IS 2
+                  </span>
+                  <span class="legend-item" title="Chamber MS5803 Temperature">
+                    <i class="legend-dot chamber-tempMS"></i>Chamber MS
+                  </span>
+                  <span class="legend-item" title="Chamber K96 Temperature">
+                    <i class="legend-dot chamber-tempK96"></i>Chamber K96
+                  </span>
+              </div>
+              </div>
+              <canvas id="thermalChart" aria-label="Temperature trend"></canvas>
+            </article>
+            <article class="chart-card">
+              <div class="chart-head">
+                <h3>Ambient</h3>
+                 <div class="chart-legend">
+                  <span class="legend-item" title= "MS5803 Pressure"><i class="legend-dot ambient-pressure"></i>Pressure</span>
+                  <span class="legend-item" title= "SHT45 Humidity"><i class="legend-dot ambient-humidity"></i>RH SHT45</span>
+                  <span class="legend-item" title= "K96 Humidity"><i class="legend-dot humidity-k96"></i>RH K96</span>
+                  <span class="legend-item" title= "SHT45 Temperature"><i class="legend-dot temperature-sht45"></i>Temp 1</span>
+                  <span class="legend-item" title= "TMP117 Temperature"><i class="legend-dot temperature-tmp117"></i>Temp 2</span>
+                  <span class="legend-item" title= "MS5803 Temperature"><i class="legend-dot temperature-ms5803"></i>Temp 3</span>
+                 </div>
+              </div>
+              <canvas id="ambientChart" aria-label="Thermal and humidity trend"></canvas>
+            </article>
+            <article class="chart-card">
+              <div class="chart-head">
+                <h3>Link / Actuation</h3>
+                <span><i class="legend-dot link"></i>E-Link <i class="legend-dot pump1-actuation"></i>VP1 <i class="legend-dot pump2-actuation"></i>VP2 <i class="legend-dot compressor-actuation"></i>PP</span>
+              </div>
+              <canvas id="linkChart" aria-label="Link and actuator trend"></canvas>
+            </article>
+            <article class="chart-card">
+              <div class="chart-head">
+                <h3>Heater Actuation</h3>
+                <div class="chart-legend heater-legend">
+                  <span><i class="legend-dot heater-1"></i>H1</span>
+                  <span><i class="legend-dot heater-2"></i>H2</span>
+                  <span><i class="legend-dot heater-3"></i>H3</span>
+                  <span><i class="legend-dot heater-4"></i>H4</span>
+                  <span><i class="legend-dot heater-5"></i>H5</span>
+                  <span><i class="legend-dot heater-6"></i>H6</span>
+                  <span><i class="legend-dot heater-7"></i>H7</span>
+                  <span><i class="legend-dot heater-8"></i>H8</span>
+                </div>
+              </div>
+              <canvas id="heaterActuationChart" aria-label="Individual heater actuation trend"></canvas>
+            </article>
+          </div>
+        </div>
+
+        <div id="systemOverviewView" class="system-overview-view" hidden>
+          <div class="system-diagram-shell">
+            <svg id="systemDiagram" class="system-diagram" viewBox="0 0 980 560" role="img" aria-labelledby="system-diagram-title system-diagram-desc">
+              <title id="system-diagram-title">MIRAGE system overview</title>
+              <desc id="system-diagram-desc">System flow diagram with live colors for pumps, compressor, outlet valve, relays, thermal control, storage, and E-Link.</desc>
+              <defs>
+                <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z"></path>
+                </marker>
+              </defs>
+
+              <path id="flowIntakePreheater" class="flow-line" d="M72 232 H158"></path>
+              <path id="flowPreheaterPump1" class="flow-line" d="M278 232 H356"></path>
+              <path id="flowPump1Pump2" class="flow-line" d="M476 232 H548"></path>
+              <path id="flowPump2Compressor" class="flow-line" d="M668 232 H740"></path>
+              <path id="flowCompressorChamber" class="flow-line" d="M800 282 V348 H610"></path>
+              <path id="flowChamberValve" class="flow-line" d="M430 398 H246"></path>
+              <path id="flowValveOutlet" class="flow-line" d="M126 398 H72"></path>
+
+              <g id="diagramAmbient" class="diagram-node passive" transform="translate(24 192)">
+                <rect width="112" height="80"></rect>
+                <text x="56" y="32">Ambient</text>
+                <text x="56" y="54" id="diagramAmbientValue">-- hPa</text>
+              </g>
+
+              <g id="diagramPreheater" class="diagram-node" transform="translate(158 192)">
+                <rect width="120" height="80"></rect>
+                <text x="60" y="30">Inlet heat</text>
+                <text x="60" y="54" id="diagramPreheaterValue">OFF</text>
+              </g>
+
+              <g id="diagramPump1" class="diagram-node" transform="translate(356 192)">
+                <rect width="120" height="80"></rect>
+                <text x="60" y="30">Vac pump 1</text>
+                <text x="60" y="54" id="diagramPump1Value">OFF</text>
+              </g>
+
+              <g id="diagramPump2" class="diagram-node" transform="translate(548 192)">
+                <rect width="120" height="80"></rect>
+                <text x="60" y="30">Vac pump 2</text>
+                <text x="60" y="54" id="diagramPump2Value">OFF</text>
+              </g>
+
+              <g id="diagramCompressor" class="diagram-node" transform="translate(740 192)">
+                <rect width="120" height="80"></rect>
+                <text x="60" y="30">Compressor</text>
+                <text x="60" y="54" id="diagramCompressorValue">OFF</text>
+              </g>
+
+              <g id="diagramChamber" class="diagram-node large" transform="translate(430 348)">
+                <rect width="180" height="100"></rect>
+                <text x="90" y="28">3 bar chamber</text>
+                <text x="90" y="52">K96 sensor</text>
+                <text x="90" y="76" id="diagramChamberValue">-- bar / -- C</text>
+              </g>
+
+              <g id="diagramOutletValve" class="diagram-node" transform="translate(126 358)">
+                <rect width="120" height="80"></rect>
+                <text x="60" y="30">Outlet valve</text>
+                <text x="60" y="54" id="diagramValveValue">CLOSED</text>
+              </g>
+
+              <g id="diagramExhaust" class="diagram-node passive" transform="translate(24 358)">
+                <rect width="88" height="80"></rect>
+                <text x="44" y="32">Exhaust</text>
+                <text x="44" y="54" id="diagramExhaustValue">NC path</text>
+              </g>
+
+              <g id="diagramMainMcu" class="diagram-node" transform="translate(360 40)">
+                <rect width="130" height="78"></rect>
+                <text x="65" y="30">Main MCU</text>
+                <text x="65" y="54" id="diagramMainValue">READY</text>
+              </g>
+
+              <g id="diagramPressureMcu" class="diagram-node" transform="translate(552 40)">
+                <rect width="140" height="78"></rect>
+                <text x="70" y="30">Pressure MCU</text>
+                <text x="70" y="54" id="diagramPressureMcuValue">STANDBY</text>
+              </g>
+
+              <g id="diagramThermalMcu" class="diagram-node" transform="translate(744 40)">
+                <rect width="140" height="78"></rect>
+                <text x="70" y="30">Thermal MCU</text>
+                <text x="70" y="54" id="diagramThermalMcuValue">ONLINE</text>
+              </g>
+
+              <g id="diagramElLink" class="diagram-node" transform="translate(84 40)">
+                <rect width="140" height="78"></rect>
+                <text x="70" y="30">E-Link</text>
+                <text x="70" y="54" id="diagramLinkValue">--</text>
+              </g>
+
+              <g id="diagramStorage" class="diagram-node" transform="translate(744 410)">
+                <rect width="140" height="78"></rect>
+                <text x="70" y="30">SD storage</text>
+                <text x="70" y="54" id="diagramStorageValue">--</text>
+              </g>
+
+              <g id="diagramHeaters" class="diagram-node" transform="translate(744 310)">
+                <rect width="140" height="78"></rect>
+                <text x="70" y="30">Heaters</text>
+                <text x="70" y="54" id="diagramHeaterValue">--</text>
+              </g>
+
+              <g id="diagramCooler" class="diagram-node" transform="translate(596 450)">
+                <rect width="120" height="70"></rect>
+                <text x="60" y="28">Peltier</text>
+                <text x="60" y="50" id="diagramCoolerValue">OFF</text>
+              </g>
+
+              <path id="busMainPressure" class="control-line" d="M490 79 H552"></path>
+              <path id="busPressureThermal" class="control-line" d="M692 79 H744"></path>
+              <path id="busMainLink" class="control-line" d="M224 79 H360"></path>
+              <path id="busThermalHeaters" class="control-line" d="M814 118 V310"></path>
+              <path id="busMainStorage" class="control-line" d="M425 118 V502 H744"></path>
+
+              <g class="relay-bank" transform="translate(64 486)">
+                <text class="relay-bank-title" x="0" y="-16">PDB relay lines</text>
+                <line id="diagramRelay1" class="relay-line" x1="0" y1="0" x2="170" y2="0"></line>
+                <line id="diagramRelay2" class="relay-line" x1="0" y1="18" x2="170" y2="18"></line>
+                <line id="diagramRelay3" class="relay-line" x1="0" y1="36" x2="170" y2="36"></line>
+                <line id="diagramRelay4" class="relay-line" x1="0" y1="54" x2="170" y2="54"></line>
+                <text x="182" y="4" id="diagramRelay1Value">R1 OFF</text>
+                <text x="182" y="22" id="diagramRelay2Value">R2 OFF</text>
+                <text x="182" y="40" id="diagramRelay3Value">R3 OFF</text>
+                <text x="182" y="58" id="diagramRelay4Value">R4 OFF</text>
+              </g>
+            </svg>
+          </div>
+
+          <div class="overview-state-strip" aria-label="System overview state legend">
+            <span><i class="state-swatch on"></i>Active</span>
+            <span><i class="state-swatch off"></i>Off</span>
+            <span><i class="state-swatch warn"></i>Warning</span>
+            <span><i class="state-swatch fault"></i>Fault</span>
+            <span><i class="state-swatch dropout"></i>Dropout</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel terminal-panel" aria-labelledby="terminal-title">
+        <div class="panel-resize-handle" id="terminalResizeHandle" aria-label="Resize terminal pane"></div>
+        <header class="panel-header">
+          <div>
+            <p class="eyebrow">Manual intervention</p>
+            <h2 id="terminal-title">Built-In Terminal</h2>
+          </div>
+          <span id="terminalRoute" class="terminal-route">local mock route</span>
+        </header>
+
+        <div id="terminalOutput" class="terminal-output" role="log" aria-live="polite"></div>
+        <form id="terminalForm" class="terminal-form" autocomplete="off">
+          <label for="terminalInput">manual command</label>
+          <input id="terminalInput" type="text" spellcheck="false" placeholder="type status, help, or a command">
+          <button type="submit">Send</button>
+        </form>
+      </section>
+      </div>
+    </main>
+  </body>
+</html>
