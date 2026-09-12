@@ -79,6 +79,10 @@ static bool restart_requested = false;
 static std::string ethernet_command_text;
 bool manual_mode_overwrite = false; // To track if manual mode overwrite is active
 static int last_mode_default_heater_state = -1;
+int max_pressure_threshold = P_STRATOSPHERE; // Maximum pressure threshold for status check
+int max_loop_wo_conneciton = LOOP_WO_CONNECTION;
+int max_chamber_pressure_threshold = CHAMBER_P_SHUTTER_THRESHOLD; // Maximum chamber pressure threshold for status check
+int min_inlet_temperature_threshold = INLET_TEMPERATURE_THRESHOLD; // Minimum inlet temperature threshold for status check
 
 struct QueuedPressureCommand {
     uint8_t command;
@@ -929,7 +933,7 @@ void loop()
     buffer_SD_data_csv(&sensor_data);      //4k - est time: 3 ms every 8th loop
 
     // Status Check Block
-    if (sensor_data.Pa1 < P_STRATOSPHERE)
+    if (sensor_data.Pa1 < max_pressure_threshold)
     {
         if (flightphase == 0) // If flightphase was in ascent, switch it to float
         {
@@ -1090,9 +1094,9 @@ void loop()
         }
 
         // Elevation check in terms of pressure
-        if (sensor_data.Pa1 < P_STRATOSPHERE)
+        if (sensor_data.Pa1 < max_pressure_threshold) // If pressure is below threshold, enter safe mode (aka standby)
         {
-            if (loops_since_connection > LOOP_WO_CONNECTION) // If connection lost for more than LOOP_WO_CONNECTION loops, enter safe mode
+            if (loops_since_connection > max_loop_wo_connection) // If connection lost for more than LOOP_WO_CONNECTION loops, enter safe mode (aka standby)
             {
                 mode = 2; // Standby
                 ESP_LOGE_CAPTURED(ERROR_BIT_55, TAG, "Connection lost for more than %d loops. Entering standby mode.", LOOP_WO_CONNECTION);
@@ -1115,7 +1119,7 @@ void loop()
         //    ESP_LOGE(TAG, "Pressure in chamber below threshold. Starting pre-pressurisation.");
         //} 
         //Check if pressure in chamber is above threshold, if so, stop pressurisation system. 
-        if (sensor_data.Pp2 + sensor_data.Pa1 > CHAMBER_P_SHUTTER_THRESHOLD) //Why adding the ambient pressure?
+        if (sensor_data.Pp2 + sensor_data.Pa1 > max_chamber_pressure_threshold) //Why adding the ambient pressure?
         {
             commands_comms_pressure_mcu(PRESSURE_CMD_STOP_PRESSURISATION);
             commands_comms_pressure_mcu(PRESSURE_CMD_VALVE_OPEN);
@@ -1125,7 +1129,7 @@ void loop()
 
         // Thermal check block to see if temperatures are out of limits 
         // Check if inlet temperature is below threshold. If so, stop the pressurisation system and increase inlet temperature first.
-        if (sensor_data.Tt3 < INLET_TEMPERATURE_THRESHOLD)
+        if (sensor_data.Tt3 < min_inlet_temperature_threshold)
         {
             //Thermal communication: increase inlet temperature
             commands_comms_pressure_mcu(PRESSURE_CMD_STOP_PRESSURISATION);
