@@ -14,7 +14,7 @@ bool manual_pump1 = false, manual_pump2 = false, manual_compressor = false, manu
 bool relay_manual = false;
 uint8_t applied_mode = 0;
 float target_pressure = 3.75f; //in pressure chamber
-float inlet_upper = 1.5f, inlet_lower = 1.0f; //inlet upper and lower boundaries for compressor inlet
+float inlet_upper = 1.8f, inlet_lower = 1.0f; //inlet upper and lower boundaries for compressor inlet
 //constexpr float FLUSH_COMPLETE_PRESSURE_BAR = 0.05f; //Why so low?
 constexpr uint8_t ERR_NONE = 0, ERR_CHAMBER_SENSOR = 1, ERR_INLET_SENSOR = 2;
 
@@ -26,7 +26,7 @@ TickType_t flushticks;
 float measure_time = 20.0f; //in s
 float flushsum = 0.0f; // sums up exchanged air
 float V = 0.075; //75 ml estimated chamber volume
-float Qout = 1.5; // l/min based on compressor out flow rate measured in test for lower end of pressure range
+float Qout = 1.0; // l/min based on compressor out flow rate measured in test for lower end of pressure range
 float flushtarget = 0.225; // flushtarget = -Setup.V*np.log(0.05) which means that 95% of the air should be exchanged
 
 bool compressed = false;
@@ -97,20 +97,20 @@ void pressure_update_external_sensors(const float sensors[7]) {
 void adjust_pressure_target(){
     //upper limit of compressor inlet pressure should depend on ambient pressure
     if ((status.ambient_pressure < 0.9) and (status.ambient_pressure>=0.7)){
-        inlet_upper = 1.5;
+        inlet_upper = 1.8;
         inlet_lower = 1.1;
     }
     else if ((status.ambient_pressure < 0.7) and (status.ambient_pressure>=0.5)){
-        inlet_upper = 1.3;
+        inlet_upper = 1.5;
         inlet_lower = 1.0;
     }
     else if ((status.ambient_pressure < 0.5) and (status.ambient_pressure>=0.2)){
-        inlet_upper = 1.1;
+        inlet_upper = 1.2;
         inlet_lower = 0.9;
     }
     else if (status.ambient_pressure < 0.2){
-        inlet_upper = 1.1;
-        inlet_lower = 0.9;
+        inlet_upper = 1.0;
+        inlet_lower = 0.8;
     }
 }
 
