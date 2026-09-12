@@ -30,6 +30,9 @@ float Qout = 1.0; // l/min based on compressor out flow rate measured in test fo
 float flushtarget = 0.225; // flushtarget = -Setup.V*np.log(0.05) which means that 95% of the air should be exchanged
 
 bool compressed = false;
+float pwm1 = 50; //duty cycle setting of vacuum pump1
+float pwm2 = 50; //duty cycle setting of vacuum pump2
+float pwm3 = 50; //duty cycle setting of compressor
 
 uint8_t clamp_pwm(uint8_t pwm) { return pwm > 100 ? 100 : pwm; }
 void set_pump1(uint8_t pwm) { pwm = clamp_pwm(pwm); pressure_pump1_set(pwm); status.pump1_pwm = pwm; }
@@ -103,14 +106,20 @@ void adjust_pressure_target(){
     else if ((status.ambient_pressure < 0.7) and (status.ambient_pressure>=0.5)){
         inlet_upper = 1.5;
         inlet_lower = 1.0;
+        pwm1 = 100;
+        pwm2 = 100;
     }
     else if ((status.ambient_pressure < 0.5) and (status.ambient_pressure>=0.2)){
         inlet_upper = 1.2;
         inlet_lower = 0.9;
+        pwm1 = 100;
+        pwm2 = 100;
     }
     else if (status.ambient_pressure < 0.2){
         inlet_upper = 1.0;
         inlet_lower = 0.8;
+        pwm1 = 100;
+        pwm2 = 100;
     }
 }
 
@@ -198,8 +207,8 @@ void pressure_update() {
         //}
         if (!manual_valve) set_valve(false); 
         if (!manual_compressor) set_compressor(0); //should be 0 because compressor and pumps can't be on at the same time
-        if (!manual_pump1) set_pump1(50);
-        if (!manual_pump2) set_pump2(50);
+        if (!manual_pump1) set_pump1(pwm1);
+        if (!manual_pump2) set_pump2(pwm2);
         if (status.compressor_inlet_pressure >= inlet_upper) {
             if (!manual_pump1) set_pump1(0);
             if (!manual_pump2) set_pump2(0);
@@ -209,8 +218,8 @@ void pressure_update() {
     } else if (status.state == PRESSURE_COMPRESSION) {
         if (!manual_pump1) set_pump1(0);
         if (!manual_pump2) set_pump2(0);
-        if (!manual_valve) set_valve(true);
-        if (!manual_compressor) set_compressor(50);
+        if (!manual_valve) set_valve(false);
+        if (!manual_compressor) set_compressor(pwm3);
 
         flushstep_stop = xTaskGetTickCount();
         flushticks = flushstep_stop-flushstep_start;
@@ -292,7 +301,7 @@ void pressure_update() {
     } else if (status.state == PRESSURE_CORRECTION) {
         set_pump1(0);
         set_pump2(0);
-        set_compressor(50);
+        set_compressor(pwm3);
         set_valve(false);
         if ((status.compressor_inlet_pressure <= inlet_lower) and (abs(status.chamber_pressure - target_pressure) > 0.1)){
             if (!manual_compressor) set_compressor(0);
