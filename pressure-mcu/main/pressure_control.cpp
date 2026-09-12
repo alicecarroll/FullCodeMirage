@@ -277,9 +277,10 @@ void pressure_update() {
         TickType_t current_time = xTaskGetTickCount();
         TickType_t elapsed_ticks = current_time - measurement_time_start;
         if (elapsed_ticks*portTICK_PERIOD_MS/1000 >= measure_time) {
-            status.state = PRESSURE_PREPRESSURISATION;
+            status.state = PRESSURE_AIR_EXCHANGE;
             ESP_LOGI("pressure", "Measurement done at %.3f bar", status.chamber_pressure);
             bool compressed = false;
+            flushsum = 0.0;
         }
     } else if (status.state == PRESSURE_AIR_EXCHANGE) {
         set_pump1(0);
