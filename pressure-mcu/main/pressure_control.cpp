@@ -14,7 +14,7 @@ bool manual_pump1 = false, manual_pump2 = false, manual_compressor = false, manu
 bool relay_manual = false;
 uint8_t applied_mode = 0;
 float target_pressure = 3.75f; //in pressure chamber
-float inlet_upper = 1.5f, inlet_lower = 1.0f; //inlet upper and lower boundaries for compressor inlet
+float inlet_upper = 1.6f, inlet_lower = 1.2f; //inlet upper and lower boundaries for compressor inlet
 //constexpr float FLUSH_COMPLETE_PRESSURE_BAR = 0.05f; //Why so low?
 constexpr uint8_t ERR_NONE = 0, ERR_CHAMBER_SENSOR = 1, ERR_INLET_SENSOR = 2;
 
