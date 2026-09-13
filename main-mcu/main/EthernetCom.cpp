@@ -43,6 +43,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "Settings.h"
+#include <lwip/inet.h>
 
 static const char *TAG = "Ethernet WIZ850io";
 

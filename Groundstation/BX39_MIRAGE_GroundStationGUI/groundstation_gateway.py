@@ -703,7 +703,7 @@ def run_servers(host: str, http_port: int, payload_port: int, static_root: Path)
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the MIRAGE local ground-station gateway")
     parser.add_argument("--host", default="0.0.0.0", help="host/IP for HTTP and payload TCP listeners")
-    parser.add_argument("--http-port", default=int(os.environ.get("MIRAGE_HTTP_PORT", "8080")), type=int)
+    parser.add_argument("--http-port", default=int(os.environ.get("MIRAGE_HTTP_PORT", "8001")), type=int)
     parser.add_argument("--payload-port", default=int(os.environ.get("MIRAGE_PAYLOAD_PORT", "5001")), type=int)
     parser.add_argument("--static-root", default=Path(__file__).resolve().parent, type=Path)
     return parser.parse_args()
