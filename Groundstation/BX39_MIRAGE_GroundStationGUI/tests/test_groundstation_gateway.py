@@ -134,6 +134,13 @@ class StatusPacketParserTest(unittest.TestCase):
         self.assertEqual(frame["heater1ActuationPct"], 100)
         self.assertEqual(frame["heater2ActuationPct"], 0)
 
+    def test_automatic_pressure_states_have_operator_names(self):
+        expected_names = {5: "COMPRESSION", 6: "MEASUREMENT", 7: "CORRECTION"}
+        for state, expected_name in expected_names.items():
+            with self.subTest(state=state):
+                frame = gateway.parse_status_packet(make_status_packet(pressure_state=state))
+                self.assertEqual(frame["pressureStateName"], expected_name)
+
     def test_decodes_captured_error_bits(self):
         frame = gateway.parse_status_packet(
             make_status_packet(captured_errors=(1 << 0) | (1 << 55)),

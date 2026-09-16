@@ -9,3 +9,12 @@ in the development cycle.
 
 More information about PlatformIO Unit Testing:
 - https://docs.platformio.org/en/latest/advanced/unit-testing/index.html
+
+The pressure state-machine host test can also be run without ESP-IDF:
+
+```sh
+g++ -std=c++17 -Wall -Wextra \
+  -Itest/stubs -Imain -I../protocol \
+  main/pressure_control.cpp test/pressure_control_test.cpp \
+  -o /tmp/pressure_control_test && /tmp/pressure_control_test
+```

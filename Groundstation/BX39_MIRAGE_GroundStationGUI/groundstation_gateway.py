@@ -70,6 +70,9 @@ PRESSURE_STATES = {
     2: "AIR_EXCHANGE",
     3: "ERROR",
     4: "FLUSH_CHAMBER",
+    5: "COMPRESSION",
+    6: "MEASUREMENT",
+    7: "CORRECTION",
 }
 
 ERROR_MANIFEST_PATH = Path(__file__).resolve().parents[2] / "main-mcu" / "main" / "ErrorBits.def"
