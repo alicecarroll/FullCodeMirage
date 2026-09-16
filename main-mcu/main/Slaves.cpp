@@ -1,4 +1,5 @@
 #include <string.h>
+#include <cmath>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/i2c.h"
@@ -240,14 +241,22 @@ bool pressure_send_sensors(
 
     package[0] = PRESSURE_PACKET_SENSORS;
 
+    const auto encode_sensor = [](float value) -> int16_t {
+        if (!std::isfinite(value)) return PRESSURE_SENSOR_INVALID;
+        const float scaled = value * SENSOR_SCALE;
+        if (scaled > INT16_MAX) return INT16_MAX;
+        if (scaled < INT16_MIN + 1) return INT16_MIN + 1;
+        return static_cast<int16_t>(scaled);
+    };
+
     int16_t sensor_ints[7] = {
-        (int16_t)(sensor_data.Pp3 * SENSOR_SCALE),
-        (int16_t)(sensor_data.Pp1 * SENSOR_SCALE),
-        (int16_t)(sensor_data.Pp2 * SENSOR_SCALE),
-        (int16_t)(sensor_data.Pa1 * SENSOR_SCALE),
-        (int16_t)(sensor_data.Tp1 * SENSOR_SCALE),
-        (int16_t)(sensor_data.Tp2 * SENSOR_SCALE),
-        (int16_t)(sensor_data.Tp3 * SENSOR_SCALE)
+        encode_sensor(sensor_data.Pp3),
+        encode_sensor(sensor_data.Pp1),
+        encode_sensor(sensor_data.Pp2),
+        encode_sensor(sensor_data.Pa1),
+        encode_sensor(sensor_data.Tp1),
+        encode_sensor(sensor_data.Tp2),
+        encode_sensor(sensor_data.Tp3)
     };
 
     for(int i = 0; i < 7; i++) {

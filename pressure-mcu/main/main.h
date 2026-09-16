@@ -68,7 +68,8 @@ void pressure_set_target_pressure(
 void pressure_set_compressor_inlet_upper_limit(
     float pressure);
 
-// Compressor inlet pressure that ends the air exchange phase
+// Compressor inlet pressure that ends a compression pulse and causes the
+// interstage chamber to be prepressurised again
 void pressure_set_compressor_inlet_lower_limit(
     float pressure);
 

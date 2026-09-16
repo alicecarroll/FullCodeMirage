@@ -4,15 +4,29 @@
 #include "freertos/FreeRTOS.h"
 
 #include <assert.h>
+#include <limits>
 
 namespace {
 TickType_t fake_ticks = 0;
 
-void update_sensors(float chamber_bar, float inlet_absolute_bar) {
-    constexpr float ambient_bar = 1.0f;
+void update_sensors(float chamber_bar, float inlet_absolute_bar,
+                    float ambient_bar = 1.0f) {
     const float sensors[7] = {
         0.0f,
         inlet_absolute_bar - ambient_bar,
+        chamber_bar,
+        ambient_bar,
+        0.0f,
+        0.0f,
+        0.0f,
+    };
+    pressure_update_external_sensors(sensors);
+}
+
+void update_invalid_inlet_sensor(float chamber_bar, float ambient_bar) {
+    const float sensors[7] = {
+        0.0f,
+        std::numeric_limits<float>::quiet_NaN(),
         chamber_bar,
         ambient_bar,
         0.0f,
@@ -41,28 +55,51 @@ void pressure_valve_set(bool) {}
 void pressure_relay_set(uint8_t, bool) {}
 
 int main() {
+    // Automatic operation without even one real sensor frame fails safe.
+    pressure_init();
+    pressure_execute_command(PRESSURE_CMD_START_PRESSURISATION, 0);
+    assert(pressure_get_status().state == PRESSURE_ERROR);
+    assert(pressure_get_status().error == 3);
+    expect_outputs(0, 0, false);
+    pressure_update();
+    assert(pressure_get_status().state == PRESSURE_ERROR);
+    assert(pressure_get_status().error == 3);
+    expect_outputs(0, 0, false);
+
     pressure_init();
     update_sensors(1.0f, 1.0f);
     pressure_execute_command(PRESSURE_CMD_START_PRESSURISATION, 0);
 
     // Starting pressurisation must first charge the compressor inlet.
     assert(pressure_get_status().state == PRESSURE_PREPRESSURISATION);
-    expect_outputs(50, 0, false);
+    expect_outputs(100, 0, false);
 
     update_sensors(1.0f, 1.61f);
     pressure_update();
     assert(pressure_get_status().state == PRESSURE_COMPRESSION);
-    expect_outputs(0, 50, false);
+    expect_outputs(0, 100, false);
 
     // An exhausted inlet charge below the chamber target starts another
     // prepressurisation/compression round.
     fake_ticks = 1000;
-    update_sensors(1.5f, 1.1f);
+    update_sensors(1.5f, 1.04f);
     pressure_update();
     assert(pressure_get_status().state == PRESSURE_PREPRESSURISATION);
-    expect_outputs(50, 0, false);
+    expect_outputs(100, 0, false);
 
     update_sensors(1.5f, 1.61f);
+    pressure_update();
+    assert(pressure_get_status().state == PRESSURE_COMPRESSION);
+
+    // A compression pulse is capped at seven seconds even if the inlet has
+    // not yet reached its lower threshold.
+    fake_ticks = 8000;
+    update_sensors(1.8f, 1.4f);
+    pressure_update();
+    assert(pressure_get_status().state == PRESSURE_PREPRESSURISATION);
+    expect_outputs(100, 0, false);
+
+    update_sensors(1.8f, 1.61f);
     pressure_update();
     assert(pressure_get_status().state == PRESSURE_COMPRESSION);
 
@@ -75,11 +112,13 @@ int main() {
     expect_outputs(0, 0, false);
 
     fake_ticks = 29999;
+    update_sensors(3.0f, 1.4f);
     pressure_update();
     assert(pressure_get_status().state == PRESSURE_MEASUREMENT);
 
     // After exactly 20 seconds the outlet opens for the next exchange.
     fake_ticks = 30000;
+    update_sensors(3.0f, 1.4f);
     pressure_update();
     assert(pressure_get_status().state == PRESSURE_AIR_EXCHANGE);
     expect_outputs(0, 0, true);
@@ -92,7 +131,7 @@ int main() {
     update_sensors(2.0f, 1.0f);
     pressure_update();
     assert(pressure_get_status().state == PRESSURE_PREPRESSURISATION);
-    expect_outputs(50, 0, false);
+    expect_outputs(100, 0, false);
 
     // An already-full chamber is vented first instead of being compressed.
     pressure_execute_command(PRESSURE_CMD_STOP_PRESSURISATION, 0);
@@ -113,4 +152,33 @@ int main() {
     pressure_update();
     assert(pressure_get_status().state == PRESSURE_AIR_EXCHANGE);
     expect_outputs(0, 0, true);
+
+    // Missing sensor frames stop every actuator and latch an error.
+    fake_ticks = 34001;
+    pressure_update();
+    assert(pressure_get_status().state == PRESSURE_ERROR);
+    assert(pressure_get_status().error == 3);
+    expect_outputs(0, 0, false);
+
+    // Explicit inlet settings remain authoritative at low ambient pressure.
+    pressure_set_compressor_inlet_upper_limit(1.4f);
+    pressure_set_compressor_inlet_lower_limit(1.3f);
+    update_sensors(1.0f, 1.2f, 0.1f);
+    pressure_execute_command(PRESSURE_CMD_START_PRESSURISATION, 0);
+    pressure_update();
+    assert(pressure_get_status().state == PRESSURE_PREPRESSURISATION);
+
+    update_sensors(1.0f, 1.41f, 0.1f);
+    pressure_update();
+    assert(pressure_get_status().state == PRESSURE_COMPRESSION);
+    update_sensors(1.5f, 1.29f, 0.1f);
+    pressure_update();
+    assert(pressure_get_status().state == PRESSURE_PREPRESSURISATION);
+
+    // An explicitly invalid ABP2 value also stops the automatic cycle.
+    update_invalid_inlet_sensor(1.5f, 0.1f);
+    pressure_update();
+    assert(pressure_get_status().state == PRESSURE_ERROR);
+    assert(pressure_get_status().error == 2);
+    expect_outputs(0, 0, false);
 }

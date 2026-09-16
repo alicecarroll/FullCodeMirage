@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <cstdio>
+#include <limits>
 #include "esp_err.h"
 
 
@@ -70,6 +71,12 @@ static void read_abp2(float *pressure, ErrorBit pressure_error_bit,
 {
     uint8_t data[7];
     uint8_t cmd[3] = {0xAA, 0x00, 0x00}; // High precision measurement command
+    const float invalid = std::numeric_limits<float>::quiet_NaN();
+
+    // Never retain a previous reading after a failed conversion. NaN is
+    // encoded as PRESSURE_SENSOR_INVALID when sent to the Pressure MCU.
+    if (pressure != nullptr) *pressure = invalid;
+    if (temperature != nullptr) *temperature = invalid;
 
     // 1. Send the command to wake the sensor up and trigger a measurement
     esp_err_t err_write = i2c_master_write_to_device(
@@ -102,6 +109,26 @@ static void read_abp2(float *pressure, ErrorBit pressure_error_bit,
     {
         log_sensor_error(pressure_error_bit, pressure_reading, "ABP2 read", err_read);
         log_sensor_error(temperature_error_bit, temperature_reading, "ABP2 read", err_read);
+        return;
+    }
+
+    // ABP2 status byte: bit 6 powered, bit 5 busy, bit 2 memory error,
+    // bit 0 math saturation. Busy data belongs to the preceding conversion.
+    constexpr uint8_t ABP2_POWERED = 1U << 6;
+    constexpr uint8_t ABP2_BUSY = 1U << 5;
+    constexpr uint8_t ABP2_MEMORY_ERROR = 1U << 2;
+    constexpr uint8_t ABP2_MATH_SATURATION = 1U << 0;
+    const uint8_t status = data[0];
+    const bool invalid_status =
+        (status & ABP2_POWERED) == 0 ||
+        (status & (ABP2_BUSY | ABP2_MEMORY_ERROR | ABP2_MATH_SATURATION)) != 0;
+    if (invalid_status) {
+        ESP_LOGE_CAPTURED(pressure_error_bit, TAG,
+                          "%s ABP2 invalid status byte 0x%02X",
+                          pressure_reading, status);
+        ESP_LOGE_CAPTURED(temperature_error_bit, TAG,
+                          "%s ABP2 invalid status byte 0x%02X",
+                          temperature_reading, status);
         return;
     }
 
@@ -604,5 +631,4 @@ void read_sensors()
 
     read_tmp117(&sensor_data.Tt3, ERROR_BIT_59, "TT3");
 }
-
 

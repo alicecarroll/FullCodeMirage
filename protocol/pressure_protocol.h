@@ -2,6 +2,10 @@
 
 #include <stdint.h>
 
+// Reserved sensor value used inside the existing int16 sensor frame. Real
+// pressure/temperature values can never reach -327.68 after scaling by 100.
+constexpr int16_t PRESSURE_SENSOR_INVALID = INT16_MIN;
+
 // Canonical Main MCU <-> Pressure MCU protocol. All multi-byte values are
 // encoded explicitly by the sender; frames are byte-oriented and CRC-protected.
 enum PressurePacketType : uint8_t {

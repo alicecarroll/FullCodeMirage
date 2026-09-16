@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <cmath>
 #include <string.h>
 
 namespace {
@@ -15,20 +16,31 @@ bool manual_pump1 = false, manual_pump2 = false, manual_compressor = false, manu
 bool relay_manual = false;
 uint8_t applied_mode = 0;
 float target_pressure = 3.0f; // absolute pressure in the measurement chamber
-float inlet_upper = 1.6f, inlet_lower = 1.2f; //inlet upper and lower boundaries for compressor inlet
+float inlet_upper = 1.6f, inlet_lower = 1.05f; // absolute compressor inlet limits
+bool inlet_upper_manually_set = false;
+bool inlet_lower_manually_set = false;
 constexpr float TARGET_TOLERANCE_BAR = 0.1f;
 constexpr float MINIMUM_CHAMBER_PRESSURE_BAR = 2.0f;
 constexpr float MEASUREMENT_TIME_SECONDS = 20.0f;
+constexpr float MAX_COMPRESSION_TIME_SECONDS = 7.0f;
+constexpr float MAX_SENSOR_AGE_SECONDS = 3.0f;
 constexpr float CHAMBER_VOLUME_LITRES = 0.075f;
 constexpr float COMPRESSOR_FLOW_LITRES_PER_MINUTE = 1.5f;
 // Three chamber volumes replaces about 95% of a well-mixed gas sample.
 constexpr float EXCHANGE_TARGET_LITRES = 3.0f * CHAMBER_VOLUME_LITRES;
-constexpr uint8_t AUTOMATIC_PWM = 50;
+constexpr uint8_t AUTOMATIC_PWM = 100;
 constexpr uint8_t ERR_NONE = 0;
+constexpr uint8_t ERR_CHAMBER_SENSOR = 1;
+constexpr uint8_t ERR_INLET_SENSOR = 2;
+constexpr uint8_t ERR_SENSOR_TIMEOUT = 3;
 
 TickType_t measurement_time_start;
 TickType_t compression_update_start;
+TickType_t compression_phase_start;
+TickType_t last_external_sensor_update;
 float exchanged_air_litres = 0.0f;
+bool external_sensor_frame_received = false;
+uint8_t external_sensor_error = ERR_NONE;
 
 uint8_t clamp_pwm(uint8_t pwm) { return pwm > 100 ? 100 : pwm; }
 void set_pump1(uint8_t pwm) { pwm = clamp_pwm(pwm); pressure_pump1_set(pwm); status.pump1_pwm = pwm; }
@@ -74,7 +86,8 @@ void enter_compression() {
     if (!manual_compressor) set_compressor(AUTOMATIC_PWM);
     // This is the chamber outlet valve. It must remain closed while filling.
     if (!manual_valve) set_valve(false);
-    compression_update_start = xTaskGetTickCount();
+    compression_phase_start = xTaskGetTickCount();
+    compression_update_start = compression_phase_start;
 }
 
 void enter_air_exchange() {
@@ -97,6 +110,23 @@ void enter_measurement() {
 }
 
 void start_automatic_cycle() {
+    const TickType_t sensor_age_ticks =
+        xTaskGetTickCount() - last_external_sensor_update;
+    const float sensor_age_seconds =
+        sensor_age_ticks * portTICK_PERIOD_MS / 1000.0f;
+    if (!external_sensor_frame_received || !external_sensors_valid ||
+        sensor_age_seconds > MAX_SENSOR_AGE_SECONDS) {
+        if (!external_sensor_frame_received ||
+            (external_sensors_valid && sensor_age_seconds > MAX_SENSOR_AGE_SECONDS)) {
+            external_sensor_error = ERR_SENSOR_TIMEOUT;
+        }
+        external_sensors_valid = false;
+        stop_pressure_train(false);
+        status.error = external_sensor_error;
+        status.state = PRESSURE_ERROR;
+        return;
+    }
+
     exchanged_air_litres = 0.0f;
     if (chamber_at_target()) enter_air_exchange();
     else enter_prepressurisation();
@@ -122,7 +152,10 @@ void mode_changed(uint8_t mode) {
 
 void pressure_init() {
     pressure_hardware_init();
+    external_sensor_frame_received = false;
     external_sensors_valid = false;
+    external_sensor_error = ERR_NONE;
+    last_external_sensor_update = 0;
     applied_mode = 0;
     exchanged_air_litres = 0.0f;
     clear_overrides();
@@ -134,31 +167,38 @@ void pressure_init() {
 
 void pressure_update_external_sensors(const float sensors[7]) {
     memcpy(external_sensors, sensors, sizeof(external_sensors));
+    external_sensor_frame_received = true;
+    last_external_sensor_update = xTaskGetTickCount();
+
+    if (!std::isfinite(sensors[2])) {
+        external_sensors_valid = false;
+        external_sensor_error = ERR_CHAMBER_SENSOR;
+        return;
+    }
+    if (!std::isfinite(sensors[1]) || !std::isfinite(sensors[3])) {
+        external_sensors_valid = false;
+        external_sensor_error = ERR_INLET_SENSOR;
+        return;
+    }
+
     external_sensors_valid = true;
+    external_sensor_error = ERR_NONE;
     status.chamber_pressure = sensors[2];
     status.ambient_pressure = sensors[3];
-    status.compressor_inlet_pressure = (sensors[1]+status.ambient_pressure);
-    
+    status.compressor_inlet_pressure = sensors[1] + status.ambient_pressure;
 }
 
-void adjust_pressure_target(){
-    //upper limit of compressor inlet pressure should depend on ambient pressure
-    if ((status.ambient_pressure < 0.9) and (status.ambient_pressure>=0.7)){
-        inlet_upper = 1.5;
-        inlet_lower = 1.1;
+void adjust_inlet_limits_for_ambient() {
+    // Retain the altitude-dependent upper limit unless it has explicitly
+    // been configured. The configured lower limit is 1.05 bar at all
+    // altitudes and is likewise never overwritten after being set.
+    if (!inlet_upper_manually_set) {
+        if (status.ambient_pressure < 0.5f) inlet_upper = 1.1f;
+        else if (status.ambient_pressure < 0.7f) inlet_upper = 1.3f;
+        else if (status.ambient_pressure < 0.9f) inlet_upper = 1.5f;
+        else inlet_upper = 1.6f;
     }
-    else if ((status.ambient_pressure < 0.7) and (status.ambient_pressure>=0.5)){
-        inlet_upper = 1.3;
-        inlet_lower = 1.0;
-    }
-    else if ((status.ambient_pressure < 0.5) and (status.ambient_pressure>=0.2)){
-        inlet_upper = 1.1;
-        inlet_lower = 0.9;
-    }
-    else if (status.ambient_pressure < 0.2){
-        inlet_upper = 1.1;
-        inlet_lower = 0.9;
-    }
+    if (!inlet_lower_manually_set) inlet_lower = 1.05f;
 }
 
 void pressure_execute_command(uint8_t command, uint8_t info) {
@@ -225,19 +265,31 @@ void pressure_execute_command(uint8_t command, uint8_t info) {
 }
 
 void pressure_update() {
-    adjust_pressure_target();
+    adjust_inlet_limits_for_ambient();
     //ESP_LOGI("Sensors2: ", "Ambient pressure: %.3f, Inlet of Compressor %.3f, Chamber pressure: %.3f", status.ambient_pressure, status.compressor_inlet_pressure, status.chamber_pressure);
 
-    if (!external_sensors_valid) {
-        // Keep the existing bench/simulation behavior until real pressure
-        // drivers are installed. The Main MCU sensor frame supersedes these
-        // values as soon as one is received.
-        static float fake_chamber = 0.0f;
-        static float fake_inlet = 0.0f;
-        fake_chamber += 2.0f;
-        fake_inlet += 0.05f;
-        status.chamber_pressure = fake_chamber;
-        status.compressor_inlet_pressure = fake_inlet;
+    const TickType_t current_tick = xTaskGetTickCount();
+    if (external_sensor_frame_received) {
+        const TickType_t sensor_age_ticks = current_tick - last_external_sensor_update;
+        const float sensor_age_seconds =
+            sensor_age_ticks * portTICK_PERIOD_MS / 1000.0f;
+        if (external_sensors_valid && sensor_age_seconds > MAX_SENSOR_AGE_SECONDS) {
+            external_sensors_valid = false;
+            external_sensor_error = ERR_SENSOR_TIMEOUT;
+        }
+        if (!external_sensors_valid) {
+            stop_pressure_train(false);
+            status.error = external_sensor_error;
+            if (status.state != PRESSURE_STANDBY) status.state = PRESSURE_ERROR;
+            return;
+        }
+    } else if (status.state != PRESSURE_STANDBY) {
+        // Automatic pressure control must never run on fabricated or
+        // uninitialised readings while waiting for its first sensor frame.
+        stop_pressure_train(false);
+        status.error = ERR_SENSOR_TIMEOUT;
+        status.state = PRESSURE_ERROR;
+        return;
     }
     if (status.state == PRESSURE_PREPRESSURISATION) {
         if (!manual_valve) set_valve(false);
@@ -254,22 +306,30 @@ void pressure_update() {
         if (!manual_valve) set_valve(false);
         if (!manual_compressor) set_compressor(AUTOMATIC_PWM);
 
-        const TickType_t now = xTaskGetTickCount();
-        const TickType_t elapsed_ticks = now - compression_update_start;
+        const TickType_t elapsed_ticks = current_tick - compression_update_start;
         if (status.compressor_pwm > 0) {
             const float elapsed_minutes =
                 elapsed_ticks * portTICK_PERIOD_MS / 1000.0f / 60.0f;
             exchanged_air_litres +=
                 COMPRESSOR_FLOW_LITRES_PER_MINUTE * elapsed_minutes;
         }
-        compression_update_start = now;
+        compression_update_start = current_tick;
+
+        const TickType_t compression_ticks = current_tick - compression_phase_start;
+        const float compression_seconds =
+            compression_ticks * portTICK_PERIOD_MS / 1000.0f;
 
         // Reaching chamber pressure ends compression immediately. If the
         // inlet charge runs out first, refill it and repeat.
         if (chamber_at_target()) {
             if (exchanged_air_litres >= EXCHANGE_TARGET_LITRES) enter_measurement();
             else enter_air_exchange();
-        } else if (status.compressor_inlet_pressure <= inlet_lower) {
+        } else if (status.compressor_inlet_pressure <= inlet_lower ||
+                   compression_seconds >= MAX_COMPRESSION_TIME_SECONDS) {
+            if (compression_seconds >= MAX_COMPRESSION_TIME_SECONDS) {
+                ESP_LOGW("pressure", "Compression timed out after %.1f seconds",
+                         compression_seconds);
+            }
             enter_prepressurisation();
         }
     } else if (status.state == PRESSURE_MEASUREMENT) {
@@ -312,8 +372,14 @@ void pressure_update() {
 void pressure_cmd_standby() { pressure_execute_command(PRESSURE_CMD_SET_MODE, PRESSURE_MODE_STANDBY); }
 void pressure_cmd_measurements() { pressure_execute_command(PRESSURE_CMD_SET_MODE, PRESSURE_MODE_MEASUREMENTS); }
 void pressure_set_target_pressure(float pressure) { target_pressure = pressure; }
-void pressure_set_compressor_inlet_upper_limit(float pressure) { inlet_upper = pressure; }
-void pressure_set_compressor_inlet_lower_limit(float pressure) { inlet_lower = pressure; }
+void pressure_set_compressor_inlet_upper_limit(float pressure) {
+    inlet_upper = pressure;
+    inlet_upper_manually_set = true;
+}
+void pressure_set_compressor_inlet_lower_limit(float pressure) {
+    inlet_lower = pressure;
+    inlet_lower_manually_set = true;
+}
 PressureStatus pressure_get_status() { status.relay_manual_override = relay_manual; return status; }
 bool pressure_system_is_on() { return status.state != PRESSURE_STANDBY; }
 void pdb_relay1_on() { set_relay(1, true); } void pdb_relay1_off() { set_relay(1, false); }

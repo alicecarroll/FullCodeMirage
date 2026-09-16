@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <limits>
 #include <string.h>
 
 namespace {
@@ -55,7 +56,9 @@ void process_frame(const uint8_t *frame, size_t length) {
         float sensors[7] = {};
         for (size_t i = 0; i < 7; ++i) {
             const int16_t raw = static_cast<int16_t>(static_cast<uint16_t>(frame[1 + 2 * i]) << 8 | frame[2 + 2 * i]);
-            sensors[i] = static_cast<float>(raw) / SENSOR_SCALE;
+            sensors[i] = raw == PRESSURE_SENSOR_INVALID
+                ? std::numeric_limits<float>::quiet_NaN()
+                : static_cast<float>(raw) / SENSOR_SCALE;
         }
         pressure_update_external_sensors(sensors);
         return;
