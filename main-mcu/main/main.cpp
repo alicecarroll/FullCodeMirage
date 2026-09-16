@@ -831,7 +831,8 @@ void loop()
         //    ESP_LOGE(TAG, "Pressure in chamber below threshold. Starting pre-pressurisation.");
         //} 
         //Check if pressure in chamber is above threshold, if so, stop pressurisation system. 
-        if (sensor_data.Pp2 + sensor_data.Pa1 > CHAMBER_P_SHUTTER_THRESHOLD) //Why adding the ambient pressure?
+        //if (sensor_data.Pp2 + sensor_data.Pa1 > CHAMBER_P_SHUTTER_THRESHOLD) //Why adding the ambient pressure?
+        if (sensor_data.Pp2 > CHAMBER_P_SHUTTER_THRESHOLD)
         {
             commands_comms_pressure_mcu(PRESSURE_CMD_STOP_PRESSURISATION);
             commands_comms_pressure_mcu(PRESSURE_CMD_VALVE_OPEN);
@@ -917,7 +918,7 @@ void loop()
     // Delay only the remaining time so the full loop period stays near 1 second.
     TickType_t current_time_stop = xTaskGetTickCount();
     TickType_t elapsed_ticks = current_time_stop - current_time_start;
-    TickType_t target_period_ticks = pdMS_TO_TICKS(1000);
+    TickType_t target_period_ticks = pdMS_TO_TICKS(5000);
     if (elapsed_ticks < target_period_ticks)
     {
         time_loop = static_cast<uint16_t>(target_period_ticks - elapsed_ticks);
@@ -926,7 +927,7 @@ void loop()
     {
         time_loop = 0;
     }
-    vTaskDelay(pdMS_TO_TICKS(200));
+    //vTaskDelay(pdMS_TO_TICKS(200));
     //if (time_loop > 0)
     //{
     //    vTaskDelay(time_loop);

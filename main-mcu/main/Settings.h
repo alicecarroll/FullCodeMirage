@@ -126,5 +126,5 @@ extern spi_device_handle_t WIZ_handle;
 #define CHAMBER_P_SHUTTER_THRESHOLD 4.000// Safety limit Pressure threshold for opening shutter to meassurment chamber, TBD
 #define CHAMBER_P_CHAMBER_THRESHOLD 2.800// Pressure threshold for taking measurements,TBD
 #define OUTLET_TEMPERATURE_THRESHOLD 50 // Threshold for outlet temperature in Celsius
-#define INLET_TEMPERATURE_THRESHOLD 0 // Threshold for inlet temperature in Celsius
+#define INLET_TEMPERATURE_THRESHOLD -35.0 // Threshold for inlet temperature in Celsius
 //#define INLET_TEMPERATURE_THRESHOLD // Temperature threshold for taking measurements, TBD
