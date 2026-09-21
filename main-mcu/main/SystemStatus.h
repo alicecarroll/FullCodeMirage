@@ -19,6 +19,7 @@ typedef struct {
     uint8_t connection_lost;
     uint8_t status_ok;
     uint8_t pressure_system_on;
+    uint8_t k96_on;
     uint16_t heater_mask;
     uint8_t thermal_online;
     uint8_t thermal_state;
@@ -38,4 +39,4 @@ typedef struct {
 } MainSystemStatusPacket;
 #pragma pack(pop)
 
-static_assert(sizeof(MainSystemStatusPacket) == 216, "Groundstation packet size changed");
+static_assert(sizeof(MainSystemStatusPacket) == 217, "Groundstation packet size changed");

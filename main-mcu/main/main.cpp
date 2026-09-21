@@ -79,6 +79,8 @@ static MainControllerState controller_state = MAIN_CONTROLLER_BOOTING;
 static bool restart_requested = false;
 static std::string ethernet_command_text;
 bool manual_mode_overwrite = false; // To track if manual mode overwrite is active
+static bool k96_manual_override = false;
+static bool k96_manual_state = false;
 static HeaterSystem *heater_system = nullptr;
 
 struct QueuedPressureCommand {
@@ -321,6 +323,9 @@ static void enter_safe_shutdown(MainControllerState state)
     }
     pressure_slave_commands.push_front({PRESSURE_CMD_SAFE_SHUTDOWN, 0});
     controller_state = state;
+    k96_manual_override = false;
+    k96_manual_state = false;
+    K96_off();
 }
 
 bool handle_command()
@@ -375,6 +380,66 @@ bool handle_command()
         return true;
     }
 
+    if (ethernet_command_text == "K96 ON")
+    {
+        k96_manual_override = true;
+        k96_manual_state = true;
+        K96_on();
+        ESP_LOGI(TAG, "K96 turned ON by ground command");
+        return true;
+    }
+
+    if (ethernet_command_text == "K96 OFF")
+    {
+        k96_manual_override = true;
+        k96_manual_state = false;
+        K96_off();
+        ESP_LOGI(TAG, "K96 turned OFF by ground command");
+        return true;
+    }
+
+    if (sscanf(ethernet_command_text.c_str(), "HEATER ON %d", &heater_index) == 1) // Should be updated to allow for target temperature settings
+    {
+        if (heater_index >= 1 && heater_index <= 8)
+        {
+            set_heater_bit(static_cast<uint8_t>(heater_index - 1), true);
+            ESP_LOGI(TAG, "Heater %d turned ON. Mask now 0x%02X", heater_index, active_heater_mask);
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Invalid heater index in command: %s", ethernet_command_text.c_str());
+        }
+        return heater_index >= 1 && heater_index <= 8;
+    }
+
+    if (sscanf(ethernet_command_text.c_str(), "HEATER OFF %d", &heater_index) == 1)
+    {
+        if (heater_index >= 1 && heater_index <= 8)
+        {
+            set_heater_bit(static_cast<uint8_t>(heater_index - 1), false);
+            ESP_LOGI(TAG, "Heater %d turned OFF. Mask now 0x%02X", heater_index, active_heater_mask);
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Invalid heater index in command: %s", ethernet_command_text.c_str());
+        }
+        return heater_index >= 1 && heater_index <= 8;
+    }
+
+    if (ethernet_command_text == "HEATER ALL ON") 
+    {
+        active_heater_mask = 0xFF;
+        ESP_LOGI(TAG, "All heaters turned ON");
+        return true;
+    }
+
+    if (ethernet_command_text == "HEATER ALL OFF")
+    {
+        active_heater_mask = 0x00;
+        ESP_LOGI(TAG, "All heaters turned OFF");
+        return true;
+    }
+
     if (ethernet_command_text == "EMERGENCY STOP" || ethernet_command_text == "SAFE SHUTDOWN" || ethernet_command_text == "SHUTDOWN")
     {
         enter_safe_shutdown(MAIN_CONTROLLER_SAFE_SHUTDOWN);
@@ -415,6 +480,7 @@ static esp_err_t send_system_status_packet()
     system_status_packet.connection_lost = con_lost ? 1 : 0;
     system_status_packet.status_ok = status_ok ? 1 : 0;
     system_status_packet.pressure_system_on = pressure_system_active ? 1 : 0;
+    system_status_packet.k96_on = K96_is_on() ? 1 : 0;
     system_status_packet.heater_mask = active_heater_mask;
     system_status_packet.thermal_online = thermal_status.online ? 1 : 0;
     system_status_packet.thermal_state = thermal_status.state;
@@ -879,7 +945,21 @@ void loop()
     // Standby
     case 2:
         // Deactivate K96
-        K96_off();
+        if (k96_manual_override)
+        {
+            if (k96_manual_state)
+            {
+                K96_on();
+            }
+            else
+            {
+                K96_off();
+            }
+        }
+        else
+        {
+            K96_off();
+        }
 
         //Reset overrides
 
@@ -958,10 +1038,27 @@ void loop()
         }
         
 
-        // Activate K96
-        K96_on();
+        // Activate K96 unless a manual OFF override is active.
+        if (k96_manual_override)
+        {
+            if (k96_manual_state)
+            {
+                K96_on();
+            }
+            else
+            {
+                K96_off();
+            }
+        }
+        else
+        {
+            K96_on();
+        }
         // Take meassurements!!!
-        read_k96();
+        if (K96_is_on())
+        {
+            read_k96();
+        }
         //buffer_SD_data_csv(sensor_data); 
         break;
 

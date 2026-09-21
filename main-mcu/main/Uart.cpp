@@ -11,17 +11,25 @@
 #include "ErrorStatus.h"
 
 static const char *TAG = "K96_SENSOR";
+static bool k96_enabled = false;
 
 //Turn sensor on
 void K96_on()
 {
     gpio_set_level(K96_EN_PIN, 1);
+    k96_enabled = true;
 }
 
 //Turn sensor off
 void K96_off()
 {
     gpio_set_level(K96_EN_PIN, 0);
+    k96_enabled = false;
+}
+
+bool K96_is_on()
+{
+    return k96_enabled;
 }
 
 

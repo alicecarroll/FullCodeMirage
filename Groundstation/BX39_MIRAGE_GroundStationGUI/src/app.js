@@ -3,7 +3,7 @@
 
   const MAX_SAMPLES = 120;
   const TELEMETRY_PERIOD_MS = 1000;
-  const EXPECTED_PACKET_SIZE = 216;
+  const EXPECTED_PACKET_SIZE = 217;
 
   const RELAY_LINES = [
     { id: "relay1", label: "PDB relay 1", pin: "GPIO48 / PDB pin 1" },
@@ -16,7 +16,8 @@
     { id: "pump1", label: "vacuum pump 1", offLabel: "OFF", onLabel: "ON" },
     { id: "pump2", label: "vacuum pump 2", offLabel: "OFF", onLabel: "ON" },
     { id: "compressor", label: "compressor", offLabel: "OFF", onLabel: "ON" },
-    { id: "outletValve", label: "outlet valve", offLabel: "CLOSED", onLabel: "OPEN" }
+    { id: "outletValve", label: "outlet valve", offLabel: "CLOSED", onLabel: "OPEN" },
+    { id: "k96", label: "K96", offLabel: "OFF", onLabel: "ON" }
   ];
 
   const THERMAL_CHANNELS = [
@@ -362,6 +363,26 @@
         sim.setPeripheral("outletValve", false);
         return "outlet valve manual override closed";
       }
+    },
+    k96On: {
+      label: "turn K96 on",
+      wireCommand: "K96 ON",
+      aliases: ["k96 on", "turn k96 on"],
+      stateTarget: { group: "peripherals", key: "k96", value: true },
+      effect: function (sim) {
+        sim.setPeripheral("k96", true);
+        return "K96 commanded on";
+      }
+    },
+    k96Off: {
+      label: "turn K96 off",
+      wireCommand: "K96 OFF",
+      aliases: ["k96 off", "turn k96 off"],
+      stateTarget: { group: "peripherals", key: "k96", value: false },
+      effect: function (sim) {
+        sim.setPeripheral("k96", false);
+        return "K96 commanded off";
+      }
     }
   };
 
@@ -463,7 +484,8 @@
       pump1: false,
       pump2: false,
       compressor: false,
-      outletValve: false
+      outletValve: false,
+      k96: false
     },
     heaterMask: DEFAULT_HEATER_MASK,
     coolerMask: 0x00
@@ -569,7 +591,8 @@
         pump1: false,
         pump2: false,
         compressor: false,
-        outletValve: false
+        outletValve: false,
+        k96: false
       };
       this.emergencyStopped = false;
       this.controllerRebootTicks = 0;
@@ -1490,7 +1513,7 @@
     const normalized = normalizeCommand(raw);
 
     if (normalized === "help") {
-      terminal.write("commands: status, clear, start experiment, enter standby, start/stop pressurisation, open/close outlet valve, pwm1 0-100, pwm2 0-100, pwm3 0-100, relay 1-4 on/off, pump 1/2 on/off, compressor on/off, heater n on/off, heater all on/off, heater n mode pid|bangbang|manual, heater n target -100 - 200, heater n duty 0-100, heater n mode manual duty 0-100, enable/disable cooling, flush chamber, restart main controller, emergency stop");
+    terminal.write("commands: status, clear, start experiment, enter standby, start/stop pressurisation, open/close outlet valve, k96 on/off, pwm1 0-100, pwm2 0-100, pwm3 0-100, relay 1-4 on/off, pump 1/2 on/off, compressor on/off, heater n on/off, heater all on/off, heater n mode pid|bangbang|manual, heater n target -100 - 200, heater n duty 0-100, heater n mode manual duty 0-100, enable/disable cooling, flush chamber, restart main controller, emergency stop");
       return;
     }
 

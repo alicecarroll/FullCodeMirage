@@ -39,11 +39,11 @@ SENSOR_STRUCT_FORMAT = (
     "HHfHH"     # LPL block: uflt_ir, flt_ir, uflt_conc, uflt_error, flt_error
     "HHfHH"     # SPL block: uflt_ir, flt_ir, uflt_conc, uflt_error, flt_error
     "H"         # K96_error (uint16_t)
-    "5BH14B16s" # Flags, subsystem status, SD/controller status, 128-bit captured_errors
+    "6BH14B16s" # Flags, K96 state, subsystem status, SD/controller status, 128-bit captured_errors
 )
 
 STATUS_PACKET_SIZE = struct.calcsize(SENSOR_STRUCT_FORMAT)
-EXPECTED_STATUS_PACKET_SIZE = 216
+EXPECTED_STATUS_PACKET_SIZE = 217
 if STATUS_PACKET_SIZE != EXPECTED_STATUS_PACKET_SIZE:
     raise RuntimeError(
         f"groundstation packet layout is {STATUS_PACKET_SIZE} bytes; "
@@ -251,6 +251,7 @@ def parse_status_packet(data: bytes, seq: int = 0, timestamp_ms: int | None = No
         connection_lost,
         status_ok,
         pressure_system_on,
+        k96_on,
         heater_mask,
         thermal_online,
         thermal_state,
@@ -313,12 +314,14 @@ def parse_status_packet(data: bytes, seq: int = 0, timestamp_ms: int | None = No
         "coolerDutyPct": 0,
         "outletValveOpen": bool(pressure_valve_open),
         "pressureSystemOn": bool(pressure_system_on),
+        "k96On": bool(k96_on),
         "heaterMask": int(heater_mask),
         "peripherals": {
             "pump1": bool(pressure_pump1_pwm),
             "pump2": bool(pressure_pump2_pwm),
             "compressor": bool(pressure_compressor_pwm),
             "outletValve": bool(pressure_valve_open),
+            "k96": bool(k96_on),
         },
         "relayLines": {
             "relay1": bool(pressure_relay_mask & 0x01),
@@ -357,7 +360,7 @@ def parse_status_packet(data: bytes, seq: int = 0, timestamp_ms: int | None = No
         "statusOk": bool(status_ok),
         "payloadClock": f"{hours:02}:{minutes:02}:{seconds:02}",
         "rawPressures": {
-            "k96Hpa": finite_number(k96_ntc0_temp),
+            "k96Hpa": finite_number(k96_ntc0_temp), # THIS IS WRONG. WHY IS A TEMPERATURE A PRESSURE?
         },
         "k96Error": int(k96_error),
     }
