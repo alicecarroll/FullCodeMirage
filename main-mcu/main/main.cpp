@@ -203,9 +203,9 @@ static CommandParseResult handle_heater_command(const std::string &command)
             return CommandParseResult::Rejected;
         }
         HeaterControlMode mode_value;
-        if (std::strcmp(mode_text, "PID") == 0) {
+        if (strcmp(mode_text, "PID") == 0) {
             mode_value = HEATER_MODE_PID;
-        } else if (std::strcmp(mode_text, "BANGBANG") == 0 || std::strcmp(mode_text, "BANG-BANG") == 0) {
+        } else if (strcmp(mode_text, "BANGBANG") == 0 || strcmp(mode_text, "BANG-BANG") == 0) {
             mode_value = HEATER_MODE_BANGBANG;
         } else {
             return CommandParseResult::Rejected;
@@ -234,11 +234,11 @@ static CommandParseResult handle_heater_command(const std::string &command)
             return CommandParseResult::Rejected;
         }
         HeaterControlMode mode_value;
-        if (std::strcmp(mode_text, "PID") == 0) {
+        if (strcmp(mode_text, "PID") == 0) {
             mode_value = HEATER_MODE_PID;
-        } else if (std::strcmp(mode_text, "BANGBANG") == 0 || std::strcmp(mode_text, "BANG-BANG") == 0) {
+        } else if (strcmp(mode_text, "BANGBANG") == 0 || strcmp(mode_text, "BANG-BANG") == 0) {
             mode_value = HEATER_MODE_BANGBANG;
-        } else if (std::strcmp(mode_text, "MANUAL") == 0) {
+        } else if (strcmp(mode_text, "MANUAL") == 0) {
             mode_value = HEATER_MODE_MANUAL;
         } else {
             return CommandParseResult::Rejected;
@@ -396,34 +396,6 @@ bool handle_command()
         K96_off();
         ESP_LOGI(TAG, "K96 turned OFF by ground command");
         return true;
-    }
-
-    if (sscanf(ethernet_command_text.c_str(), "HEATER ON %d", &heater_index) == 1) // Should be updated to allow for target temperature settings
-    {
-        if (heater_index >= 1 && heater_index <= 8)
-        {
-            set_heater_bit(static_cast<uint8_t>(heater_index - 1), true);
-            ESP_LOGI(TAG, "Heater %d turned ON. Mask now 0x%02X", heater_index, active_heater_mask);
-        }
-        else
-        {
-            ESP_LOGW(TAG, "Invalid heater index in command: %s", ethernet_command_text.c_str());
-        }
-        return heater_index >= 1 && heater_index <= 8;
-    }
-
-    if (sscanf(ethernet_command_text.c_str(), "HEATER OFF %d", &heater_index) == 1)
-    {
-        if (heater_index >= 1 && heater_index <= 8)
-        {
-            set_heater_bit(static_cast<uint8_t>(heater_index - 1), false);
-            ESP_LOGI(TAG, "Heater %d turned OFF. Mask now 0x%02X", heater_index, active_heater_mask);
-        }
-        else
-        {
-            ESP_LOGW(TAG, "Invalid heater index in command: %s", ethernet_command_text.c_str());
-        }
-        return heater_index >= 1 && heater_index <= 8;
     }
 
     if (ethernet_command_text == "HEATER ALL ON") 
@@ -595,11 +567,39 @@ uint8_t status_thermal;
 uint8_t error_thermal;
 int16_t thermal_current_temperatures[8];
 
+// The chamber heater is controlled from the two K96 NTCs. Do not pass an
+// invalid or stale chamber temperature to the thermal MCU: -99.00 C is its
+// existing invalid-temperature/off sentinel.
+static int16_t chamber_heater_temperature(const SensorData &sensor_data)
+{
+    constexpr float SENSOR_MIN_C = -80.0f;
+    constexpr float SENSOR_MAX_C = 120.0f;
+    constexpr uint16_t K96_NTC_ERROR = static_cast<uint16_t>(1U << 10);
+
+    const float ntc0 = sensor_data.K96_NTC0_Temp;
+    const float ntc1 = sensor_data.K96_NTC1_Temp;
+    const bool ntcs_are_reasonable =
+        K96_is_on() &&
+        (sensor_data.K96_error & K96_NTC_ERROR) == 0 &&
+        std::isfinite(ntc0) && std::isfinite(ntc1) &&
+        ntc0 >= SENSOR_MIN_C && ntc0 <= SENSOR_MAX_C &&
+        ntc1 >= SENSOR_MIN_C && ntc1 <= SENSOR_MAX_C;
+
+    if (!ntcs_are_reasonable)
+    {
+        // Make sure that the main mcu is changing the reference if no NTC is responding to e.g. the PP2 sensor.
+        return -9900;
+    }
+
+    return static_cast<int16_t>(std::lround(((ntc0 + ntc1) / 2.0f) * 100.0f));
+}
+
 static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_ms){
     uint8_t chosen_channel_id_thermal=0x00; //0x00- 0x07
     //temperature array used for temperature data for thermal
     thermal_current_temperatures[0] = static_cast<int16_t>(std::lround(sensor_data.Tt2 * 100.0f));
-    thermal_current_temperatures[1] = static_cast<int16_t>(std::lround(sensor_data.Tp5 * 100.0f));
+    // H2 / channel 1: chamber heater, referenced to the average K96 NTC0/NTC1.
+    thermal_current_temperatures[1] = chamber_heater_temperature(sensor_data);
     thermal_current_temperatures[2] = static_cast<int16_t>(std::lround(sensor_data.Tp3 * 100.0f));
     thermal_current_temperatures[3] = static_cast<int16_t>(std::lround(sensor_data.Tt3 * 100.0f));
     thermal_current_temperatures[4] = static_cast<int16_t>(std::lround(sensor_data.Tp5 * 100.0f));
@@ -960,6 +960,10 @@ void loop()
         {
             K96_off();
         }
+        if (K96_is_on())
+        {
+            read_k96();
+        }
 
         //Reset overrides
 
@@ -1121,7 +1125,7 @@ void loop()
     // Delay only the remaining time so the full loop period stays near 1 second.
     TickType_t current_time_stop = xTaskGetTickCount();
     TickType_t elapsed_ticks = current_time_stop - current_time_start;
-    TickType_t target_period_ticks = pdMS_TO_TICKS(5000);
+    TickType_t target_period_ticks = pdMS_TO_TICKS(1000);
     if (elapsed_ticks < target_period_ticks)
     {
         time_loop = static_cast<uint16_t>(target_period_ticks - elapsed_ticks);
@@ -1130,9 +1134,8 @@ void loop()
     {
         time_loop = 0;
     }
-    //vTaskDelay(pdMS_TO_TICKS(200));
-    //if (time_loop > 0)
-    //{
-    //    vTaskDelay(time_loop);
-    //}
+    if (time_loop > 0)
+    {
+        vTaskDelay(time_loop);
+    }
 }

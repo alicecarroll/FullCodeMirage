@@ -235,11 +235,8 @@ esp_err_t wiz_init(void)
 
 esp_err_t wiz_send(const uint8_t *data, size_t length)
 {
-    if (!data || length == 0 || strlen((const char *)data) != length)
-    {
-        ESP_LOGE("Data length to send (%zu) is not equal to the specified length (%zu)", strlen((const char *)data), length);
+    if (!data || length == 0)
         return ESP_ERR_INVALID_ARG;
-    }
 
     // send() writes data into the W5500's internal TX buffer.
     // The chip's hardwired TCP/IP stack handles segmentation and transmission.

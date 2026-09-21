@@ -245,7 +245,7 @@ Bang bangPool[number_controllers]{
 // Some things for controllers
 PID_control PIDPool[number_controllers]{
     PID_control(2, 0.1, 3, timestep_s, false), // 0 //P, I , D, timestep (s)
-    PID_control(2, 0.1, 3, timestep_s, false),
+    PID_control(2, 0.08, 3, timestep_s, false), // Chamber heater: The large thermal inertia of the chamber heater means that the integral part should be smaller than for the other controllers. This is to prevent overshoot and oscillations.
     PID_control(2, 0.1, 3, timestep_s, false),
     PID_control(2, 0.1, 3, timestep_s, false),
     PID_control(2, 0.1, 3, timestep_s, false),

@@ -283,12 +283,12 @@ def parse_status_packet(data: bytes, seq: int = 0, timestamp_ms: int | None = No
         "linkStatus": link_status,
         "linkQuality": link_quality,
         "latencyMs": 0,
-        "methaneRaw": int(k96_lpl_uflt_ir_signal),
-        "co2Raw": int(k96_spl_uflt_ir_signal),
-        "waterRaw": int(k96_mpl_uflt_ir_signal),
+        "methaneRaw": int(k96_lpl_signal), # changed to lpl_signal
+        "co2Raw": int(k96_spl_signal), # changed to spl_signal
+        "waterRaw": int(k96_mpl_signal), # changed to mpl_signal
         "chamberPressureBar": finite_number(pp2),
         "chamberTempC_MS": finite_number(tp5),
-        "chamberTempC_K96": finite_number(k96_rh_temp, 0.0),
+        "chamberTempC_K96": (finite_number(k96_ntc0_temp, 0.0) + finite_number(k96_ntc1_temp, 0.0))/2, 
         "electronicsTempC": finite_number(tt2, 25.0),
         "humidityRh_ambient": finite_number(ha1),
         "humidityRh_k96": finite_number(k96_rh),
@@ -359,6 +359,86 @@ def parse_status_packet(data: bytes, seq: int = 0, timestamp_ms: int | None = No
         "connectionLost": bool(connection_lost),
         "statusOk": bool(status_ok),
         "payloadClock": f"{hours:02}:{minutes:02}:{seconds:02}",
+        # Preserve every unpacked field with its wire-structure name. The
+        # aliases above are used by the GUI; these groups are for complete,
+        # readable telemetry logs, including values not currently displayed.
+        "sensorData": {
+            "seconds": int(seconds),
+            "minutes": int(minutes),
+            "hours": int(hours),
+            "Tp1": finite_number(tp1),
+            "Tp2": finite_number(tp2),
+            "Tp3": finite_number(tp3),
+            "Tp6": finite_number(tp6),
+            "Pp3": finite_number(pp3),
+            "Tp4": finite_number(tp4),
+            "Pp1": finite_number(pp1),
+            "Pa1": finite_number(pa1),
+            "Ta1": finite_number(ta1),
+            "Ta2": finite_number(ta2),
+            "Ta3": finite_number(ta3),
+            "Ha1": finite_number(ha1),
+            "Tp5": finite_number(tp5),
+            "Pp2": finite_number(pp2),
+            "Tt1": finite_number(tt1),
+            "Tt2": finite_number(tt2),
+            "Tt3": finite_number(tt3),
+            "K96_LPL_Signal": int(k96_lpl_signal),
+            "K96_LPL_Signal_filtered": finite_number(k96_lpl_signal_filtered),
+            "K96_SPL_Signal": int(k96_spl_signal),
+            "K96_SPL_Signal_filtered": finite_number(k96_spl_signal_filtered),
+            "K96_MPL_Signal": int(k96_mpl_signal),
+            "K96_MPL_Signal_filtered": finite_number(k96_mpl_signal_filtered),
+            "K96_ADuCdie_Temp": finite_number(k96_aducdie_temp),
+            "K96_ADuCdie_Temp_filtered": finite_number(k96_aducdie_temp_filtered),
+            "K96_NTC0_Temp": finite_number(k96_ntc0_temp),
+            "K96_NTC0_Temp_filtered": finite_number(k96_ntc0_temp_filtered),
+            "K96_NTC1_Temp": finite_number(k96_ntc1_temp),
+            "K96_NTC1_Temp_filtered": finite_number(k96_ntc1_temp_filtered),
+            "K96_RH": finite_number(k96_rh),
+            "K96_RH_Temp": finite_number(k96_rh_temp),
+            "K96_MPL_uflt_IR_Signal": int(k96_mpl_uflt_ir_signal),
+            "K96_MPL_flt_IR_Signal": int(k96_mpl_flt_ir_signal),
+            "K96_MPL_uflt_Conc": finite_number(k96_mpl_uflt_conc),
+            "K96_MPL_flt_Conc": finite_number(k96_mpl_flt_conc),
+            "K96_MPL_uflt_Error": int(k96_mpl_uflt_error),
+            "K96_LPL_uflt_IR_Signal": int(k96_lpl_uflt_ir_signal),
+            "K96_LPL_flt_IR_Signal": int(k96_lpl_flt_ir_signal),
+            "K96_LPL_uflt_Conc": finite_number(k96_lpl_uflt_conc),
+            "K96_LPL_uflt_Error": int(k96_lpl_uflt_error),
+            "K96_LPL_flt_Error": int(k96_lpl_flt_error),
+            "K96_SPL_uflt_IR_Signal": int(k96_spl_uflt_ir_signal),
+            "K96_SPL_flt_IR_Signal": int(k96_spl_flt_ir_signal),
+            "K96_SPL_uflt_Conc": finite_number(k96_spl_uflt_conc),
+            "K96_SPL_uflt_Error": int(k96_spl_uflt_error),
+            "K96_SPL_flt_Error": int(k96_spl_flt_error),
+            "K96_error": int(k96_error),
+        },
+        "statusData": {
+            "operating_mode": int(operating_mode),
+            "command_received": int(command_received),
+            "connection_lost": int(connection_lost),
+            "status_ok": int(status_ok),
+            "pressure_system_on": int(pressure_system_on),
+            "k96_on": int(k96_on),
+            "heater_mask": int(heater_mask),
+            "thermal_online": int(thermal_online),
+            "thermal_state": int(thermal_state),
+            "thermal_error": int(thermal_error),
+            "pressure_state": int(pressure_state),
+            "pressure_error": int(pressure_error),
+            "pressure_relay_mask": int(pressure_relay_mask),
+            "pressure_pump1_pwm": int(pressure_pump1_pwm),
+            "pressure_pump2_pwm": int(pressure_pump2_pwm),
+            "pressure_compressor_pwm": int(pressure_compressor_pwm),
+            "pressure_manual_override": int(pressure_manual_override),
+            "pressure_valve_open": int(pressure_valve_open),
+            "onboard_logging": int(onboard_logging),
+            "storage_free_pct": int(storage_free_pct),
+            "controller_state": int(controller_state),
+            "captured_errors": int(captured_errors),
+            "captured_errors_bytes_hex": captured_errors_bytes.hex(),
+        },
         "rawPressures": {
             "k96Hpa": finite_number(k96_ntc0_temp), # THIS IS WRONG. WHY IS A TEMPERATURE A PRESSURE?
         },
@@ -459,11 +539,24 @@ class GroundStationState:
             self._seq += 1
             seq = self._seq
 
-        frame = parse_status_packet(packet, seq=seq)
+        raw_packet = {
+            "packetSize": len(packet),
+            "rawPacketHex": packet.hex(),
+        }
+        try:
+            frame = parse_status_packet(packet, seq=seq)
+        except (TypeError, ValueError):
+            # Preserve malformed packets too; they are still part of the
+            # received telemetry stream and may be needed for diagnosis.
+            self.log("telemetry_decode_error", {"seq": seq, **raw_packet})
+            raise
+
         with self._frame_condition:
             self._last_frame = frame
             self._frame_condition.notify_all()
-        self.log("telemetry", frame)
+        # The decoded frame is convenient to inspect, while rawPacketHex is
+        # the lossless record of every byte transmitted by the main MCU.
+        self.log("telemetry", {**frame, **raw_packet})
         self.broadcast("telemetry", frame)
         return frame
 

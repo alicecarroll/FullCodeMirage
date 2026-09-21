@@ -22,7 +22,7 @@
 
   const THERMAL_CHANNELS = [
     { bit: 0, label: "SD-card heater" },
-    { bit: 1, label: "Peltier chamber cooler" },
+    { bit: 1, label: "chamber heater" },
     { bit: 2, label: "outlet heater" },
     { bit: 3, label: "intake preheater" },
     { bit: 4, label: "secondary inlet heater" },
@@ -31,8 +31,8 @@
     { bit: 7, label: "backup thermal channel" }
   ];
 
-  const DEFAULT_HEATER_MASK = 0x0d;
-  const DEFAULT_COOLER_MASK = 0x62;
+  const DEFAULT_HEATER_MASK = 0x0f;
+  const DEFAULT_COOLER_MASK = 0x60;
   const MOCK_DATA_ENABLED = false;
   const HEATER_COMMAND_GUIDE = [
     "heater 1 mode pid target 50",
