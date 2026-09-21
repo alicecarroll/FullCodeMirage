@@ -20,6 +20,7 @@ def make_status_packet(
     connection_lost=0,
     status_ok=1,
     pressure_system_on=1,
+    k96_on=0,
     heater_mask=0x0D,
     thermal_online=1,
     thermal_error=0,
@@ -71,6 +72,7 @@ def make_status_packet(
         connection_lost,
         status_ok,
         pressure_system_on,
+        k96_on,
         heater_mask,
         thermal_online,
         2,
@@ -112,6 +114,7 @@ class StatusPacketParserTest(unittest.TestCase):
         self.assertAlmostEqual(frame["chamberPressureBar"], 3.0, places=2)
         self.assertAlmostEqual(frame["ambientPressureHpa"], 900.0, places=1)
         self.assertTrue(frame["pressureSystemOn"])
+        self.assertFalse(frame["peripherals"]["k96"])
         self.assertTrue(frame["peripherals"]["pump1"])
         self.assertEqual(frame["pump1DutyPct"], 80)
         self.assertTrue(frame["relayLines"]["relay1"])
@@ -170,6 +173,8 @@ class FrontendCommandContractTest(unittest.TestCase):
             "PUMP 1 ON",
             "PUMP 2 OFF",
             "COMPRESSOR ON",
+            "K96 ON",
+            "K96 OFF",
             "VALVE OPEN",
             "HEATER ALL ON",
             "MODE MEASUREMENTS",
@@ -191,6 +196,7 @@ class FrontendCommandContractTest(unittest.TestCase):
             'data-toggle="pump2"',
             'data-toggle="compressor"',
             'data-toggle="outletValve"',
+            'data-toggle="k96"',
         ]
         index_html = (GUI_ROOT / "index.html").read_text(encoding="utf-8")
         for toggle_id in expected_toggle_ids:
