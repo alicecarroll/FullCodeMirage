@@ -6,7 +6,7 @@ the ground laptop. Browsers cannot receive that raw TCP stream directly, so this
 gateway bridges the existing payload protocol to the static GUI:
 
 - TCP :5001 receives payload status packets and sends text commands back.
-- HTTP :8080 serves the GUI.
+- HTTP :8001 serves the GUI.
 - GET /api/telemetry streams decoded status frames as server-sent events.
 - POST /api/command sends a command string to the connected payload socket.
 """
