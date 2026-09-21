@@ -7,7 +7,7 @@
 #include "esp_log.h"
 #include "Settings.h" //Pin definitions and hardware configuration
 #include "read_sensors.h" //Data storage
-#include "uart.h" //Initialization/configuration functions
+#include "Uart.h" //Initialization/configuration functions
 #include "ErrorStatus.h"
 
 static const char *TAG = "K96_SENSOR";
