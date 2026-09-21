@@ -93,6 +93,10 @@ def make_status_packet(
 
 
 class StatusPacketParserTest(unittest.TestCase):
+    def test_wire_packet_size_is_explicitly_217_bytes(self):
+        self.assertEqual(gateway.STATUS_PACKET_SIZE, 217)
+        self.assertEqual(gateway.EXPECTED_STATUS_PACKET_SIZE, 217)
+
     def test_error_manifest_is_shared_and_contiguous(self):
         self.assertEqual(len(gateway.ERROR_MESSAGES), 75)
         self.assertEqual(gateway.ERROR_MESSAGES[0], "Ethernet SPI read transaction failed")

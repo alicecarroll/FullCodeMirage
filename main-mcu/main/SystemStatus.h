@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "read_sensors.h"
@@ -39,4 +40,6 @@ typedef struct {
 } MainSystemStatusPacket;
 #pragma pack(pop)
 
-static_assert(sizeof(MainSystemStatusPacket) == 217, "Groundstation packet size changed");
+// Keep this wire-size contract synchronized with groundstation_gateway.py and listener.py.
+static constexpr size_t MAIN_SYSTEM_STATUS_PACKET_SIZE = 217;
+static_assert(sizeof(MainSystemStatusPacket) == MAIN_SYSTEM_STATUS_PACKET_SIZE, "Groundstation packet size changed");

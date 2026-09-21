@@ -500,7 +500,7 @@ static esp_err_t send_system_status_packet()
     system_status_packet.controller_state = static_cast<uint8_t>(controller_state);
     system_status_packet.captured_errors = captured_errors;
 
-    return wiz_send((uint8_t *)&system_status_packet, sizeof(system_status_packet));
+    return wiz_send((uint8_t *)&system_status_packet, MAIN_SYSTEM_STATUS_PACKET_SIZE);
 }
 
 static void handle_ethernet_send_status(esp_err_t esp_err_status)
