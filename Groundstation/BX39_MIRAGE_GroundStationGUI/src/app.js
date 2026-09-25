@@ -1475,13 +1475,17 @@
         const targetValue = parseFloat(targetInput.value);
         const dutyValue = parseFloat(dutyInput.value);
 
-        const commandIds = selectedHeaters.map(function (heaterNumber) {
+        const commandIds = selectedHeaters.reduce(function (commands, heaterNumber) {
           const normalizedValue = (mode === "MANUAL")
             ? "heater " + heaterNumber + " mode manual duty " + String(Math.max(0, Math.min(100, Number.isFinite(dutyValue) ? dutyValue : 0)))
             : "heater " + heaterNumber + " mode " + mode.toLowerCase() + " target " + String(Number.isFinite(targetValue) ? targetValue : 25);
+          const configCommandId = parseHeaterControlCommand(normalizeCommand(normalizedValue));
 
-          return parseHeaterControlCommand(normalizeCommand(normalizedValue));
-        }).filter(Boolean);
+          if (configCommandId) {
+            commands.push(configCommandId, "heater" + heaterNumber + "On");
+          }
+          return commands;
+        }, []);
 
         if (!commandIds.length) {
           terminal.write("ERR HEATER_CONFIG; could not build command", "error");
