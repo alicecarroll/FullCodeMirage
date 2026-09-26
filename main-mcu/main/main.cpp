@@ -915,7 +915,7 @@ void loop()
         vTaskDelay(pdMS_TO_TICKS(100));
         esp_restart();
     }
-    // Delay only the remaining time so the full loop period stays near 1 second.
+    /*// Delay only the remaining time so the full loop period stays near 1 second.
     TickType_t current_time_stop = xTaskGetTickCount();
     TickType_t elapsed_ticks = current_time_stop - current_time_start;
     TickType_t target_period_ticks = pdMS_TO_TICKS(5000);
@@ -932,4 +932,5 @@ void loop()
     //{
     //    vTaskDelay(time_loop);
     //}
+    */
 }
