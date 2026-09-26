@@ -79,7 +79,7 @@ while True:  # outer loop: always wait for a (new) connection
     try:
         while not stop_event.is_set():  # inner loop: handle this connection until it drops
             # Must match MainSystemStatusPacket in SystemStatus.h exactly:
-            # SensorData (179 bytes) + status tail (37 bytes) = 216 bytes.
+            # SensorData (179 bytes) + status tail (38 bytes) = 217 bytes.
             fmt = (
                 '<3B17f'
                 'ididid'
@@ -88,11 +88,12 @@ while True:  # outer loop: always wait for a (new) connection
                 'HHfHH'
                 'HHfHH'
                 'H'
-                '5BH14B16s'
+                '6BH14B16s'
             )
             size = struct.calcsize(fmt)
-            if size != 216:
-                raise RuntimeError(f"listener packet layout is {size} bytes, expected 216")
+            expected_packet_size = 217
+            if size != expected_packet_size:
+                raise RuntimeError(f"listener packet layout is {size} bytes, expected {expected_packet_size}")
 
             data = recv_exact(conn, size)
 
@@ -109,7 +110,7 @@ while True:  # outer loop: always wait for a (new) connection
                 K96_CO2, K96_CH4, K96_H2O, K96_pressure, K96_temperature, K96_humidity,
                 K96_error,
                 operating_mode, command_received, connection_lost, status_ok,
-                pressure_system_on, heater_mask, thermal_online, thermal_state,
+                pressure_system_on, k96_on, heater_mask, thermal_online, thermal_state,
                 thermal_error, pressure_state, pressure_error, relay_mask,
                 pump1_pwm, pump2_pwm, compressor_pwm,
                 manual_override, valve_open, onboard_logging, storage_free_pct,
@@ -119,7 +120,7 @@ while True:  # outer loop: always wait for a (new) connection
                 print(f"Mode: {operating_mode} ({MODE_NAMES.get(operating_mode, 'Unknown')})")
                 print(f"Ethernet command received: {'yes' if command_received else 'no'}")
                 print(f"Connection lost: {'yes' if connection_lost else 'no'} | Status OK: {'yes' if status_ok else 'no'}")
-                print(f"Pressure system active: {'yes' if pressure_system_on else 'no'} | Active heaters: {describe_heaters(heater_mask)}")
+                print(f"Pressure system active: {'yes' if pressure_system_on else 'no'} | K96: {'on' if k96_on else 'off'} | Active heaters: {describe_heaters(heater_mask)}")
                 print(f"Thermal MCU: {'online' if thermal_online else 'offline'} | state={thermal_state} | error={thermal_error}")
                 print(f"Pressure MCU: state={pressure_state} | error={pressure_error} | relays=0x{relay_mask:02X} | "
                       f"VP1={pump1_pwm}% | VP2={pump2_pwm}% | compressor={compressor_pwm}% | "

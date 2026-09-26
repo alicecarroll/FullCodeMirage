@@ -14,7 +14,7 @@ bool manual_pump1 = false, manual_pump2 = false, manual_compressor = false, manu
 bool relay_manual = false;
 uint8_t applied_mode = 0;
 float target_pressure = 3.75f; //in pressure chamber
-float inlet_upper = 1.6f, inlet_lower = 1.2f; //inlet upper and lower boundaries for compressor inlet
+float inlet_upper = 1.8f, inlet_lower = 1.0f; //inlet upper and lower boundaries for compressor inlet
 //constexpr float FLUSH_COMPLETE_PRESSURE_BAR = 0.05f; //Why so low?
 constexpr uint8_t ERR_NONE = 0, ERR_CHAMBER_SENSOR = 1, ERR_INLET_SENSOR = 2;
 
@@ -93,6 +93,17 @@ void pressure_update_external_sensors(const float sensors[7]) {
     status.compressor_inlet_pressure = (sensors[1]+status.ambient_pressure);
     
 }
+
+void adjust_pwm_target(){
+    // the pwm settings of the pumps need to depend on the ambient pressure as the vacuum pumps would overpressurise the interstage otherwise.
+    // the pwm settings should be linearly dependent such that 0.04 bar -> 100% pwm and 1.0 bar -> 12% pwm
+    float pwm1 = 100.0f - ((status.ambient_pressure - 0.04f) / (1.0f - 0.04f)) * 88.0f;
+    float pwm2 = 100.0f - ((status.ambient_pressure - 0.04f) / (1.0f - 0.04f)) * 88.0f;
+    if (!manual_pump1) set_pump1(pwm1);
+    if (!manual_pump2) set_pump2(pwm2);
+    ESP_LOGI("pressure", "Adjusted PWM target. Pump1: %.2f%%, Pump2: %.2f%%", pwm1, pwm2);
+}
+
 
 void adjust_pressure_target(){
     //upper limit of compressor inlet pressure should depend on ambient pressure
@@ -175,20 +186,17 @@ void pressure_execute_command(uint8_t command, uint8_t info) {
 
 void pressure_update() {
     adjust_pressure_target();
+    ESP_LOGI("pressure", "Starting pressure update. State: %d, Chamber: %.3f bar, Inlet: %.3f bar, Ambient: %.3f bar",
+             status.state, status.chamber_pressure, status.compressor_inlet_pressure, status.ambient_pressure);
     //ESP_LOGI("Sensors2: ", "Ambient pressure: %.3f, Inlet of Compressor %.3f, Chamber pressure: %.3f", status.ambient_pressure, status.compressor_inlet_pressure, status.chamber_pressure);
 
     if (!external_sensors_valid) {
-        // Keep the existing bench/simulation behavior until real pressure
-        // drivers are installed. The Main MCU sensor frame supersedes these
-        // values as soon as one is received.
-        static float fake_chamber = 0.0f;
-        static float fake_inlet = 0.0f;
-        fake_chamber += 2.0f;
-        fake_inlet += 0.05f;
-        status.chamber_pressure = fake_chamber;
-        status.compressor_inlet_pressure = fake_inlet;
+       ESP_LOGE("pressure", "External sensors not valid. Cannot update pressure control.");
+        return;
     }
     if (status.state == PRESSURE_PREPRESSURISATION) {
+        ESP_LOGI("pressure", "Prepressurisation state. Chamber: %.3f bar, Inlet: %.3f bar, Ambient: %.3f bar",
+                 status.chamber_pressure, status.compressor_inlet_pressure, status.ambient_pressure);
         //Prepressurise the volume infront of the compressor
         //if (applied_mode == PRESSURE_MODE_MEASUREMENTS) {
         //    if (!manual_pump1) set_pump1(100);
@@ -198,19 +206,37 @@ void pressure_update() {
         //}
         if (!manual_valve) set_valve(false); 
         if (!manual_compressor) set_compressor(0); //should be 0 because compressor and pumps can't be on at the same time
-        if (!manual_pump1) set_pump1(50);
-        if (!manual_pump2) set_pump2(50);
         if (status.compressor_inlet_pressure >= inlet_upper) {
-            if (!manual_pump1) set_pump1(0);
-            if (!manual_pump2) set_pump2(0);
+            adjust_pwm_target();
             status.state = PRESSURE_COMPRESSION;
             flushstep_start = xTaskGetTickCount();
         }
     } else if (status.state == PRESSURE_COMPRESSION) {
+        ESP_LOGI("pressure", "Compression state. Chamber: %.3f bar, Inlet: %.3f bar, Ambient: %.3f bar",
+                 status.chamber_pressure, status.compressor_inlet_pressure, status.ambient_pressure);
         if (!manual_pump1) set_pump1(0);
         if (!manual_pump2) set_pump2(0);
+
+        // Before turning the compressor on we should check that there is not too much pressure in the chamber. If there is, we should first flush the chamber to avoid overpressurisation.
+        if (status.chamber_pressure > target_pressure) {
+            if (!manual_compressor) set_compressor(0);
+            status.state = PRESSURE_AIR_EXCHANGE;
+            ESP_LOGI("pressure", "Chamber pressure too high: %.3f bar. Starting air exchange.", status.chamber_pressure);
+        }
+        // Before turning on the compressor we should check that the inlet/interstage pressure is not too high. 
+        // The exact logic depends on whether or not we will have leaks here. I assume that we will have leaks and that interstage pressure drops over time.
+        else if (status.compressor_inlet_pressure > inlet_upper) {
+            if (!manual_compressor) set_compressor(0);
+            if (!manual_valve) set_valve(false);
+            status.state = PRESSURE_COMPRESSION; // Making it explicit that we want to remain in compression state
+            ESP_LOGI("pressure", "Compressor inlet pressure too high: %.3f bar. Waiting for it to drop.", status.compressor_inlet_pressure);
+        }
+        else {
+            if (!manual_compressor) set_compressor(100);
+        }
+
         if (!manual_valve) set_valve(true);
-        if (!manual_compressor) set_compressor(50);
+        if (!manual_compressor) set_compressor(100); // As of 26.09.26 the compressor cant be pwm controlled. 
 
         flushstep_stop = xTaskGetTickCount();
         flushticks = flushstep_stop-flushstep_start;
@@ -234,6 +260,7 @@ void pressure_update() {
                 }
         } 
         else if ((status.compressor_inlet_pressure <= inlet_lower) and ((status.chamber_pressure - target_pressure) > 0)){
+            // I believe this check is redundant, since too high chamber pressure is already checked above. However, I will leave it here for now.
             if (!manual_compressor) set_compressor(0);
             if (!manual_valve) set_valve(false); //to make sure its closed until Air exchange is started in next loop
             status.state = PRESSURE_AIR_EXCHANGE;
@@ -277,6 +304,8 @@ void pressure_update() {
         set_pump2(0);
         set_compressor(0);
         set_valve(true);
+        ESP_LOGI("pressure", "Air exchange state. Chamber: %.3f bar, Inlet: %.3f bar, Ambient: %.3f bar",
+                 status.chamber_pressure, status.compressor_inlet_pressure, status.ambient_pressure);
         if ((status.chamber_pressure <= target_pressure+0.1) and (flushsum > flushtarget)) {
             status.state = PRESSURE_MEASUREMENT;
             flushsum = 0.0;

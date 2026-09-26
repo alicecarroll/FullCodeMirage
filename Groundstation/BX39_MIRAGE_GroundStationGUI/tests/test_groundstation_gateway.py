@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import binascii
 import struct
 import tempfile
 import unittest
@@ -20,6 +21,7 @@ def make_status_packet(
     connection_lost=0,
     status_ok=1,
     pressure_system_on=1,
+    k96_on=0,
     heater_mask=0x0D,
     thermal_online=1,
     thermal_error=0,
@@ -71,6 +73,7 @@ def make_status_packet(
         connection_lost,
         status_ok,
         pressure_system_on,
+        k96_on,
         heater_mask,
         thermal_online,
         2,
@@ -91,6 +94,10 @@ def make_status_packet(
 
 
 class StatusPacketParserTest(unittest.TestCase):
+    def test_wire_packet_size_is_explicitly_217_bytes(self):
+        self.assertEqual(gateway.STATUS_PACKET_SIZE, 217)
+        self.assertEqual(gateway.EXPECTED_STATUS_PACKET_SIZE, 217)
+
     def test_error_manifest_is_shared_and_contiguous(self):
         self.assertEqual(len(gateway.ERROR_MESSAGES), 75)
         self.assertEqual(gateway.ERROR_MESSAGES[0], "Ethernet SPI read transaction failed")
@@ -112,6 +119,11 @@ class StatusPacketParserTest(unittest.TestCase):
         self.assertAlmostEqual(frame["chamberPressureBar"], 3.0, places=2)
         self.assertAlmostEqual(frame["ambientPressureHpa"], 900.0, places=1)
         self.assertTrue(frame["pressureSystemOn"])
+        self.assertFalse(frame["peripherals"]["k96"])
+        self.assertEqual(frame["sensorData"]["K96_LPL_Signal"], 416)
+        self.assertAlmostEqual(frame["sensorData"]["K96_LPL_Signal_filtered"], 1.86)
+        self.assertEqual(frame["statusData"]["k96_on"], 0)
+        self.assertEqual(frame["statusData"]["captured_errors_bytes_hex"], "00" * 16)
         self.assertTrue(frame["peripherals"]["pump1"])
         self.assertEqual(frame["pump1DutyPct"], 80)
         self.assertTrue(frame["relayLines"]["relay1"])
@@ -170,6 +182,8 @@ class FrontendCommandContractTest(unittest.TestCase):
             "PUMP 1 ON",
             "PUMP 2 OFF",
             "COMPRESSOR ON",
+            "K96 ON",
+            "K96 OFF",
             "VALVE OPEN",
             "HEATER ALL ON",
             "MODE MEASUREMENTS",
@@ -191,6 +205,7 @@ class FrontendCommandContractTest(unittest.TestCase):
             'data-toggle="pump2"',
             'data-toggle="compressor"',
             'data-toggle="outletValve"',
+            'data-toggle="k96"',
         ]
         index_html = (GUI_ROOT / "index.html").read_text(encoding="utf-8")
         for toggle_id in expected_toggle_ids:
@@ -248,6 +263,22 @@ class CommandAcknowledgementTest(unittest.TestCase):
 
         self.assertFalse(ok)
         self.assertIn("disconnected before acknowledging", message)
+
+
+class TelemetryLogTest(unittest.TestCase):
+    def test_telemetry_log_preserves_complete_wire_packet(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_log = gateway.SessionLog(Path(temp_dir) / "logs")
+            state = gateway.GroundStationState(session_log)
+            packet = make_status_packet(k96_on=1)
+
+            state.next_frame(packet)
+
+            entries = [json.loads(line) for line in session_log.path.read_text().splitlines()]
+            telemetry = next(entry for entry in entries if entry["event"] == "telemetry")
+            self.assertEqual(telemetry["data"]["packetSize"], gateway.STATUS_PACKET_SIZE)
+            self.assertEqual(binascii.unhexlify(telemetry["data"]["rawPacketHex"]), packet)
+            self.assertTrue(telemetry["data"]["k96On"])
 
 
 class SessionLogTest(unittest.TestCase):

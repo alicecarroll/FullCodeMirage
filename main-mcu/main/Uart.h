@@ -5,6 +5,7 @@
 void K96_on();
 
 void K96_off();
+bool K96_is_on();
 
 void K96_send(const char *data);
 

@@ -4,7 +4,9 @@
 #include <string>
 #include <cstdio>
 #include <cctype>
+#include <cmath>
 #include <forward_list>
+#include <limits>
 
 #include "esp_system.h"
 
@@ -25,6 +27,7 @@
 #include "main.h"
 #include "w5500.h"
 #include "Slaves.h" 
+#include "HeaterControl.h"
 
 bool loop_exp = true;
 uint16_t time_loop;
@@ -76,6 +79,9 @@ static MainControllerState controller_state = MAIN_CONTROLLER_BOOTING;
 static bool restart_requested = false;
 static std::string ethernet_command_text;
 bool manual_mode_overwrite = false; // To track if manual mode overwrite is active
+static bool k96_manual_override = false;
+static bool k96_manual_state = false;
+static HeaterSystem *heater_system = nullptr;
 
 struct QueuedPressureCommand {
     uint8_t command;
@@ -128,6 +134,139 @@ static CommandParseResult queue_pwm_command(const std::string &command)
     return CommandParseResult::Accepted;
 }
 
+static void set_heater_bit(uint8_t heater_index, bool enabled);
+
+static bool parse_heater_number(int heater_number, uint8_t *heater_id)
+{
+    if (heater_number < 1 || heater_number > 8) {
+        return false;
+    }
+    *heater_id = static_cast<uint8_t>(heater_number - 1);
+    return true;
+}
+
+static bool parse_heater_temperature(const char *text, int16_t *target)
+{
+    char extra = '\0';
+    float temperature = 0.0f;
+    if (std::sscanf(text, "%f %c", &temperature, &extra) != 1 ||
+        !std::isfinite(temperature) ||
+        temperature < (std::numeric_limits<int16_t>::min() / 100.0f) ||
+        temperature > (std::numeric_limits<int16_t>::max() / 100.0f)) {
+        return false;
+    }
+    *target = static_cast<int16_t>(std::lround(temperature * 100.0f));
+    return true;
+}
+
+static CommandParseResult handle_heater_command(const std::string &command)
+{
+    if (command.rfind("HEATER", 0) != 0) {
+        return CommandParseResult::NotMatched;
+    }
+
+    if (heater_system == nullptr) {
+        ESP_LOGE(TAG, "Heater system is not initialized");
+        return CommandParseResult::Rejected;
+    }
+
+    int heater_number = 0;
+    int duty = 0;
+    char mode_text[16] = {};
+    char value_text[32] = {};
+    char extra = '\0';
+    uint8_t heater_id = 0;
+
+    if (command == "HEATER ALL ON" || command == "HEATER ALL OFF") {
+        const bool enabled = command == "HEATER ALL ON";
+        for (uint8_t index = 0; index < 8; ++index) {
+            heater_set_enabled(heater_system, index, enabled);
+        }
+        active_heater_mask = enabled ? 0xFF : 0x00;
+        return CommandParseResult::Accepted;
+    }
+
+    if (std::sscanf(command.c_str(), "HEATER ON %d %c", &heater_number, &extra) == 1 ||
+        std::sscanf(command.c_str(), "HEATER OFF %d %c", &heater_number, &extra) == 1) {
+        const bool enabled = command.compare(7, 2, "ON") == 0;
+        if (!parse_heater_number(heater_number, &heater_id)) {
+            return CommandParseResult::Rejected;
+        }
+        heater_set_enabled(heater_system, heater_id, enabled);
+        set_heater_bit(heater_id, enabled);
+        return CommandParseResult::Accepted;
+    }
+
+    if (std::sscanf(command.c_str(), "HEATER %d MODE %15s TARGET %31s %c",
+                    &heater_number, mode_text, value_text, &extra) == 3) {
+        if (!parse_heater_number(heater_number, &heater_id)) {
+            return CommandParseResult::Rejected;
+        }
+        HeaterControlMode mode_value;
+        if (strcmp(mode_text, "PID") == 0) {
+            mode_value = HEATER_MODE_PID;
+        } else if (strcmp(mode_text, "BANGBANG") == 0 || strcmp(mode_text, "BANG-BANG") == 0) {
+            mode_value = HEATER_MODE_BANGBANG;
+        } else {
+            return CommandParseResult::Rejected;
+        }
+        int16_t target = 0;
+        if (!parse_heater_temperature(value_text, &target)) {
+            return CommandParseResult::Rejected;
+        }
+        heater_set_mode(heater_system, heater_id, mode_value);
+        heater_set_target(heater_system, heater_id, target);
+        return CommandParseResult::Accepted;
+    }
+
+    if (std::sscanf(command.c_str(), "HEATER %d MODE MANUAL DUTY %d %c",
+                    &heater_number, &duty, &extra) == 2) {
+        if (!parse_heater_number(heater_number, &heater_id) || duty < 0 || duty > 100) {
+            return CommandParseResult::Rejected;
+        }
+        heater_set_mode(heater_system, heater_id, HEATER_MODE_MANUAL);
+        heater_set_manual_duty(heater_system, heater_id, static_cast<uint8_t>(duty));
+        return CommandParseResult::Accepted;
+    }
+
+    if (std::sscanf(command.c_str(), "HEATER %d MODE %15s %c", &heater_number, mode_text, &extra) == 2) {
+        if (!parse_heater_number(heater_number, &heater_id)) {
+            return CommandParseResult::Rejected;
+        }
+        HeaterControlMode mode_value;
+        if (strcmp(mode_text, "PID") == 0) {
+            mode_value = HEATER_MODE_PID;
+        } else if (strcmp(mode_text, "BANGBANG") == 0 || strcmp(mode_text, "BANG-BANG") == 0) {
+            mode_value = HEATER_MODE_BANGBANG;
+        } else if (strcmp(mode_text, "MANUAL") == 0) {
+            mode_value = HEATER_MODE_MANUAL;
+        } else {
+            return CommandParseResult::Rejected;
+        }
+        heater_set_mode(heater_system, heater_id, mode_value);
+        return CommandParseResult::Accepted;
+    }
+
+    if (std::sscanf(command.c_str(), "HEATER %d TARGET %31s %c", &heater_number, value_text, &extra) == 2) {
+        int16_t target = 0;
+        if (!parse_heater_number(heater_number, &heater_id) || !parse_heater_temperature(value_text, &target)) {
+            return CommandParseResult::Rejected;
+        }
+        heater_set_target(heater_system, heater_id, target);
+        return CommandParseResult::Accepted;
+    }
+
+    if (std::sscanf(command.c_str(), "HEATER %d DUTY %d %c", &heater_number, &duty, &extra) == 2) {
+        if (!parse_heater_number(heater_number, &heater_id) || duty < 0 || duty > 100) {
+            return CommandParseResult::Rejected;
+        }
+        heater_set_manual_duty(heater_system, heater_id, static_cast<uint8_t>(duty));
+        return CommandParseResult::Accepted;
+    }
+
+    return CommandParseResult::Rejected;
+}
+
 static void set_heater_bit(uint8_t heater_index, bool enabled)
 // Currently, this function is not used to pass information to the thermal mcu. This should be added (Jonathan, 26.7.)
 {
@@ -177,8 +316,16 @@ static void enter_safe_shutdown(MainControllerState state)
     mode = 2;
     manual_mode_overwrite = true;
     active_heater_mask = 0x00;
+    if (heater_system != nullptr) {
+        for (uint8_t index = 0; index < 8; ++index) {
+            heater_set_enabled(heater_system, index, false);
+        }
+    }
     pressure_slave_commands.push_front({PRESSURE_CMD_SAFE_SHUTDOWN, 0});
     controller_state = state;
+    k96_manual_override = false;
+    k96_manual_state = false;
+    K96_off();
 }
 
 bool handle_command()
@@ -198,7 +345,10 @@ bool handle_command()
         return pwm_result == CommandParseResult::Accepted;
     }
 
-    int heater_index = 0;
+    const CommandParseResult heater_result = handle_heater_command(ethernet_command_text);
+    if (heater_result != CommandParseResult::NotMatched) {
+        return heater_result == CommandParseResult::Accepted;
+    }
 
     //if (ethernet_command_text == "STATUS" || ethernet_command_text == "REQUEST STATUS" || ethernet_command_text == "REQUEST STATUS UPDATE")
     //{
@@ -230,32 +380,22 @@ bool handle_command()
         return true;
     }
 
-    if (sscanf(ethernet_command_text.c_str(), "HEATER ON %d", &heater_index) == 1) // Should be updated to allow for target temperature settings
+    if (ethernet_command_text == "K96 ON")
     {
-        if (heater_index >= 1 && heater_index <= 8)
-        {
-            set_heater_bit(static_cast<uint8_t>(heater_index - 1), true);
-            ESP_LOGI(TAG, "Heater %d turned ON. Mask now 0x%02X", heater_index, active_heater_mask);
-        }
-        else
-        {
-            ESP_LOGW(TAG, "Invalid heater index in command: %s", ethernet_command_text.c_str());
-        }
-        return heater_index >= 1 && heater_index <= 8;
+        k96_manual_override = true;
+        k96_manual_state = true;
+        K96_on();
+        ESP_LOGI(TAG, "K96 turned ON by ground command");
+        return true;
     }
 
-    if (sscanf(ethernet_command_text.c_str(), "HEATER OFF %d", &heater_index) == 1)
+    if (ethernet_command_text == "K96 OFF")
     {
-        if (heater_index >= 1 && heater_index <= 8)
-        {
-            set_heater_bit(static_cast<uint8_t>(heater_index - 1), false);
-            ESP_LOGI(TAG, "Heater %d turned OFF. Mask now 0x%02X", heater_index, active_heater_mask);
-        }
-        else
-        {
-            ESP_LOGW(TAG, "Invalid heater index in command: %s", ethernet_command_text.c_str());
-        }
-        return heater_index >= 1 && heater_index <= 8;
+        k96_manual_override = true;
+        k96_manual_state = false;
+        K96_off();
+        ESP_LOGI(TAG, "K96 turned OFF by ground command");
+        return true;
     }
 
     if (ethernet_command_text == "HEATER ALL ON") 
@@ -312,6 +452,7 @@ static esp_err_t send_system_status_packet()
     system_status_packet.connection_lost = con_lost ? 1 : 0;
     system_status_packet.status_ok = status_ok ? 1 : 0;
     system_status_packet.pressure_system_on = pressure_system_active ? 1 : 0;
+    system_status_packet.k96_on = K96_is_on() ? 1 : 0;
     system_status_packet.heater_mask = active_heater_mask;
     system_status_packet.thermal_online = thermal_status.online ? 1 : 0;
     system_status_packet.thermal_state = thermal_status.state;
@@ -331,7 +472,7 @@ static esp_err_t send_system_status_packet()
     system_status_packet.controller_state = static_cast<uint8_t>(controller_state);
     system_status_packet.captured_errors = captured_errors;
 
-    return wiz_send((uint8_t *)&system_status_packet, sizeof(system_status_packet));
+    return wiz_send((uint8_t *)&system_status_packet, MAIN_SYSTEM_STATUS_PACKET_SIZE);
 }
 
 static void handle_ethernet_send_status(esp_err_t esp_err_status)
@@ -424,29 +565,55 @@ uint8_t received_power_thermal;
 uint16_t received_target_thermal;
 uint8_t status_thermal;
 uint8_t error_thermal;
-uint16_t thermal_current_temperatures[8];
+int16_t thermal_current_temperatures[8];
+
+// The chamber heater is controlled from the two K96 NTCs. Do not pass an
+// invalid or stale chamber temperature to the thermal MCU: -99.00 C is its
+// existing invalid-temperature/off sentinel.
+static int16_t chamber_heater_temperature(const SensorData &sensor_data)
+{
+    constexpr float SENSOR_MIN_C = -80.0f;
+    constexpr float SENSOR_MAX_C = 120.0f;
+    constexpr uint16_t K96_NTC_ERROR = static_cast<uint16_t>(1U << 10);
+
+    const float ntc0 = sensor_data.K96_NTC0_Temp;
+    const float ntc1 = sensor_data.K96_NTC1_Temp;
+    const bool ntcs_are_reasonable =
+        K96_is_on() &&
+        (sensor_data.K96_error & K96_NTC_ERROR) == 0 &&
+        std::isfinite(ntc0) && std::isfinite(ntc1) &&
+        ntc0 >= SENSOR_MIN_C && ntc0 <= SENSOR_MAX_C &&
+        ntc1 >= SENSOR_MIN_C && ntc1 <= SENSOR_MAX_C;
+
+    if (!ntcs_are_reasonable)
+    {
+        // Make sure that the main mcu is changing the reference if no NTC is responding to e.g. the PP2 sensor.
+        return -9900;
+    }
+
+    return static_cast<int16_t>(std::lround(((ntc0 + ntc1) / 2.0f) * 100.0f));
+}
 
 static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_ms){
     uint8_t chosen_channel_id_thermal=0x00; //0x00- 0x07
     //temperature array used for temperature data for thermal
-    thermal_current_temperatures[0]=static_cast<uint16_t> (sensor_data.Tt2*100); //thermal expect temp values where 5000=50.00 C
-    thermal_current_temperatures[1]=static_cast<uint16_t>(sensor_data.Tp5*100);
-    thermal_current_temperatures[2]=static_cast<uint16_t>(sensor_data.Tp3*100);
-    thermal_current_temperatures[3]=static_cast<uint16_t>(sensor_data.Tt3*100);
-    thermal_current_temperatures[4]=static_cast<uint16_t>(sensor_data.Tp5*100);
-    thermal_current_temperatures[5]=static_cast<uint16_t>(sensor_data.Tp6*100);
-    thermal_current_temperatures[6]=static_cast<uint16_t>(sensor_data.Tt1*100);
-    thermal_current_temperatures[7]=static_cast<uint16_t>(sensor_data.Tt2*100);
+    thermal_current_temperatures[0] = static_cast<int16_t>(std::lround(sensor_data.Tt2 * 100.0f));
+    // H2 / channel 1: chamber heater, referenced to the average K96 NTC0/NTC1.
+    thermal_current_temperatures[1] = chamber_heater_temperature(sensor_data);
+    thermal_current_temperatures[2] = static_cast<int16_t>(std::lround(sensor_data.Tp3 * 100.0f));
+    thermal_current_temperatures[3] = static_cast<int16_t>(std::lround(sensor_data.Tt3 * 100.0f));
+    thermal_current_temperatures[4] = static_cast<int16_t>(std::lround(sensor_data.Tp5 * 100.0f));
+    thermal_current_temperatures[5] = static_cast<int16_t>(std::lround(sensor_data.Tp6 * 100.0f));
+    thermal_current_temperatures[6] = static_cast<int16_t>(std::lround(sensor_data.Tt1 * 100.0f));
+    thermal_current_temperatures[7] = static_cast<int16_t>(std::lround(sensor_data.Tt2 * 100.0f));
 
     bool thermal_tx_ok = false;
 
-    while (chosen_channel_id_thermal!=(number_channels_thermal-1)){
-        thermal_tx_ok = thermal_test_send_package(
-            thermal_mcu, 
-            chosen_channel_id_thermal, //0x00- 0x07
-            thermal_mode, //0 bang bang 1 PID 155-255 D_cycle
-            thermal_current_temperatures[chosen_channel_id_thermal], // 5000 = 50,0C 
-            thermal_target);
+    while (chosen_channel_id_thermal < number_channels_thermal) {
+        const bool channel_tx_ok = heater_send_config_to_thermal(
+            chosen_channel_id_thermal,
+            thermal_current_temperatures[chosen_channel_id_thermal]);
+        thermal_tx_ok = channel_tx_ok && (chosen_channel_id_thermal == 0 || thermal_tx_ok);
         chosen_channel_id_thermal++;
     }
         
@@ -584,6 +751,11 @@ extern "C" void app_main()
     init_i2c();
     init_uart();
     init_sensors();
+    //static HeaterSystem initialized_heater_system;
+    //heater_system_init(&initialized_heater_system);
+    //heater_system = &initialized_heater_system;
+    heater_system = heater_system_get_global();
+    heater_system_init(heater_system);
     sd_mount();
     controller_state = MAIN_CONTROLLER_READY;
     printf("Initialization done\n");
@@ -601,7 +773,7 @@ extern "C" void app_main()
     uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
     last_thermal_ping_time = current_time;
     last_pressure_ping_time = current_time;
-    active_heater_mask = 0x01;
+    active_heater_mask = 0x00;
 
     while (loop_exp == true)
     {
@@ -773,7 +945,25 @@ void loop()
     // Standby
     case 2:
         // Deactivate K96
-        K96_off();
+        if (k96_manual_override)
+        {
+            if (k96_manual_state)
+            {
+                K96_on();
+            }
+            else
+            {
+                K96_off();
+            }
+        }
+        else
+        {
+            K96_off();
+        }
+        if (K96_is_on())
+        {
+            read_k96();
+        }
 
         //Reset overrides
 
@@ -852,10 +1042,27 @@ void loop()
         }
         
 
-        // Activate K96
-        K96_on();
+        // Activate K96 unless a manual OFF override is active.
+        if (k96_manual_override)
+        {
+            if (k96_manual_state)
+            {
+                K96_on();
+            }
+            else
+            {
+                K96_off();
+            }
+        }
+        else
+        {
+            K96_on();
+        }
         // Take meassurements!!!
-        read_k96();
+        if (K96_is_on())
+        {
+            read_k96();
+        }
         //buffer_SD_data_csv(sensor_data); 
         break;
 
@@ -915,10 +1122,10 @@ void loop()
         vTaskDelay(pdMS_TO_TICKS(100));
         esp_restart();
     }
-    // Delay only the remaining time so the full loop period stays near 1 second.
+    /*// Delay only the remaining time so the full loop period stays near 1 second.
     TickType_t current_time_stop = xTaskGetTickCount();
     TickType_t elapsed_ticks = current_time_stop - current_time_start;
-    TickType_t target_period_ticks = pdMS_TO_TICKS(5000);
+    TickType_t target_period_ticks = pdMS_TO_TICKS(1000);
     if (elapsed_ticks < target_period_ticks)
     {
         time_loop = static_cast<uint16_t>(target_period_ticks - elapsed_ticks);
@@ -932,4 +1139,5 @@ void loop()
     //{
     //    vTaskDelay(time_loop);
     //}
+    */
 }

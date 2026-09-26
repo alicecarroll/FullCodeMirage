@@ -3,6 +3,7 @@ idf_component_register(
         "main.cpp"
         "ConnectionLoss.cpp"
         "EthernetCom.cpp"
+        "HeaterControl.cpp"
         #"Humidity.cpp"
         "Initialize.cpp"
         "Multiplexer.cpp"
