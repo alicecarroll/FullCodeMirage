@@ -40,6 +40,8 @@ typedef struct {
 } MainSystemStatusPacket;
 #pragma pack(pop)
 
+extern MainSystemStatusPacket system_status_packet;
+
 // Keep this wire-size contract synchronized with groundstation_gateway.py and listener.py.
 static constexpr size_t MAIN_SYSTEM_STATUS_PACKET_SIZE = 217;
 static_assert(sizeof(MainSystemStatusPacket) == MAIN_SYSTEM_STATUS_PACKET_SIZE, "Groundstation packet size changed");

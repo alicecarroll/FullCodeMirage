@@ -823,7 +823,9 @@ void loop()
     //buffer_SD_data_binary_single(); //est time: 1.5 ms
     //buffer_SD_data_csv_single();      //est time: 3 ms
     //buffer_SD_data_binary(sensor_data); //4k - est time: 1.5 ms every 8th loop
-    buffer_SD_data_csv(&sensor_data);      //4k - est time: 3 ms every 8th loop
+    //buffer_SD_data_csv(&sensor_data);      //4k - est time: 3 ms every 8th loop
+    buffer_SD_data_csv(&system_status_packet);
+    //META data log
     print_sensor_data(&sensor_data);
 
     // Status Check Block
