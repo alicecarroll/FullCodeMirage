@@ -29,15 +29,34 @@
 #include "driver/sdspi_host.h"
 #include "sdmmc_cmd.h"
 
-        static const char *TAG = "SDCard";
+static const char *TAG = "SDCard";
 
 static sdmmc_card_t *s_card = NULL;
 static bool s_mounted = false;
+static char current_csv_filename[56] = "";
+static char current_metadata_filename[56] = "";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-// hello
+static void create_timestamped_filename(const char *prefix,
+                                       char *buffer,
+                                       size_t buffer_size,
+                                       const char *extension)
+{
+    time_t now = time(NULL);
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
+
+    snprintf(buffer, buffer_size,
+             "%s_%04d%02d%02d_%02d%02d%02d%s",
+             prefix,
+             timeinfo.tm_year + 1900,
+             timeinfo.tm_mon + 1,
+             timeinfo.tm_mday,
+             timeinfo.tm_hour,
+             timeinfo.tm_min,
+             timeinfo.tm_sec,
+             extension);
+}
+
 
 /*
 * Buffers with immediate storing
