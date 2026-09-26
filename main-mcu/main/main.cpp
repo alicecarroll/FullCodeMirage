@@ -414,7 +414,7 @@ uint8_t number_channels_thermal=8;  //0-8 depending on the number of switches us
 //Variables for thermal under this comment will need to have value assigned in loop. Currently using placeholders (Remove comment when this has changed)
 uint8_t thermal_mode=1; //0 bang bang 1 PID 155-255 D_cycle
 int16_t thermal_currentTemp=2000; // 5000 = 50,0C  
-int16_t thermal_target=5000;
+int16_t thermal_target=2000;
 int16_t thermal_watchdog_tolerance=3000; // 1 according to SEDv3. Number of subsequent times where the thermal slave is reset. If reset more than this number of times, the thermal MCU will be considered lost.
 bool thermal_mcu_lost=false; // To track if the thermal slave is lost.
 //Data recieved from thermal
@@ -430,9 +430,9 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
     uint8_t chosen_channel_id_thermal=0x00; //0x00- 0x07
     //temperature array used for temperature data for thermal
     thermal_current_temperatures[0]=static_cast<uint16_t> (sensor_data.Tt2*100); //thermal expect temp values where 5000=50.00 C
-    thermal_current_temperatures[1]=static_cast<uint16_t>(sensor_data.Tp2*100);
+    thermal_current_temperatures[1]=static_cast<uint16_t>(sensor_data.Tp5*100);
     thermal_current_temperatures[2]=static_cast<uint16_t>(sensor_data.Tp3*100);
-    thermal_current_temperatures[3]=static_cast<uint16_t>(sensor_data.Tp4*100);
+    thermal_current_temperatures[3]=static_cast<uint16_t>(sensor_data.Tt3*100);
     thermal_current_temperatures[4]=static_cast<uint16_t>(sensor_data.Tp5*100);
     thermal_current_temperatures[5]=static_cast<uint16_t>(sensor_data.Tp6*100);
     thermal_current_temperatures[6]=static_cast<uint16_t>(sensor_data.Tt1*100);
