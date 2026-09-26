@@ -7,21 +7,29 @@
 #include "esp_log.h"
 #include "Settings.h" //Pin definitions and hardware configuration
 #include "read_sensors.h" //Data storage
-#include "uart.h" //Initialization/configuration functions
+#include "Uart.h" //Initialization/configuration functions
 #include "ErrorStatus.h"
 
 static const char *TAG = "K96_SENSOR";
+static bool k96_enabled = false;
 
 //Turn sensor on
 void K96_on()
 {
     gpio_set_level(K96_EN_PIN, 1);
+    k96_enabled = true;
 }
 
 //Turn sensor off
 void K96_off()
 {
     gpio_set_level(K96_EN_PIN, 0);
+    k96_enabled = false;
+}
+
+bool K96_is_on()
+{
+    return k96_enabled;
 }
 
 
