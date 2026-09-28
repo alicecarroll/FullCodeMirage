@@ -81,6 +81,7 @@ static std::string ethernet_command_text;
 bool manual_mode_overwrite = false; // To track if manual mode overwrite is active
 static bool k96_manual_override = false;
 static bool k96_manual_state = false;
+MainSystemStatusPacket system_status_packet = {};
 static HeaterSystem *heater_system = nullptr;
 
 struct QueuedPressureCommand {
@@ -443,9 +444,9 @@ bool handle_command()
     return false;
 }
 
-static esp_err_t send_system_status_packet()
+void log_system_status_packet()
 {
-    MainSystemStatusPacket system_status_packet  = {};
+    system_status_packet = {};
     system_status_packet.sensor_data = sensor_data;
     system_status_packet.operating_mode = static_cast<uint8_t>(mode);
     system_status_packet.command_received = command_received ? 1 : 0;
@@ -471,7 +472,11 @@ static esp_err_t send_system_status_packet()
     system_status_packet.storage_free_pct = storage_available ? storage_free_pct : 0;
     system_status_packet.controller_state = static_cast<uint8_t>(controller_state);
     system_status_packet.captured_errors = captured_errors;
+}
 
+static esp_err_t send_system_status_packet()
+{
+    log_system_status_packet();
     return wiz_send((uint8_t *)&system_status_packet, MAIN_SYSTEM_STATUS_PACKET_SIZE);
 }
 
@@ -820,6 +825,7 @@ void loop()
 
     // Read I2C Data Block
     read_sensors();
+    log_system_status_packet();
     //buffer_SD_data_binary_single(); //est time: 1.5 ms
     //buffer_SD_data_csv_single();      //est time: 3 ms
     //buffer_SD_data_binary(sensor_data); //4k - est time: 1.5 ms every 8th loop

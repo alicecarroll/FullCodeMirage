@@ -13,7 +13,8 @@ enum MainControllerState : uint8_t {
 };
 
 #pragma pack(push, 1)
-typedef struct {
+typedef struct{
+//struct MainSystemStatusPacket{
     SensorData sensor_data;
     uint8_t operating_mode;
     uint8_t command_received;

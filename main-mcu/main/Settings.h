@@ -103,9 +103,6 @@ extern spi_device_handle_t WIZ_handle;
 #define SD_BUFFER_SIZE 8 * 512 // In bytes, min 512 bytes
 
 #define SENSOR_READING_SIZE sizeof(SensorData)
-#define TOTAL_READING_SIZE sizeof(MainSystemStatusPacket)
-
-#define READINGS_PER_BUFFER (SD_BUFFER_SIZE / TOTAL_READING_SIZE)
 //#define READINGS_PER_BUFFER (SD_BUFFER_SIZE / SENSOR_READING_SIZE)
 
 
