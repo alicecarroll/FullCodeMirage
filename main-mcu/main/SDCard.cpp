@@ -36,10 +36,8 @@
 static const char *TAG = "SDCard";
 // Buffer configuration
 //#define SD_BUFFER_SIZE 4096
-#define SENSOR_READING_SIZE sizeof(SensorData)
-#define TOTAL_READING_SIZE sizeof(MainSystemStatusPacket)
+//#define SENSOR_READING_SIZE sizeof(SensorData)
 
-#define READINGS_PER_BUFFER (SD_BUFFER_SIZE / TOTAL_READING_SIZE)
 
 //#define READINGS_PER_BUFFER //(SD_BUFFER_SIZE / SENSOR_READING_SIZE)//
 
