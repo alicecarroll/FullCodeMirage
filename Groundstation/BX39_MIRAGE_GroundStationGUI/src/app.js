@@ -2051,6 +2051,8 @@
       yLabel: "deg C",
       series: [
         { key: "sdCardC", color: getColorFromCssClass("SD-temp","background-color"), min: -60, max: 80 },
+        { key: "outletC", color: getColorFromCssClass("outlet-temp","background-color"), min: -60, max: 80 },
+        { key: "inletC", color: getColorFromCssClass("inlet-temp","background-color"), min: -60, max: 80 },
         { key: "pump1C", color: getColorFromCssClass("pump1-temp","background-color"), min: -60, max: 70 },
         { key: "pump2C", color: getColorFromCssClass("pump2-temp","background-color"), min: -60, max: 70 },
         { key: "compressorC", color: getColorFromCssClass("pump3-temp","background-color"), min: -60, max: 70 },
