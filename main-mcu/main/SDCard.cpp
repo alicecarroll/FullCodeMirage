@@ -199,7 +199,12 @@ void buffer_SD_data_binary(const SensorData *sensor_data)
 
 void buffer_SD_data_csv(MainSystemStatusPacket *system_status_packet)//SensorData *sensor_data)
 {
-    *sensor_datas = system_status_packet->sensor_data;
+    if (system_status_packet == nullptr){
+        ESP_LOGE(TAG,"System status packet is nullpointer"); 
+        return;
+    }
+    SensorData *sensor_datas = &system_status_packet->sensor_data;
+
     if (sensor_datas == NULL) return;
 
     // Create temp CSV line to store (increased size to 1024 to fit all expanded sensor fields)
