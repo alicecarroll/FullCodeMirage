@@ -41,7 +41,7 @@ uint16_t time_loop;
 int mode = 1;//DEFAULT_MODE; // 1
 
 // Watchdog
-bool system_ok;
+bool system_ok = true;
 
 // Watchdog variables for tracking slave pings locally inside the loop
 #define SLAVE_WATCHDOG_TIMEOUT_MS 5000
@@ -737,12 +737,14 @@ static void comms_pressure_default(SensorData &sensor_data, uint32_t current_tim
 extern "C" void app_main()
 {
     init_gpio_pins();
+    feed_watchdog(system_ok);
     init_spi();
     wiz_init();
     // Try to establish Ethernet for 5 seconds before proceeding. This is to ensure that the system can still run even if Ethernet is not available.
     TickType_t start_time = xTaskGetTickCount();
     while ((xTaskGetTickCount() - start_time) < pdMS_TO_TICKS(5000) && !wizphy_getphylink()){
         ESP_LOGW(TAG, "Ethernet link not established yet. Retrying...");
+        feed_watchdog(system_ok);
         vTaskDelay(pdMS_TO_TICKS(500));
     }
         
@@ -766,7 +768,7 @@ extern "C" void app_main()
     //wiz_connect(targetip, REMOTE_PORT);
     setSn_IR(WIZ_SOCKET, Sn_IR_CON);
 
-    wiz_ensure_connected(targetip, REMOTE_PORT);
+    wiz_ensure_connected(targetip, REMOTE_PORT, system_ok);
     wiz_ping(targetip, "h\n");
 
     // Set baseline slave watchdog timestamps here, AFTER Ethernet blocks!
@@ -787,7 +789,7 @@ void loop()
     TickType_t current_time_start = xTaskGetTickCount();
     uint32_t current_time_ms = current_time_start * portTICK_PERIOD_MS;
     status_packet_sent_this_loop = false; // Could be removed
-    //feed_watchdog(system_ok);
+    feed_watchdog(system_ok);
     //wiz_connect(targetip, REMOTE_PORT);
 
 
