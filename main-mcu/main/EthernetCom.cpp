@@ -35,6 +35,7 @@
 // ioLibrary headers (from WIZnet ioLibrary_Driver component)
 #include "EthernetCom.h"
 #include "ErrorStatus.h"
+#include "watchdog.h"
 
 #include "wizchip_conf.h"
 #include "wizsocket.h"
@@ -299,7 +300,7 @@ esp_err_t wiz_receive(uint8_t *buf, size_t buf_size, size_t *bytes_read)
 
 // In main: if(wiz_ensure_connected(ip, port) == ESP_OK){reconected}
 // For reconnection also
-esp_err_t wiz_ensure_connected(uint8_t *ip, uint16_t port)
+esp_err_t wiz_ensure_connected(uint8_t *ip, uint16_t port, bool system_ok)
 {
     if (getSn_SR(WIZ_SOCKET) == SOCK_ESTABLISHED)
     {
@@ -316,6 +317,7 @@ esp_err_t wiz_ensure_connected(uint8_t *ip, uint16_t port)
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000));
+        feed_watchdog(system_ok);
     }
 
     return ESP_FAIL;

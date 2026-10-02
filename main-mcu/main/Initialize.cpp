@@ -34,7 +34,7 @@ void init_gpio_pins()
     gpio_config(&io_conf);
 
     // Safe startup states
-    gpio_set_level(Watchdog_PIN, 0); 
+    gpio_set_level(Watchdog_PIN, 0);
     gpio_set_level(Thermal_reset_PIN, 1);   
     gpio_set_level(Pressure_reset_PIN, 1); 
     gpio_set_level(Reset_WIZ_PIN, 1);       

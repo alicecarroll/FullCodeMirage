@@ -4,6 +4,7 @@
 #include "Settings.h"
 #include "watchdog.h"
 
+/* This is the old implementation of feed_watchdog
 void feed_watchdog(bool system_ok)
 {
     static uint8_t counter = 0; // creates the variable once and keeps it in memory
@@ -21,4 +22,14 @@ void feed_watchdog(bool system_ok)
             gpio_set_level(Watchdog_PIN, state);
         }
     }
+}
+    */
+
+void feed_watchdog(bool system_ok){
+    if (system_ok){
+        gpio_set_level(Watchdog_PIN, 1);
+        vTaskDelay(pdMS_TO_TICKS(50));
+        gpio_set_level(Watchdog_PIN, 0);
+    }
+
 }
