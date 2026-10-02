@@ -14,9 +14,14 @@ bool manual_pump1 = false, manual_pump2 = false, manual_compressor = false, manu
 bool relay_manual = false;
 uint8_t applied_mode = 0;
 float target_pressure = 3.75f; //in pressure chamber
-float inlet_upper = 1.8f, inlet_lower = 1.0f; //inlet upper and lower boundaries for compressor inlet
+float inlet_upper = 1.5f, inlet_lower = 1.0f; //inlet upper and lower boundaries for compressor inlet
+float compressor_safe_start_inlet_upper = 2.2f; //inlet upper boundary for compressor safe start. Otherwise it might scream at low duty cycles.
+// In reality, the difference between interstage and pressure chamber is also relevant. I don't know how to account for that. 
+float pwm1 = 0.0f, pwm2 = 0.0f, pwm3 = 0.0f;
 //constexpr float FLUSH_COMPLETE_PRESSURE_BAR = 0.05f; //Why so low?
 constexpr uint8_t ERR_NONE = 0, ERR_CHAMBER_SENSOR = 1, ERR_INLET_SENSOR = 2;
+bool pwm_targets_initialized = false; // to keep track of one-time-initialisation of pwm targets
+
 
 TickType_t measurement_time_start;
 TickType_t flushstep_start;
@@ -42,8 +47,62 @@ void set_relay(uint8_t relay, bool on) {
     status.relay_mask = on ? status.relay_mask | bit : status.relay_mask & ~bit;
 }
 void clear_overrides() { manual_pump1 = manual_pump2 = manual_compressor = manual_valve = false; relay_manual = false; }
+
+void set_pwm_target_pump12(){
+    if (!manual_pump1) set_pump1(pwm1);
+    if (!manual_pump2) set_pump2(pwm2);
+    ESP_LOGW("pressure", "Adjusted PWM target. Pump1: %.2f%%, Pump2: %.2f%%", pwm1, pwm2);
+}
+
+void set_pwm_target_pump3(){
+    // When the compressor is at low duty cycles, it can struggle to start. Thus, we power it on briefly at 100% and then set it to what is required.
+    // However, this is causing high current spikes and thus we will not use this.
+    //if (!manual_compressor) set_compressor(20);
+    //vTaskDelay(pdMS_TO_TICKS(100));
+    if (!manual_compressor) set_compressor(pwm3);
+    ESP_LOGW("pressure", "Adjusted PWM target. Compressor: %.2f%%", pwm3);
+}
+
+/*
+I am not sure why, but sometimes the compressor squeaks and struggles to start. I believed this might be due to the required pressure drop
+over the compressor increasing with inlet pressure. I now believe that it is solely a function of the inlet pressure, not of the 
+pressure drop. I therefore have commented out the function below.
+
+
+bool compressor_can_start() {
+// This is calculating the required pressure drop over the compressor necessary to start. 
+// The dp_crit is calculated from measurement data at 10% duty cycle. 
+    float p_in = status.compressor_inlet_pressure;
+    float p_out = status.chamber_pressure;
+    float k = -0.65f; // This is determined by experiments.
+    float dp_crit = k * (p_out - 1.0f); // If 1 bar inlet pressure: no pressure drop required. If 2 bar inlet pressure: k bar pressure drop required.
+    bool can_start = (p_out - p_in) < dp_crit;
+    if (!can_start) {
+        ESP_LOGW("pressure", "Compressor cannot start. Inlet pressure: %.2f bar, Chamber pressure: %.2f bar, Pressure drop: %.2f bar, Required pressure drop: %.2f bar", p_in, p_out, (p_in - p_out), -dp_crit);
+    }
+    return can_start;
+}
+*/
+
+bool compressor_can_start(){
+    if (status.compressor_inlet_pressure > compressor_safe_start_inlet_upper){
+        ESP_LOGW("pressure", "Compressor cannot start. Inlet pressure: %.2f bar, Upper limit: %.2f bar", status.compressor_inlet_pressure, compressor_safe_start_inlet_upper);
+        return false;
+    }
+    else{
+        return true;
+    }
+}
+
+
 void set_measurement_outputs() {
-    set_pump1(100); set_pump2(100); set_compressor(0);
+    // If the measurement phase is entered while the interstage pressure is already above the lower limit, we can let the compressor run to deplete it to avoid the vacuum pumps hurting.
+    if (status.compressor_inlet_pressure >= inlet_lower) {
+        status.state = PRESSURE_COMPRESSION;
+        return;
+    }
+    set_pwm_target_pump12();
+    set_compressor(0);
 }
 void stop_pressure_train(bool open_valve) {
     clear_overrides();
@@ -77,6 +136,19 @@ void mode_changed(uint8_t mode) {
 }
 }
 
+void pressure_init_pwm(){
+    // the pwm settings of the pumps need to depend on the ambient pressure as the vacuum pumps would overpressurise the interstage otherwise.
+    // the pwm settings should be linearly dependent such that 0.04 bar -> 100% pwm and 1.0 bar -> 20% pwm
+    pwm1 = 100.0f - ((status.ambient_pressure - 0.04f) / (1.0f - 0.04f)) * 80.0f;
+    pwm1 = (pwm1 > 100) ? 100 : ((pwm1 < 20) ? 20 : pwm1);
+    pwm2 = 100.0f - ((status.ambient_pressure - 0.04f) / (1.0f - 0.04f)) * 80.0f;
+    pwm2 = (pwm2 > 100) ? 100 : ((pwm2 < 20) ? 20 : pwm2);
+    //The pwm setting of the compressor might be decided to depend on ambient conditions
+    //For now (02.10.) the compressor will just be set to 10% duty cycle
+    pwm3 = 10.0f;
+    pwm3 = (pwm3 > 100) ? 100 : ((pwm3 < 10) ? 10 : pwm3);
+}
+
 void pressure_init() {
     pressure_hardware_init();
     status.state = PRESSURE_STANDBY;
@@ -91,37 +163,31 @@ void pressure_update_external_sensors(const float sensors[7]) {
     status.chamber_pressure = sensors[2];
     status.ambient_pressure = sensors[3];
     status.compressor_inlet_pressure = (sensors[1]+status.ambient_pressure);
-    
+    if (!pwm_targets_initialized) {
+        pressure_init_pwm();
+        pwm_targets_initialized = true;
+    }
 }
 
-void adjust_pwm_target(){
-    // the pwm settings of the pumps need to depend on the ambient pressure as the vacuum pumps would overpressurise the interstage otherwise.
-    // the pwm settings should be linearly dependent such that 0.04 bar -> 100% pwm and 1.0 bar -> 12% pwm
-    float pwm1 = 100.0f - ((status.ambient_pressure - 0.04f) / (1.0f - 0.04f)) * 88.0f;
-    float pwm2 = 100.0f - ((status.ambient_pressure - 0.04f) / (1.0f - 0.04f)) * 88.0f;
-    if (!manual_pump1) set_pump1(pwm1);
-    if (!manual_pump2) set_pump2(pwm2);
-    ESP_LOGI("pressure", "Adjusted PWM target. Pump1: %.2f%%, Pump2: %.2f%%", pwm1, pwm2);
-}
 
 
 void adjust_pressure_target(){
     //upper limit of compressor inlet pressure should depend on ambient pressure
-    if ((status.ambient_pressure < 0.9) and (status.ambient_pressure>=0.7)){
-        inlet_upper = 1.8;
-        inlet_lower = 1.1;
+    if ((status.ambient_pressure < 1.1) and (status.ambient_pressure>=0.7)){
+        inlet_upper = 1.7;
+        inlet_lower = 0.95;
     }
     else if ((status.ambient_pressure < 0.7) and (status.ambient_pressure>=0.5)){
         inlet_upper = 1.5;
-        inlet_lower = 1.0;
+        inlet_lower = 0.95;
     }
     else if ((status.ambient_pressure < 0.5) and (status.ambient_pressure>=0.2)){
-        inlet_upper = 1.2;
-        inlet_lower = 0.9;
+        inlet_upper = 1.5;
+        inlet_lower = 0.95;
     }
     else if (status.ambient_pressure < 0.2){
-        inlet_upper = 1.0;
-        inlet_lower = 0.8;
+        inlet_upper = 1.5;
+        inlet_lower = 0.95;
     }
 }
 
@@ -129,15 +195,18 @@ void pressure_execute_command(uint8_t command, uint8_t info) {
     switch (command) {
         // Legacy ON commands do not carry a PWM value. They must mean full
         // speed; explicit partial duty cycles use the *_PWM commands below.
-        case PRESSURE_CMD_PUMP1_ON: manual_pump1 = true; set_pump1(100); break;
+        case PRESSURE_CMD_PUMP1_ON: manual_pump1 = true; pwm1 = (pwm1 > 100 ? 100 : ((pwm1 < 15) ? 15 : pwm1)); set_pump1(pwm1); break;
         case PRESSURE_CMD_PUMP1_OFF: manual_pump1 = true; set_pump1(0); break;
-        case PRESSURE_CMD_PUMP2_ON: manual_pump2 = true; set_pump2(100); break;
+        case PRESSURE_CMD_PUMP2_ON: manual_pump2 = true; pwm2 = (pwm2 > 100 ? 100 : ((pwm2 < 15) ? 15 : pwm2)); set_pump2(pwm2); break;
         case PRESSURE_CMD_PUMP2_OFF: manual_pump2 = true; set_pump2(0); break;
-        case PRESSURE_CMD_COMPRESSOR_ON: manual_compressor = true; set_compressor(100); break;
+        case PRESSURE_CMD_COMPRESSOR_ON: manual_compressor = true; pwm3 = (pwm3 > 100 ? 100 : ((pwm3 < 15) ? 15 : pwm3)); set_compressor(pwm3); break;
         case PRESSURE_CMD_COMPRESSOR_OFF: manual_compressor = true; set_compressor(0); break;
-        case PRESSURE_CMD_PUMP1_PWM: manual_pump1 = true; set_pump1(info > 100 ? 100 : info); break;
-        case PRESSURE_CMD_PUMP2_PWM: manual_pump2 = true; set_pump2(info > 100 ? 100 : info); break;
-        case PRESSURE_CMD_COMPRESSOR_PWM: manual_compressor = true; set_compressor(info > 100 ? 100 : info); break;
+        case PRESSURE_CMD_PUMP1_PWM: manual_pump1 = true; pwm1 = (info > 100 ? 100 : (info < 15 ? 15 : info)); set_pump1(pwm1); break;
+        case PRESSURE_CMD_PUMP2_PWM: manual_pump2 = true; pwm2 = (info > 100 ? 100 : (info < 15 ? 15 : info)); set_pump2(pwm2); break;
+        case PRESSURE_CMD_COMPRESSOR_PWM: manual_compressor = true; pwm3 = (info > 100 ? 100 : (info < 15 ? 15 : info)); set_compressor(pwm3); break;
+        case PRESSURE_CMD_PUMP1_PWM_NoInterrupt: manual_pump1 = false; pwm1 = (info > 100 ? 100 : info); break;
+        case PRESSURE_CMD_PUMP2_PWM_NoInterrupt: manual_pump2 = false; pwm2 = (info > 100 ? 100 : info); break;
+        case PRESSURE_CMD_COMPRESSOR_PWM_NoInterrupt: manual_compressor = false; pwm3 = (info > 100 ? 100 : info); break;
         case PRESSURE_CMD_VALVE_OPEN: manual_valve = true; set_valve(true); break;
         case PRESSURE_CMD_VALVE_CLOSE: manual_valve = true; set_valve(false); break;
         case PRESSURE_CMD_SET_MODE:
@@ -159,8 +228,7 @@ void pressure_execute_command(uint8_t command, uint8_t info) {
             clear_overrides();
             status.state = PRESSURE_PREPRESSURISATION;
             status.error = ERR_NONE;
-            set_pump1(100);
-            set_pump2(100);
+            set_measurement_outputs();
             set_compressor(0);
             set_valve(false);
             break;
@@ -204,12 +272,16 @@ void pressure_update() {
         //    if (!manual_compressor) set_compressor(0); 
         //    return;
         //}
-        if (!manual_valve) set_valve(false); 
-        if (!manual_compressor) set_compressor(0); //should be 0 because compressor and pumps can't be on at the same time
+
         if (status.compressor_inlet_pressure >= inlet_upper) {
-            adjust_pwm_target();
             status.state = PRESSURE_COMPRESSION;
             flushstep_start = xTaskGetTickCount();
+            return;
+        }
+        else {
+            if (!manual_valve) set_valve(false); 
+            if (!manual_compressor) set_compressor(0); //should be 0 because compressor and pumps can't be on at the same time
+            set_pwm_target_pump12();
         }
     } else if (status.state == PRESSURE_COMPRESSION) {
         ESP_LOGI("pressure", "Compression state. Chamber: %.3f bar, Inlet: %.3f bar, Ambient: %.3f bar",
@@ -222,21 +294,23 @@ void pressure_update() {
             if (!manual_compressor) set_compressor(0);
             status.state = PRESSURE_AIR_EXCHANGE;
             ESP_LOGI("pressure", "Chamber pressure too high: %.3f bar. Starting air exchange.", status.chamber_pressure);
+            return;
         }
         // Before turning on the compressor we should check that the inlet/interstage pressure is not too high. 
-        // The exact logic depends on whether or not we will have leaks here. I assume that we will have leaks and that interstage pressure drops over time.
-        else if (status.compressor_inlet_pressure > inlet_upper) {
+        else if (status.compressor_inlet_pressure > compressor_safe_start_inlet_upper) {
             if (!manual_compressor) set_compressor(0);
             if (!manual_valve) set_valve(false);
             status.state = PRESSURE_COMPRESSION; // Making it explicit that we want to remain in compression state
             ESP_LOGI("pressure", "Compressor inlet pressure too high: %.3f bar. Waiting for it to drop.", status.compressor_inlet_pressure);
+            return;
         }
         else {
-            if (!manual_compressor) set_compressor(100);
+            if (compressor_can_start()) {
+                set_pwm_target_pump3();
+            }
+            set_pwm_target_pump3();
+            if (!manual_valve) set_valve(true);
         }
-
-        if (!manual_valve) set_valve(true);
-        if (!manual_compressor) set_compressor(100); // As of 26.09.26 the compressor cant be pwm controlled. 
 
         flushstep_stop = xTaskGetTickCount();
         flushticks = flushstep_stop-flushstep_start;
@@ -318,7 +392,7 @@ void pressure_update() {
             status.state = PRESSURE_PREPRESSURISATION;
         }
         
-    } else if (status.state == PRESSURE_CORRECTION) {
+    } else if (status.state == PRESSURE_CORRECTION) { // What is this for - Jonathan 02.10.
         set_pump1(0);
         set_pump2(0);
         set_compressor(50);
@@ -335,6 +409,8 @@ void pressure_update() {
             ESP_LOGI("pressure", "Measurement started at %.3f bar", status.chamber_pressure);
         }
     } else if (status.state == PRESSURE_STANDBY) {
+        ESP_LOGI("pressure", "Standby state. Chamber: %.3f bar, Inlet: %.3f bar, Ambient: %.3f bar",
+                 status.chamber_pressure, status.compressor_inlet_pressure, status.ambient_pressure);
         if (status.chamber_pressure < 3.0) {
             safe_off();
         }
@@ -342,6 +418,8 @@ void pressure_update() {
             set_valve(true);
         }
     } else if (status.state == PRESSURE_ERROR) {
+        ESP_LOGE("pressure", "Error state. Chamber: %.3f bar, Inlet: %.3f bar, Ambient: %.3f bar",
+                 status.chamber_pressure, status.compressor_inlet_pressure, status.ambient_pressure);
         safe_off();
     } 
 }

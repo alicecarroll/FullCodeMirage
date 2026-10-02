@@ -118,19 +118,30 @@ static CommandParseResult queue_pwm_command(const std::string &command)
 {
     int pump = 0;
     int pwm = 0;
-    char extra = '\0';
-    if (std::sscanf(command.c_str(), "PWM%d %d %c", &pump, &pwm, &extra) != 2) {
+    char extra[32] = {};
+    const int parsed = std::sscanf(command.c_str(), "PWM%d %d %31s", &pump, &pwm, extra);
+    if (parsed != 2 && parsed != 3) {
         return CommandParseResult::NotMatched;
     }
     if (pump < 1 || pump > 3 || pwm < 0 || pwm > 100) {
         ESP_LOGW(TAG, "PWM must be pwm1/pwm2/pwm3 with a value from 0 to 100");
         return CommandParseResult::Rejected;
     }
-    const uint8_t commands[] = {
+    if (parsed == 3 && strcmp(extra, "NOINTERRUPT") != 0) {
+        ESP_LOGW(TAG, "Unsupported PWM option: %s", extra);
+        return CommandParseResult::Rejected;
+    }
+
+    const uint8_t pwm_commands[] = {
         PRESSURE_CMD_PUMP1_PWM, PRESSURE_CMD_PUMP2_PWM, PRESSURE_CMD_COMPRESSOR_PWM
     };
+    const uint8_t no_interrupt_commands[] = {
+        PRESSURE_CMD_PUMP1_PWM_NoInterrupt, PRESSURE_CMD_PUMP2_PWM_NoInterrupt,
+        PRESSURE_CMD_COMPRESSOR_PWM_NoInterrupt
+    };
+    const uint8_t *commands = parsed == 3 ? no_interrupt_commands : pwm_commands;
     pressure_slave_commands.push_front({commands[pump - 1], static_cast<uint8_t>(pwm)});
-    ESP_LOGI(TAG, "Queued PWM%d = %d%%", pump, pwm);
+    ESP_LOGI(TAG, "Queued PWM%d = %d%%%s", pump, pwm, parsed == 3 ? " without interrupt" : "");
     return CommandParseResult::Accepted;
 }
 

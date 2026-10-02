@@ -21,7 +21,6 @@ enum PressureCommand : uint8_t {
     PRESSURE_CMD_VALVE_CLOSE  = 0x08,
     // 0x09..0x0C were legacy mode/heater commands and are intentionally
     // reserved. The supported command IDs remain wire-compatible.
-    PRESSURE_CMD_SET_MODE     = 0x15,
     PRESSURE_CMD_RELAY1_ON    = 0x0D,
     PRESSURE_CMD_RELAY1_OFF   = 0x0E,
     PRESSURE_CMD_RELAY2_ON    = 0x0F,
@@ -30,6 +29,7 @@ enum PressureCommand : uint8_t {
     PRESSURE_CMD_RELAY3_OFF   = 0x12,
     PRESSURE_CMD_RELAY4_ON    = 0x13,
     PRESSURE_CMD_RELAY4_OFF   = 0x14,
+    PRESSURE_CMD_SET_MODE     = 0x15,
     PRESSURE_CMD_PUMP1_PWM    = 0x16,
     PRESSURE_CMD_PUMP2_PWM    = 0x17,
     PRESSURE_CMD_COMPRESSOR_PWM = 0x18,
@@ -38,6 +38,9 @@ enum PressureCommand : uint8_t {
     PRESSURE_CMD_START_PREPRESSURISATION = 0x1B,
     PRESSURE_CMD_FLUSH_CHAMBER = 0x1D,
     PRESSURE_CMD_SAFE_SHUTDOWN = 0x1E,
+    PRESSURE_CMD_PUMP1_PWM_NoInterrupt = 0x1F,
+    PRESSURE_CMD_PUMP2_PWM_NoInterrupt = 0x20,
+    PRESSURE_CMD_COMPRESSOR_PWM_NoInterrupt = 0x21 
 };
 
 enum PressureMode : uint8_t {
