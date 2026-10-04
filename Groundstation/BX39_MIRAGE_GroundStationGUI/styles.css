@@ -846,6 +846,63 @@ lydiatestingstyle {
   opacity: 0.72;
 }
 
+.threshold-note {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.threshold-value-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(90px, 0.7fr) auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.threshold-value-grid label {
+  color: var(--text);
+  font-size: 0.75rem;
+}
+
+.threshold-value-grid input,
+.threshold-value-grid button {
+  min-width: 0;
+  min-height: 32px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background: #242a23;
+  color: var(--text);
+}
+
+.threshold-value-grid input {
+  width: 100%;
+  padding: 0 7px;
+}
+
+.threshold-value-grid input:focus-visible,
+.threshold-value-grid button:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.threshold-value-grid button {
+  min-width: 52px;
+  padding: 0 9px;
+  cursor: pointer;
+}
+
+.threshold-value-grid button:hover {
+  border-color: var(--accent);
+  background: #2a332e;
+}
+
+.threshold-value-grid button:disabled {
+  color: var(--faint);
+  cursor: wait;
+  opacity: 0.72;
+}
+
 .command-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
