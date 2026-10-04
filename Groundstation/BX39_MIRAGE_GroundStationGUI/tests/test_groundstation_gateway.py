@@ -222,6 +222,28 @@ class FrontendCommandContractTest(unittest.TestCase):
         self.assertIn('data-heater-action="off"', index_html)
         self.assertIn('wireCommand: "HEATER " + action.toUpperCase()', app_js)
         self.assertIn('heaterBit: channel.bit', app_js)
+        expected_reset_commands = [
+            "RESET OVERRIDE ALL",
+            "RESET OVERRIDE MODE",
+            "RESET OVERRIDE K96",
+            "RESET OVERRIDE HEATERS",
+            "RESET THRESHOLD ALL",
+            "RESET THRESHOLD MAX_PRESSURE",
+            "RESET THRESHOLD CONNECTION_LOSS",
+            "RESET THRESHOLD CHAMBER_PRESSURE",
+            "RESET THRESHOLD INLET_TEMPERATURE",
+            "RESET THRESHOLD WATCHDOG_TIMEOUT",
+            "RESET THRESHOLD THERMAL_WATCHDOG_TOLERANCE",
+            "RESET THRESHOLD PRESSURE_WATCHDOG_TOLERANCE",
+            "RESET THRESHOLD RETRY_INTERVAL",
+        ]
+        for command in expected_reset_commands:
+            with self.subTest(reset_command=command):
+                self.assertIn(f'"{command}"', app_js)
+        self.assertIn('data-reset-all="overrides"', index_html)
+        self.assertIn('data-reset-all="thresholds"', index_html)
+        self.assertIn('data-reset-apply="overrides"', index_html)
+        self.assertIn('data-reset-apply="thresholds"', index_html)
 
 
 class CommandAcknowledgementTest(unittest.TestCase):

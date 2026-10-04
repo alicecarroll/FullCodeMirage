@@ -767,6 +767,85 @@ lydiatestingstyle {
   white-space: nowrap;
 }
 
+.reset-selection {
+  margin-top: 8px;
+}
+
+.reset-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.reset-checkbox-grid label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 2px 6px;
+  min-width: 0;
+  padding: 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.reset-checkbox-grid label:hover,
+.reset-checkbox-grid label:focus-within {
+  background: #242a23;
+}
+
+.reset-checkbox-grid input {
+  grid-row: span 2;
+  accent-color: var(--accent);
+}
+
+.reset-checkbox-grid span {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reset-checkbox-grid small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.67rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reset-all-option {
+  border: 1px solid rgba(240, 193, 91, 0.35);
+  background: rgba(46, 38, 24, 0.35);
+}
+
+.reset-apply {
+  width: 100%;
+  min-height: 38px;
+  margin-top: 8px;
+  border: 1px solid rgba(240, 193, 91, 0.7);
+  border-radius: 5px;
+  color: #ffe0a0;
+  background: #2e2618;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.reset-apply:hover,
+.reset-apply:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+  background: #3a3020;
+}
+
+.reset-apply:disabled {
+  color: var(--faint);
+  cursor: wait;
+  opacity: 0.72;
+}
+
 .command-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1234,6 +1313,7 @@ lydiatestingstyle {
   .quick-metrics,
   .chart-grid,
   .command-grid,
+  .reset-checkbox-grid,
   .toggle-grid {
     grid-template-columns: 1fr;
   }

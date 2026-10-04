@@ -162,6 +162,41 @@
 
           <section class="command-group recovery-group" aria-labelledby="recovery-commands">
             <h3 id="recovery-commands">Recovery</h3>
+            <fieldset class="heater-selection reset-selection" data-reset-section="overrides">
+              <legend>Reset overrides</legend>
+              <div class="heater-selection-actions">
+                <button type="button" data-reset-select="all" data-reset-group="overrides">Select all</button>
+                <button type="button" data-reset-select="none" data-reset-group="overrides">Deselect</button>
+              </div>
+              <div class="reset-checkbox-grid">
+                <label class="reset-all-option"><input type="checkbox" data-reset-all="overrides" data-reset-command-id="resetOverrideAll"><span>All overrides</span><small>Restore all override defaults</small></label>
+                <label><input type="checkbox" data-reset-checkbox="overrides" data-reset-command-id="resetOverrideMode"><span>Mode</span><small>Release manual mode selection</small></label>
+                <label><input type="checkbox" data-reset-checkbox="overrides" data-reset-command-id="resetOverrideK96"><span>K96</span><small>Release manual K96 state</small></label>
+                <label><input type="checkbox" data-reset-checkbox="overrides" data-reset-command-id="resetOverrideHeaters"><span>Heaters</span><small>Restore heater defaults and disable</small></label>
+              </div>
+              <button type="button" class="reset-apply" data-reset-apply="overrides">Apply override reset</button>
+            </fieldset>
+
+            <fieldset class="heater-selection reset-selection" data-reset-section="thresholds">
+              <legend>Reset thresholds</legend>
+              <div class="heater-selection-actions">
+                <button type="button" data-reset-select="all" data-reset-group="thresholds">Select all</button>
+                <button type="button" data-reset-select="none" data-reset-group="thresholds">Deselect</button>
+              </div>
+              <div class="reset-checkbox-grid">
+                <label class="reset-all-option"><input type="checkbox" data-reset-all="thresholds" data-reset-command-id="resetThresholdAll"><span>All thresholds</span><small>Restore every threshold default</small></label>
+                <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdMaxPressure"><span>Flight pressure</span><small>Maximum flight pressure</small></label>
+                <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdConnectionLoss"><span>Connection loss</span><small>Loops before standby</small></label>
+                <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdChamberPressure"><span>Chamber pressure</span><small>Maximum chamber pressure</small></label>
+                <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdInletTemperature"><span>Inlet temperature</span><small>Minimum inlet temperature</small></label>
+                <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdWatchdogTimeout"><span>Watchdog timeout</span><small>Thermal and pressure timeout</small></label>
+                <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdThermalTolerance"><span>Thermal watchdog tolerance</span><small>Thermal MCU reset limit</small></label>
+                <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdPressureTolerance"><span>Pressure watchdog tolerance</span><small>Pressure MCU reset limit</small></label>
+                <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdRetryInterval"><span>Retry interval</span><small>Connection retry loop interval</small></label>
+              </div>
+              <button type="button" class="reset-apply" data-reset-apply="thresholds">Apply threshold reset</button>
+            </fieldset>
+
             <div class="command-grid">
               <button type="button" class="warning-command" data-command="restartController" data-confirm="Restart the main controller? Telemetry may pause during reboot.">Restart main controller</button>
               <button type="button" class="danger-command" data-command="emergencyStop" data-confirm="Send emergency stop and safe shutdown?">Emergency stop / safe shutdown</button>
