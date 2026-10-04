@@ -23,8 +23,9 @@ TaskHandle_t control_loop_task_handle;
 void startup(){
     BaseType_t taskResult;
     //Initilizes data queues
+    uint8_t sendsize[8*5+1];
     dataQueue=xQueueCreate(number_switches,sizeof(individual_switch_data_rx));
-    dataQueue_slave_tx=xQueueCreate(1,sizeof(i2c_data_evt));
+    dataQueue_slave_tx=xQueueCreate(1,sizeof(sendsize));
 
 
     //FreeRTOS tasks IF There are crashes check the memory allocation of the FREERTOS tasks ie change the allocated memory in xtaskcreate
@@ -55,6 +56,18 @@ void startup(){
     );
     if (taskResult != pdPASS) {
         ESP_LOGE("TaskCreation", "Failed to create task! ControlTask");
+    }
+
+    taskResult=xTaskCreate(
+        i2c_loop_send_task, //receivetask
+        "I2C send task",
+        8192,
+        NULL,
+        10,
+        NULL
+    );
+    if (taskResult != pdPASS) {
+        ESP_LOGE("TaskCreation", "Failed to create task! i2c send task");
     }
 
     

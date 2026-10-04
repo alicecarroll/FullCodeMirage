@@ -6,6 +6,7 @@
 #include "Settings.h"
 #include "Multiplexer.h"
 #include "Initialize.h"
+#include "esp_log.h"
 //#include "communication.h"
 #include "Slaves.h"
 #include "ErrorStatus.h"
@@ -215,7 +216,78 @@ bool thermal_test_receive_package(  //when passing variable to this one remember
     return true;
 }
 
+bool thermal_receive_big_packet(
+    SlaveDevice slave,
+    ThermalDataValues *dataArray //This is supposed to be an array of thermalDataValues structs with number 8 ie ThermalDataValues dataArray[8];
+)
+{
+    int dataLength=8*5+1;
+    uint8_t mux_channel; //multiplexer channel, defined in select_slave
+    gpio_num_t reset_pin;//reset pin, defined in select_slave
 
+    //Purpose is to run selectskave "if" is just to handle error
+    if (!select_slave(
+            slave,
+            &mux_channel,
+            &reset_pin))
+        {
+            return false;
+        }
+
+    //Purpose is to run selectmuxchannel "if" is just to handle errors
+    if (sel_mux_channel(mux_channel) != ESP_OK)
+    {
+        return false;
+    }
+    
+    uint8_t data[dataLength];
+    esp_err_t err =
+    i2c_master_read_from_device(
+        I2C_master,
+        Slave_MCU_addr,
+        data,
+        sizeof(data),
+        100 / portTICK_PERIOD_MS
+    );
+
+    if (err != ESP_OK)
+    {
+        dataArray[0].global_error=1; //esp error
+        ESP_LOGE("Slaves","i2c_master_read_from_device failed");
+        return false;
+        
+    }
+
+    if(data[dataLength-1]!=computeCRC8(data, dataLength-1)){  //Verifies packet integrity start value for crc is 0 so crc should return 0
+        dataArray[0].global_error=2; //crc error, packet has been corrupted
+        ESP_LOGE("Slaves", "CRC8 error");
+        for(uint8_t i=0; i<8; i++){
+            dataArray[i].mode=data[5*i];
+            dataArray[i].duty_cycle=data[5*i+1];
+            dataArray[i].error=data[5*i+2]; ///Check if its 0-100 or 155-255
+            dataArray[i].target=static_cast<int16_t>(static_cast<uint16_t>(data[5*i+3]) << 8 | static_cast<uint16_t>(data[5*i+4]))/100.0f;
+            ESP_LOGW("Slaves", "Feedback from thermal slave - Channel: %u, Mode: %u, Power: %u, Target: %f, Error: %u,Global Error: %u, ",
+            i, 
+            dataArray[i].mode,
+            dataArray[i].duty_cycle,
+            dataArray[i].target,
+            dataArray[i].error,
+            dataArray[i].global_error);
+        }
+        return false; 
+    }
+
+    dataArray[0].global_error=0;
+    for(uint8_t i=0; i<8; i++) //Unpacks the datastream into the proper array of struct
+    {
+        dataArray[i].mode=data[5*i];
+        dataArray[i].duty_cycle=data[5*i+1];
+        dataArray[i].error=data[5*i+2]; ///Check if its 0-100 or 155-255
+        dataArray[i].target=static_cast<int16_t>(static_cast<uint16_t>(data[5*i+3]) << 8 | static_cast<uint16_t>(data[5*i+4]))/100.0f;
+    }
+
+    return true;
+}
 
 
 

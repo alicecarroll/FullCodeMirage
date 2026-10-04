@@ -63,8 +63,7 @@ void i2c_loop_task(void *pvParameters) { // If still not working
   individual_switch_data_rx controllerData;
   i2c_data_evt evtData; // Data from i2c
 
-  // send
-  i2c_data_evt send;
+
   // i2c stuff
   uint8_t rx[rx_buffer_len] = {};
   size_t buffered = 0;
@@ -142,16 +141,33 @@ void i2c_loop_task(void *pvParameters) { // If still not working
       }
       // Add a way to send packeterrors to master
     }
-    // sends stuff
-    if (xQueueReceive(dataQueue_slave_tx, &send, 0)) {
-      // ESP_LOGI("I2C_SLAVE","Size of send data %zu", send.length);
-      i2c_reset_tx_fifo(I2C_PORT);
-      i2c_slave_write_buffer(
-          I2C_PORT, send.data, send.length,
-          0); // can use sizeof(send.data) instead of send.length
-    }
+
+
   }
 }
+
+void i2c_loop_send_task(void *pvParameters) 
+{
+  while(1)
+  {
+    // send
+    int byteswritten=0;
+    uint8_t send[8*5+1];
+    // sends stuff
+    if (xQueueReceive(dataQueue_slave_tx, &send, portMAX_DELAY)) {
+      // ESP_LOGI("I2C_SLAVE","Size of send data %zu", send.length);
+      if(send[40]!=computeCRC8(send, 40)){
+        ESP_LOGE("i2c send", "CRC8 Failure!!!!");
+      }
+      i2c_reset_tx_fifo(I2C_PORT);
+      
+      byteswritten=i2c_slave_write_buffer(I2C_PORT, send, sizeof(send),0); 
+      //ESP_LOGI("i2c send", "Bytes written %i", byteswritten);
+    }
+  }
+    
+}
+
 
 /*
 Under this is packet structures
@@ -172,12 +188,8 @@ bool data_unpack_indvidual_switch(
   packet->regist = dataBuffer[0];   // regiester/command determines packet type
   packet->switchID = dataBuffer[1]; // switch id 0-7
   packet->mode = dataBuffer[2];     // mode
-  packet->temperature =
-      static_cast<int16_t>(static_cast<uint16_t>(dataBuffer[3]) << 8 |
-                           static_cast<uint16_t>(dataBuffer[4]));
-  packet->target =
-      static_cast<int16_t>(static_cast<uint16_t>(dataBuffer[5]) << 8 |
-                           static_cast<uint16_t>(dataBuffer[6]));
+  packet->temperature =static_cast<int16_t>(static_cast<uint16_t>(dataBuffer[3]) << 8 | static_cast<uint16_t>(dataBuffer[4]));
+  packet->target = static_cast<int16_t>(static_cast<uint16_t>(dataBuffer[5]) << 8 | static_cast<uint16_t>(dataBuffer[6]));
   packet->crc8 = dataBuffer[7];
 
   return true;
@@ -206,3 +218,22 @@ bool data_pack_indvidual_switch( // input a struct and get ouy uint8array
   data[7] = computeCRC8(data, INDIVIDUAL_SWITCH_TX_LEN - 1);
   return true;
 }
+
+// bool data_pack_large_packet(
+//   uint8_t *data, //Data should have size N*switch_size+1 where N is number of switches
+//   uint8_t N, //N is number of switches where data is sent from
+//   const uint8_t *packet_array[8]
+// ){
+//   uint8_t switch_size=5;
+  
+//   for(uint8_t i=0; i<N;i++){
+//     data[i*switch_size] = packet_array[i].
+//     data[i*switch_size+1]=packet_array[i].D_cycle;
+//     data[i*switch_size+2]=packet_array[i].status;
+//     data[i*switch_size+3]=static_cast<uint8_t>((unsigned_target >> 8) & 0xFF); // msb
+//     data[i*switch_size+4]=static_cast<uint8_t>(((unsigned_target) & 0xFF)); // msb
+//   }
+
+//   data[N*switch_size]=computeCRC8(data,N*switch_size);
+//   return true;
+// }
