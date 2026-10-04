@@ -21,12 +21,12 @@ struct individual_switch_data_rx {
 
 //For sending data for indvidual switches
 struct individual_switch_data_tx{
-uint8_t switchID;   //which switch 
-uint8_t mode;   //Mode for switch  
-uint8_t D_cycle; //WHich duty cycle is it using
-float target; // which target temp is it
-uint8_t status; //status/error codes
-uint8_t global_mode; //Global Mode is if its in emergency mode or not ie mode not specific to a switch
+uint8_t switchID=8;   //which switch 
+uint8_t mode=4;   //Mode for switch  4 is error mode ie packet hasnt been updated
+uint8_t D_cycle=0; //WHich duty cycle is it using
+float target=-99.0f; // which target temp is it
+uint8_t status=1; //status/error codes
+uint8_t global_mode=0x01; //Global Mode is if its in emergency mode or not ie mode not specific to a switch
 //Crc8 will be added to send buffer later (it is not in this struct intentionally)
 };
 

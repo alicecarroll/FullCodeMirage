@@ -87,6 +87,14 @@ struct PressureStatusData {
     bool valve_open;
     bool manual_override;
 };
+//Thermal mcu data struct
+struct ThermalDataValues{ //Channel id is the same as the number in the array ie if at thermalDataValues dataArray[2] we are at channel 2 
+    uint8_t global_error=0;
+    uint8_t mode=3;
+    uint8_t error=1;
+    uint8_t duty_cycle=0;
+    float target=-99.0f;
+};
 
 // API
 void slave_reset(
@@ -112,6 +120,10 @@ bool thermal_test_receive_package(  //when passing variable to this one remember
     uint8_t* status,
     uint8_t* error);
 
+bool thermal_receive_big_packet(
+    SlaveDevice slave,
+    ThermalDataValues *dataArray
+);
 bool pressure_send_sensors(
     SlaveDevice slave,
     const SensorData& sensor_data
