@@ -630,13 +630,9 @@ int16_t thermal_target=2000;
 #define THERMAL_WATCHDOG_TOL 3000
 int16_t thermal_watchdog_tolerance = THERMAL_WATCHDOG_TOL; // 1 according to SEDv3. Number of subsequent times where the thermal slave is reset. If reset more than this number of times, the thermal MCU will be considered lost.
 bool thermal_mcu_lost=false; // To track if the thermal slave is lost.
-//Data recieved from thermal
-uint8_t received_channel_id_thermal; //Reason i seperate recieved and sent is to be able to compare later if data packet made it
-uint8_t received_mode_thermal;
-uint8_t received_power_thermal;
-uint16_t received_target_thermal;
-uint8_t status_thermal;
-uint8_t error_thermal;
+
+//Data recieved from thermal this struct is defined under slaves.h For errors 0 is thats ok anything else is error
+ThermalDataValues thermal_data_received_array[8];
 int16_t thermal_current_temperatures[8];
 
 // The chamber heater is controlled from the two K96 NTCs. Do not pass an

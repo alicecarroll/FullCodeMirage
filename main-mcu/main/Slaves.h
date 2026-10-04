@@ -92,7 +92,7 @@ struct ThermalDataValues{ //Channel id is the same as the number in the array ie
     uint8_t global_error=0;
     uint8_t mode=3;
     uint8_t error=1;
-    uint8_t duty_cycle=0; //Is 0-100
+    uint8_t duty_cycle=0;
     float target=-99.0f;
 };
 
