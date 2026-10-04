@@ -34,8 +34,12 @@ The gateway sends the `wireCommand` string from each frontend command definition
 - `PRESSURE ON/OFF`
 - `FLUSH CHAMBER`
 - `MODE STANDBY` and `MODE MEASUREMENTS`
+- `RESET OVERRIDE MODE`, `RESET OVERRIDE K96`, `RESET OVERRIDE HEATERS`, and `RESET OVERRIDE ALL`
+- `RESET THRESHOLD MAX_PRESSURE`, `RESET THRESHOLD CONNECTION_LOSS`, `RESET THRESHOLD CHAMBER_PRESSURE`, `RESET THRESHOLD INLET_TEMPERATURE`, `RESET THRESHOLD WATCHDOG_TIMEOUT`, `RESET THRESHOLD THERMAL_WATCHDOG_TOLERANCE`, `RESET THRESHOLD PRESSURE_WATCHDOG_TOLERANCE`, `RESET THRESHOLD RETRY_INTERVAL`, and `RESET THRESHOLD ALL`
 - `REBOOT`
 - `EMERGENCY STOP`
+
+The Recovery panel lets operators select individual overrides or thresholds, select all entries in a group, or choose the group's all-reset command. Heater resets restore the configured heater defaults and disable every heater.
 
 The status packet reports SD free percentage, main-controller state, pressure task state, individual pump/compressor PWM, relay/peripheral state, and the eight-bit heater mask. Gas plots use the K96 unfiltered raw IR detector channels rather than calculated ppm concentrations.
 
