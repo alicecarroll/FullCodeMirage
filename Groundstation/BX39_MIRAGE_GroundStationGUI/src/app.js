@@ -1489,6 +1489,32 @@
       });
     });
 
+    document.querySelectorAll("[data-threshold-set]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        const input = document.getElementById(button.dataset.thresholdInput);
+        if (!input || input.value.trim() === "" || !input.reportValidity()) {
+          log.add("warn", "Threshold update rejected", "Enter a valid value within the field's allowed range");
+          return;
+        }
+
+        const value = Number(input.value);
+        if (!Number.isFinite(value)) {
+          log.add("warn", "Threshold update rejected", "Threshold values must be finite numbers");
+          return;
+        }
+
+        const commandId = registerThresholdValueCommand(button.dataset.thresholdSet, value);
+        button.disabled = true;
+        sendCommand(commandId, "button")
+          .catch(function () {
+            return undefined;
+          })
+          .finally(function () {
+            button.disabled = false;
+          });
+      });
+    });
+
     document.querySelectorAll("[data-heater-shortcut]").forEach(function (button) {
       button.addEventListener("click", function () {
         const shortcut = button.dataset.heaterShortcut;
@@ -2985,6 +3011,26 @@ function drawTooltip(ctx, hoverPos, samples, pad, plotW, plotH, config, yRange, 
         effect: function (sim) {
           sim.setPeripheral(pump === 3 ? "compressor" : "pump" + pump, percentage > 0);
           return label + " queued";
+        }
+      };
+    }
+    return commandId;
+  }
+
+  function registerThresholdValueCommand(target, value) {
+    const valueText = String(value);
+    const commandId = "setThreshold_" + target + "_" + valueText.replace(/[^a-zA-Z0-9]+/g, "_");
+    if (!COMMANDS[commandId]) {
+      COMMANDS[commandId] = {
+        label: "set " + target.toLowerCase().replace(/_/g, " ") + " threshold to " + valueText,
+        wireCommand: "SET THRESHOLD " + target + " " + valueText,
+        aliases: [],
+        effect: function (sim) {
+          if (!sim.thresholds) {
+            sim.thresholds = {};
+          }
+          sim.thresholds[target] = value;
+          return target.toLowerCase().replace(/_/g, " ") + " threshold set to " + valueText;
         }
       };
     }

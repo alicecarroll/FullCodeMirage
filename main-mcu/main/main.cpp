@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cctype>
 #include <cmath>
+#include <cerrno>
+#include <cstdlib>
 #include <forward_list>
 #include <limits>
 
@@ -93,6 +95,7 @@ float min_inlet_temperature_threshold = INLET_TEMPERATURE_THRESHOLD; // Minimum 
 
 static bool reset_overrides(const std::string &target);
 static bool reset_thresholds(const std::string &target);
+static bool set_threshold(const std::string &target, const std::string &value);
 
 
 struct QueuedPressureCommand {
@@ -416,6 +419,22 @@ bool handle_command()
         }
         ESP_LOGW(TAG, "Unknown threshold reset target: %s", target.c_str());
         return false;
+    }
+
+    constexpr char SET_THRESHOLD_PREFIX[] = "SET THRESHOLD ";
+    if (ethernet_command_text.rfind(SET_THRESHOLD_PREFIX, 0) == 0)
+    {
+        const std::string arguments = ethernet_command_text.substr(sizeof(SET_THRESHOLD_PREFIX) - 1);
+        const size_t separator = arguments.find(' ');
+        if (separator == std::string::npos ||
+            !set_threshold(arguments.substr(0, separator), arguments.substr(separator + 1)))
+        {
+            ESP_LOGW(TAG, "Invalid threshold update command: %s", ethernet_command_text.c_str());
+            return false;
+        }
+        ESP_LOGI(TAG, "Threshold %.*s updated to %s",
+                 static_cast<int>(separator), arguments.c_str(), arguments.c_str() + separator + 1);
+        return true;
     }
 
     if (ethernet_command_text == "K96 ON")
@@ -836,6 +855,73 @@ static bool reset_thresholds(const std::string &target)
         thermal_watchdog_tolerance = THERMAL_WATCHDOG_TOL;
         pressure_watchdog_tolerance = PRESSURE_WATCHDOG_TOL;
         loop_retry_connection = LOOP_RETRY_CONNECTION;
+    }
+
+    return true;
+}
+
+static bool set_threshold(const std::string &target, const std::string &value)
+{
+    char *end = nullptr;
+    errno = 0;
+
+    if (target == "MAX_PRESSURE" || target == "CHAMBER_PRESSURE" ||
+        target == "INLET_TEMPERATURE")
+    {
+        const float parsed = std::strtof(value.c_str(), &end);
+        if (errno == ERANGE || end == value.c_str() || *end != '\0' || !std::isfinite(parsed))
+            return false;
+
+        if (target == "MAX_PRESSURE")
+        {
+            if (parsed < 0.0f || parsed > 1000.0f) return false;
+            max_pressure_threshold = parsed;
+        }
+        else if (target == "CHAMBER_PRESSURE")
+        {
+            if (parsed < 0.0f || parsed > 1000.0f) return false;
+            max_chamber_pressure_threshold = parsed;
+        }
+        else
+        {
+            if (parsed < -100.0f || parsed > 200.0f) return false;
+            min_inlet_temperature_threshold = parsed;
+        }
+        return true;
+    }
+
+    const long parsed = std::strtol(value.c_str(), &end, 10);
+    if (errno == ERANGE || end == value.c_str() || *end != '\0')
+        return false;
+
+    if (target == "CONNECTION_LOSS")
+    {
+        if (parsed < 0 || parsed > std::numeric_limits<int>::max()) return false;
+        max_loops_without_connection = static_cast<int>(parsed);
+    }
+    else if (target == "WATCHDOG_TIMEOUT")
+    {
+        if (parsed < 1 || parsed > std::numeric_limits<uint16_t>::max()) return false;
+        current_slave_watchdog_timeout = static_cast<uint16_t>(parsed);
+    }
+    else if (target == "THERMAL_WATCHDOG_TOLERANCE")
+    {
+        if (parsed < 1 || parsed > std::numeric_limits<int16_t>::max()) return false;
+        thermal_watchdog_tolerance = static_cast<int16_t>(parsed);
+    }
+    else if (target == "PRESSURE_WATCHDOG_TOLERANCE")
+    {
+        if (parsed < 1 || parsed > std::numeric_limits<int16_t>::max()) return false;
+        pressure_watchdog_tolerance = static_cast<int16_t>(parsed);
+    }
+    else if (target == "RETRY_INTERVAL")
+    {
+        if (parsed < 1 || parsed > std::numeric_limits<int32_t>::max()) return false;
+        loop_retry_connection = static_cast<int32_t>(parsed);
+    }
+    else
+    {
+        return false;
     }
 
     return true;

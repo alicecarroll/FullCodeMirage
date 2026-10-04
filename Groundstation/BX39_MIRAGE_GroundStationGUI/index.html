@@ -197,6 +197,44 @@
               <button type="button" class="reset-apply" data-reset-apply="thresholds">Apply threshold reset</button>
             </fieldset>
 
+            <fieldset class="heater-selection threshold-values">
+              <legend>Set threshold values</legend>
+              <p class="threshold-note">Enter one value and apply it to change only that threshold. Current values are not included in telemetry.</p>
+              <div class="threshold-value-grid">
+                <label for="thresholdMaxPressure">Maximum flight pressure (bar)</label>
+                <input id="thresholdMaxPressure" type="number" step="any" min="0" max="1000" placeholder="Default: 0.040" data-threshold-value="MAX_PRESSURE">
+                <button type="button" data-threshold-set="MAX_PRESSURE" data-threshold-input="thresholdMaxPressure">Set</button>
+
+                <label for="thresholdConnectionLoss">Connection-loss limit (loops)</label>
+                <input id="thresholdConnectionLoss" type="number" step="1" min="0" max="2147483647" placeholder="Default: 50" data-threshold-value="CONNECTION_LOSS">
+                <button type="button" data-threshold-set="CONNECTION_LOSS" data-threshold-input="thresholdConnectionLoss">Set</button>
+
+                <label for="thresholdChamberPressure">Maximum chamber pressure (bar)</label>
+                <input id="thresholdChamberPressure" type="number" step="any" min="0" max="1000" placeholder="Default: 4.000" data-threshold-value="CHAMBER_PRESSURE">
+                <button type="button" data-threshold-set="CHAMBER_PRESSURE" data-threshold-input="thresholdChamberPressure">Set</button>
+
+                <label for="thresholdInletTemperature">Minimum inlet temperature (°C)</label>
+                <input id="thresholdInletTemperature" type="number" step="any" min="-100" max="200" placeholder="Default: -35.0" data-threshold-value="INLET_TEMPERATURE">
+                <button type="button" data-threshold-set="INLET_TEMPERATURE" data-threshold-input="thresholdInletTemperature">Set</button>
+
+                <label for="thresholdWatchdogTimeout">Slave watchdog timeout (ms)</label>
+                <input id="thresholdWatchdogTimeout" type="number" step="1" min="1" max="65535" placeholder="Default: 5000" data-threshold-value="WATCHDOG_TIMEOUT">
+                <button type="button" data-threshold-set="WATCHDOG_TIMEOUT" data-threshold-input="thresholdWatchdogTimeout">Set</button>
+
+                <label for="thresholdThermalTolerance">Thermal watchdog tolerance (resets)</label>
+                <input id="thresholdThermalTolerance" type="number" step="1" min="1" max="32767" placeholder="Default: 3000" data-threshold-value="THERMAL_WATCHDOG_TOLERANCE">
+                <button type="button" data-threshold-set="THERMAL_WATCHDOG_TOLERANCE" data-threshold-input="thresholdThermalTolerance">Set</button>
+
+                <label for="thresholdPressureTolerance">Pressure watchdog tolerance (resets)</label>
+                <input id="thresholdPressureTolerance" type="number" step="1" min="1" max="32767" placeholder="Default: 3000" data-threshold-value="PRESSURE_WATCHDOG_TOLERANCE">
+                <button type="button" data-threshold-set="PRESSURE_WATCHDOG_TOLERANCE" data-threshold-input="thresholdPressureTolerance">Set</button>
+
+                <label for="thresholdRetryInterval">Connection retry interval (loops)</label>
+                <input id="thresholdRetryInterval" type="number" step="1" min="1" max="2147483647" placeholder="Default: 10" data-threshold-value="RETRY_INTERVAL">
+                <button type="button" data-threshold-set="RETRY_INTERVAL" data-threshold-input="thresholdRetryInterval">Set</button>
+              </div>
+            </fieldset>
+
             <div class="command-grid">
               <button type="button" class="warning-command" data-command="restartController" data-confirm="Restart the main controller? Telemetry may pause during reboot.">Restart main controller</button>
               <button type="button" class="danger-command" data-command="emergencyStop" data-confirm="Send emergency stop and safe shutdown?">Emergency stop / safe shutdown</button>

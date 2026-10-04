@@ -244,6 +244,15 @@ class FrontendCommandContractTest(unittest.TestCase):
         self.assertIn('data-reset-all="thresholds"', index_html)
         self.assertIn('data-reset-apply="overrides"', index_html)
         self.assertIn('data-reset-apply="thresholds"', index_html)
+        self.assertIn('data-threshold-set="MAX_PRESSURE"', index_html)
+        self.assertIn('data-threshold-set="CONNECTION_LOSS"', index_html)
+        self.assertIn('data-threshold-set="CHAMBER_PRESSURE"', index_html)
+        self.assertIn('data-threshold-set="INLET_TEMPERATURE"', index_html)
+        self.assertIn('data-threshold-set="WATCHDOG_TIMEOUT"', index_html)
+        self.assertIn('data-threshold-set="THERMAL_WATCHDOG_TOLERANCE"', index_html)
+        self.assertIn('data-threshold-set="PRESSURE_WATCHDOG_TOLERANCE"', index_html)
+        self.assertIn('data-threshold-set="RETRY_INTERVAL"', index_html)
+        self.assertIn('wireCommand: "SET THRESHOLD " + target + " " + valueText', app_js)
 
 
 class CommandAcknowledgementTest(unittest.TestCase):
