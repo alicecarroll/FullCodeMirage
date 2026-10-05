@@ -266,13 +266,13 @@ bool thermal_receive_big_packet(
             dataArray[i].duty_cycle=data[5*i+1];
             dataArray[i].error=data[5*i+2]; ///Check if its 0-100 or 155-255
             dataArray[i].target=static_cast<int16_t>(static_cast<uint16_t>(data[5*i+3]) << 8 | static_cast<uint16_t>(data[5*i+4]))/100.0f;
-            ESP_LOGW("Slaves", "Feedback from thermal slave - Channel: %u, Mode: %u, Power: %u, Target: %f, Error: %u,Global Error: %u, ",
-            i, 
-            dataArray[i].mode,
-            dataArray[i].duty_cycle,
-            dataArray[i].target,
-            dataArray[i].error,
-            dataArray[i].global_error);
+            // ESP_LOGW("Slaves", "Feedback from thermal slave - Channel: %u, Mode: %u, Power: %u, Target: %f, Error: %u,Global Error: %u, ",
+            // i, 
+            // dataArray[i].mode,
+            // dataArray[i].duty_cycle,
+            // dataArray[i].target,
+            // dataArray[i].error,
+            // dataArray[i].global_error);
         }
         return false; 
     }
