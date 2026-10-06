@@ -45,6 +45,8 @@ extern "C"
     bool sd_is_mounted(void);
     bool sd_get_free_percent(uint8_t *free_percent);
     void buffer_SD_data_csv(MainSystemStatusPacket *system_status_packet);//SensorData *sensor_data);
+    bool sd_apply_datetime_response(const char *response);
+    bool sd_datetime_is_synchronized(void);
     //void log_metadata(MetaData *meta_data);
     void buffer_SD_data_flush(void);
 

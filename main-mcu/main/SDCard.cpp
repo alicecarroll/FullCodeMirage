@@ -55,38 +55,162 @@ static size_t SD_buffer_offset2 = 0;
 
 static sdmmc_card_t *s_card = NULL;
 static bool s_mounted = false;
-static char current_csv_filename[56] = "";
-static char current_metadata_filename[56] = "";
+static char current_csv_filename[64] = "";
+static char current_metadata_filename[64] = "";
+static int64_t first_entry_time_us = -1;
+static bool datetime_synchronized = false;
 
 //SensorData *sensor_datas;
 
-static void create_timestamped_filename(const char *prefix,
-                                       char *buffer,
-                                       size_t buffer_size,
-                                       SensorData *sensor_data,
-                                       const char *extension)
+static void create_generic_filename(const char *prefix,
+                                    char *buffer,
+                                    size_t buffer_size,
+                                    const char *extension)
 {
-    
-    //time_t now = time(NULL);
-    //struct tm timeinfo;
-    //localtime_r(&now, &timeinfo);
-
     snprintf(buffer, buffer_size,
-             "%s_%02u%02u%02u%s",
-             prefix,
-             sensor_data->hours,
-             sensor_data->minutes,
-             sensor_data->seconds,
-             extension);
+             "%s_noDateTimeInformation%s", prefix, extension);
 }
 
 static void create_unique_csv_filename(void)
 {
-    create_timestamped_filename("sensor_data", current_csv_filename, sizeof(current_csv_filename), &sensor_data, ".csv");
+    create_generic_filename("sensor_data", current_csv_filename, sizeof(current_csv_filename), ".csv");
 }
 static void create_unique_metadata_filename(void)
 {
-    create_timestamped_filename("metadata", current_metadata_filename, sizeof(current_metadata_filename), &sensor_data, ".log");
+    create_generic_filename("metadata", current_metadata_filename, sizeof(current_metadata_filename), ".log");
+}
+
+static void create_datetime_filename(const char *prefix,
+                                     char *buffer,
+                                     size_t buffer_size,
+                                     const struct tm *datetime,
+                                     const char *extension)
+{
+    // FAT filenames cannot contain ':', so use hyphens in the time portion.
+    snprintf(buffer, buffer_size,
+             "%s_%02d-%02d-%04dT%02d-%02d-%02d%s",
+             prefix,
+             datetime->tm_mday,
+             datetime->tm_mon + 1,
+             datetime->tm_year + 1900,
+             datetime->tm_hour,
+             datetime->tm_min,
+             datetime->tm_sec,
+             extension);
+}
+
+static bool is_leap_year(int year)
+{
+    return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+}
+
+static void subtract_seconds(struct tm *datetime, uint32_t seconds)
+{
+    while (seconds > 0) {
+        if (datetime->tm_sec > 0) {
+            const uint32_t seconds_to_subtract = seconds < static_cast<uint32_t>(datetime->tm_sec)
+                                                     ? seconds
+                                                     : static_cast<uint32_t>(datetime->tm_sec);
+            datetime->tm_sec -= static_cast<int>(seconds_to_subtract);
+            seconds -= seconds_to_subtract;
+            continue;
+        }
+
+        datetime->tm_sec = 59;
+        if (datetime->tm_min > 0) {
+            --datetime->tm_min;
+        } else {
+            datetime->tm_min = 59;
+            if (datetime->tm_hour > 0) {
+                --datetime->tm_hour;
+            } else {
+                datetime->tm_hour = 23;
+                if (datetime->tm_mday > 1) {
+                    --datetime->tm_mday;
+                } else {
+                    if (datetime->tm_mon > 0) {
+                        --datetime->tm_mon;
+                    } else {
+                        datetime->tm_mon = 11;
+                        --datetime->tm_year;
+                    }
+                    static const uint8_t days_in_month[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+                    datetime->tm_mday = days_in_month[datetime->tm_mon];
+                    if (datetime->tm_mon == 1 && is_leap_year(datetime->tm_year + 1900)) {
+                        ++datetime->tm_mday;
+                    }
+                }
+            }
+        }
+        --seconds;
+    }
+}
+
+static bool rename_current_file(const char *old_name, const char *new_name)
+{
+    char old_path[SD_MAX_PATH_LEN];
+    char new_path[SD_MAX_PATH_LEN];
+    const int old_length = snprintf(old_path, sizeof(old_path), "%s/%s", SD_MOUNT_POINT, old_name);
+    const int new_length = snprintf(new_path, sizeof(new_path), "%s/%s", SD_MOUNT_POINT, new_name);
+    if (old_length < 0 || new_length < 0 ||
+        static_cast<size_t>(old_length) >= sizeof(old_path) ||
+        static_cast<size_t>(new_length) >= sizeof(new_path)) {
+        return false;
+    }
+    return rename(old_path, new_path) == 0;
+}
+
+bool sd_apply_datetime_response(const char *response)
+{
+    if (!s_mounted || datetime_synchronized || first_entry_time_us < 0 || response == nullptr) {
+        return false;
+    }
+
+    struct tm received_datetime = {};
+    if (sscanf(response, "DATETIME_RESPONSE:%d-%d-%dT%d:%d:%d",
+               &received_datetime.tm_year,
+               &received_datetime.tm_mon,
+               &received_datetime.tm_mday,
+               &received_datetime.tm_hour,
+               &received_datetime.tm_min,
+               &received_datetime.tm_sec) != 6) {
+        return false;
+    }
+    received_datetime.tm_year -= 1900;
+    --received_datetime.tm_mon;
+    if (received_datetime.tm_mon < 0 || received_datetime.tm_mon > 11 ||
+        received_datetime.tm_mday < 1 || received_datetime.tm_mday > 31 ||
+        received_datetime.tm_hour < 0 || received_datetime.tm_hour > 23 ||
+        received_datetime.tm_min < 0 || received_datetime.tm_min > 59 ||
+        received_datetime.tm_sec < 0 || received_datetime.tm_sec > 59) {
+        return false;
+    }
+
+    const int64_t elapsed_us = esp_timer_get_time() - first_entry_time_us;
+    subtract_seconds(&received_datetime, static_cast<uint32_t>(elapsed_us / 1000000));
+
+    char new_csv_filename[sizeof(current_csv_filename)];
+    char new_metadata_filename[sizeof(current_metadata_filename)];
+    create_datetime_filename("sensor_data", new_csv_filename, sizeof(new_csv_filename), &received_datetime, ".csv");
+    create_datetime_filename("metadata", new_metadata_filename, sizeof(new_metadata_filename), &received_datetime, ".log");
+
+    buffer_SD_data_flush();
+    if (!rename_current_file(current_csv_filename, new_csv_filename) ||
+        !rename_current_file(current_metadata_filename, new_metadata_filename)) {
+        ESP_LOGE(TAG, "Failed to rename generic SD files after datetime synchronization");
+        return false;
+    }
+
+    snprintf(current_csv_filename, sizeof(current_csv_filename), "%s", new_csv_filename);
+    snprintf(current_metadata_filename, sizeof(current_metadata_filename), "%s", new_metadata_filename);
+    datetime_synchronized = true;
+    ESP_LOGI(TAG, "SD files synchronized to first entry timestamp: %s", current_csv_filename);
+    return true;
+}
+
+bool sd_datetime_is_synchronized(void)
+{
+    return datetime_synchronized;
 }
 /*
 //
@@ -209,6 +333,10 @@ void buffer_SD_data_csv(MainSystemStatusPacket *system_status_packet)//SensorDat
         return;
     }
     SensorData *sensor_datas = &system_status_packet->sensor_data;
+
+    if (first_entry_time_us < 0) {
+        first_entry_time_us = esp_timer_get_time();
+    }
 
     if (sensor_datas == NULL) return;
 
@@ -470,6 +598,8 @@ esp_err_t sd_mount(void)
     }
 
     s_mounted = true;
+    first_entry_time_us = -1;
+    datetime_synchronized = false;
     create_unique_csv_filename();
     create_unique_metadata_filename();
     esp_err_t csv_err = create_new_csv_file();
@@ -631,6 +761,8 @@ esp_err_t sd_wipe_files(void)
     SD_buffer_offset2 = 0;
     current_csv_filename[0]      = '\0';
     current_metadata_filename[0] = '\0';
+    first_entry_time_us = -1;
+    datetime_synchronized = false;
     create_new_csv_file();
     create_new_metadata_log();
     if (failed > 0)
