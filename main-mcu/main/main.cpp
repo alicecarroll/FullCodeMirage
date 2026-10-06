@@ -1321,7 +1321,7 @@ void loop()
     // Delay only the remaining time so the full loop period stays near 1 second.
     TickType_t current_time_stop = xTaskGetTickCount();
     TickType_t elapsed_ticks = current_time_stop - current_time_start;
-    TickType_t target_period_ticks = pdMS_TO_TICKS(1000);
+    TickType_t target_period_ticks = pdMS_TO_TICKS(200);
     if (elapsed_ticks < target_period_ticks)
     {
         time_loop = static_cast<uint16_t>(target_period_ticks - elapsed_ticks);
