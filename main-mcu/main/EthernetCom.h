@@ -75,7 +75,7 @@ extern "C"
      * @return ESP_OK if already connected or successfully reconnected,
      *         or an esp_err_t on error.
      */
-    esp_err_t wiz_ensure_connected(uint8_t *ip, uint16_t port);
+    esp_err_t wiz_ensure_connected(uint8_t *ip, uint16_t port, bool system_ok);
 
     /**
      * @brief  Send an ICMP Echo Request and return IMMEDIATELY.

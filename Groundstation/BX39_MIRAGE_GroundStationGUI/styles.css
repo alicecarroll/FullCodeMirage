@@ -545,6 +545,8 @@ h3 {
 .ambient-pressure { background: #b589ff; }
 .chamber-temp { background: #ff9f57; }
 .SD-temp { background: #ffeb68; }
+.outlet-temp { background: #940494; }
+.inlet-temp { background: #fa04fa; }
 .ambient-humidity { background: #7fd4ff; }
 .humidity-k96 { background: #548eab; }
 .temperature-sht45 { background: #d4a260; }
