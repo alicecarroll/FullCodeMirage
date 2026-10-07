@@ -9,8 +9,6 @@
 #include "esp_timer.h"
 #include "i2c_com.h"
 
-// Things that should be sent to main MCU: Modes of all pin ie Pin1 manual, pin2
-// PID et.
 
 // Things main MCU should be able to send. Sensor data for all sensors.
 
@@ -18,15 +16,10 @@
 class Controller {
 public:
   virtual float
-  update(float desired_value, float meas,
-         float dutyCycle) = 0; // Dutycycle only used for manual mode. Its an
-                               // extra variable to prevent sending bad data in
-                               // case of wrong mode being on
+  update(float desired_value, float meas, float dutyCycle) = 0; // Dutycycle only used for manual mode. Its an extra variable to prevent sending bad data in case of wrong mode being on
   virtual void reset() = 0;
 };
 
-// Fix bang bang such that it has proper deadzon (current deadzone is not
-// correct)
 class Bang : public Controller // ON/OFF controller
 {
 private:
@@ -369,18 +362,22 @@ void control_loop(void *pvParameters) {
   int64_t current_time = esp_timer_get_time();
   int64_t last_recieved_time = esp_timer_get_time();
   int64_t last_comtroller_activation = esp_timer_get_time();
+
+  int64_t last_recieved_first_switch =esp_timer_get_time(); //These two are used to determine when a write operations will occur
+  int64_t last_recieved_last_switch =esp_timer_get_time();
+
+  int64_t temp_error_check_timer=esp_timer_get_time();
+
+  int64_t delta=1000000;
   // Used for sending data back to master
   uint8_t error[number_switches] = {};
   uint8_t lastSwitch = 7;
   bool newData = false;
+  bool allowSend=false;
+  
 
   static uint8_t dataBuffer[8];
-  individual_switch_data_tx sendPacket = {.switchID = 8,
-                                          .mode = 155,
-                                          .D_cycle = 100,
-                                          .target = -99.0f,
-                                          .status = 0,
-                                          .global_mode = 0x01};
+  individual_switch_data_tx sendPacket[8]; 
 
   for (int i = 0; i < number_switches; i++) {
     
@@ -436,6 +433,7 @@ void control_loop(void *pvParameters) {
           
         } else {
           // error case mode is in range from 2-154
+          error[lastSwitch]=2;
           break;
         }
         controllerData[recievedData.switchID].last_updated =
@@ -458,32 +456,29 @@ void control_loop(void *pvParameters) {
         }
         all_switches_off = false;
         break;
+      default:
+        error[lastSwitch]=3;
+        break;
       }
     }
 
-    // Need to add if so that PID only triggers once every x ms (is dependant on
     // how often you get data but needs to be constant) Main control stuff
     // //TODO implement staggered dutyCycles
 
     // Loops through switches
-    if (current_time - last_comtroller_activation >
-        timestep_us) // Makes sure controllers arent running faster than once
-                     // every timestep us
+    if (current_time - last_comtroller_activation > timestep_us) // Makes sure controllers arent running faster than once every timestep us
     {
       last_comtroller_activation = esp_timer_get_time();
       for (int i = 0; i < number_switches; i++) {
-
-        // If timeout or off set dutycycle to 0 else call controller class and
-        // set dutycycle
-        if ((current_time - last_recieved_time) >
-                control_timeout_us || // Global i2c timeout no packat has been
-                                      // recieved in a while
-            (current_time - controllerData[i].last_updated) >
-                control_timeout_us || // Local timeout no data for this switch
-                                      // has been recieved
-            // controllerData[i].last_updated==0 ||
-            all_switches_off // All switches off
+        // If timeout or off set dutycycle to 0 else call controller class and set dutycycle
+        if ((current_time - last_recieved_time) > control_timeout_us || // Global i2c timeout no packat has been recieved in a while
+            (current_time - controllerData[i].last_updated) > control_timeout_us // Local timeout no data for this switch has been recieved controllerData[i].last_updated==0 ||
         ) {                  // Error case/Off case
+          error[lastSwitch]=5;
+          controllerData[i].duty_cycle = 0;
+        }
+        else if(all_switches_off){
+          error[lastSwitch]=6;
           controllerData[i].duty_cycle = 0;
         }
         // This is a case in case that temperature is out of bounds ie assuming
@@ -495,6 +490,7 @@ void control_loop(void *pvParameters) {
                  controllerData[i].temperature ==
                      -99.0f) // Idunno i believe its error code
         {
+          error[lastSwitch]=4;
           controllerData[i].duty_cycle = 0;
         } else {
           //ESP_LOGI("Control:", "Normal case");
@@ -505,10 +501,10 @@ void control_loop(void *pvParameters) {
         //ESP_LOGI("Control:", "Switch: %d,  Mode: %d, DutyCycle %d", i, controllerData[i].mode, controllerData[i].duty_cycle);
         
       }
-      ESP_LOGI("Control:", "Switch 2. Mode: %d, DutyCycle: %d Target %g, Temperature %g", controllerData[2].mode, 
-        controllerData[2].duty_cycle,
-        controllerData[2].target,
-        controllerData[2].temperature);
+      // ESP_LOGI("Control:", "Switch 2. Mode: %d, DutyCycle: %d Target %g, Temperature %g", controllerData[2].mode, 
+      //   controllerData[2].duty_cycle,
+      //   controllerData[2].target,
+      //   controllerData[2].temperature);
     }
 
     // sets level of output pins
@@ -520,42 +516,71 @@ void control_loop(void *pvParameters) {
     }
 
     // Packet with data to send
-    sendPacket = {
-        .switchID = lastSwitch,
-        .mode = controllerData[lastSwitch].mode,
-        .D_cycle = controllerData[lastSwitch].duty_cycle,
-        .target = controllerData[lastSwitch].target,
-        .status = error[lastSwitch], // Fix so this error thing actually does its job
+    uint8_t switch_size=5;
+    uint8_t data[8*switch_size+1];
+    for(uint8_t i=0;i<number_switches;i++) //Packs data into large packet to be sent to main MCU
+    {
+      sendPacket[i]={
+        .switchID = i,
+        .mode = controllerData[i].mode,
+        .D_cycle = controllerData[i].duty_cycle,
+        .target = controllerData[i].target,
+        .status = error[i], // Fix so this error thing actually does its job
                                // should be done with giving error corresponding
                                // with numbers 2^x and then using or on error ie
                                // error1 |error2 (basically does the same as
                                // adding them but with safety)
         .global_mode = 0x00};
 
-    if (all_switches_off) {
-      sendPacket.global_mode = packet_stop_all;
-    } else if (recievedData.regist == packet_resume_all) {
-      sendPacket.global_mode = packet_resume_all;
-    } else if (recievedData.regist == packet_type_indvidual_switch) {
-      sendPacket.global_mode = packet_type_indvidual_switch;
-    } else {
-      sendPacket.global_mode = 0;
+      if (all_switches_off) {
+        sendPacket[i].global_mode = packet_stop_all;
+      } else if (recievedData.regist == packet_resume_all) {
+        sendPacket[i].global_mode = packet_resume_all;
+      }else if (recievedData.regist == packet_type_indvidual_switch) {
+        sendPacket[i].global_mode = packet_type_indvidual_switch;
+      } else {
+        sendPacket[i].global_mode = 0;
+      }
+
+      int16_t target_int = static_cast<int16_t>(sendPacket[i].target* 100.0f); // Keep in mind that code will not work for numbers above 320C or below -320C due to limits of int16
+      uint16_t unsigned_target = static_cast<uint16_t>(target_int);
+      data[i*switch_size] = sendPacket[i].mode;
+      data[i*switch_size+1]=sendPacket[i].D_cycle;
+      data[i*switch_size+2]=sendPacket[i].status;
+      data[i*switch_size+3]=static_cast<uint8_t>((unsigned_target >> 8) & 0xFF); // msb
+      data[i*switch_size+4]=static_cast<uint8_t>(((unsigned_target) & 0xFF)); // msb
+    }
+    data[8*switch_size]=computeCRC8(data,8*switch_size);
+
+
+
+    if(newData && lastSwitch==0) //This is to make the proper timing for sending data to make sure the tx buffer isn't wiping itself
+    {
+      last_recieved_first_switch=esp_timer_get_time();
+      delta=last_recieved_first_switch-last_recieved_last_switch;
+      //ESP_LOGI("Control", "lastswitch 1111");
+      newData=false;
+    }
+    else if(newData && lastSwitch==7)
+    {
+      last_recieved_last_switch=esp_timer_get_time();
+      newData=false;
+      allowSend=true;
+      //ESP_LOGI("Control", "lastswitch 7777");
+    }
+    else{
+      newData=false;
     }
 
-    data_pack_indvidual_switch(&sendPacket, dataBuffer);
-    i2c_data_evt send;
-    send.length = 8;
-
-    memcpy(send.data, dataBuffer, send.length);
-
-    // should be if newdata changed for finding errors
-    //  if(
-    //    newData || // Makes sure that the buffer will have semi_recent data
-    //    first_loop) //Makes sure that the buffer always has data
-    if (true) {
-      xQueueOverwrite(dataQueue_slave_tx, &send); // Writes to send task
+    
+    if(delta/4+last_recieved_last_switch<current_time && allowSend){ //Send function 1/4 * timeS0-timeS7 <currenttime
+      xQueueOverwrite(dataQueue_slave_tx, &data); // Writes to send task
+      //ESP_LOGI("Control", "delta val %" PRId64, delta);
       newData = false;
+      allowSend=false;
     }
+    
+
 
     first_loop = false;
   }
