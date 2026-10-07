@@ -5,8 +5,6 @@
 #include <cstdio>
 #include <cctype>
 #include <cmath>
-#include <cerrno>
-#include <cstdlib>
 #include <forward_list>
 #include <limits>
 
@@ -43,7 +41,7 @@ uint16_t time_loop;
 int mode = 1;//DEFAULT_MODE; // 1
 
 // Watchdog
-bool system_ok = true;
+bool system_ok;
 
 // Watchdog variables for tracking slave pings locally inside the loop
 #define SLAVE_WATCHDOG_TIMEOUT_MS 5000
@@ -95,7 +93,6 @@ float min_inlet_temperature_threshold = INLET_TEMPERATURE_THRESHOLD; // Minimum 
 
 static bool reset_overrides(const std::string &target);
 static bool reset_thresholds(const std::string &target);
-static bool set_threshold(const std::string &target, const std::string &value);
 
 
 struct QueuedPressureCommand {
@@ -421,22 +418,6 @@ bool handle_command()
         return false;
     }
 
-    constexpr char SET_THRESHOLD_PREFIX[] = "SET THRESHOLD ";
-    if (ethernet_command_text.rfind(SET_THRESHOLD_PREFIX, 0) == 0)
-    {
-        const std::string arguments = ethernet_command_text.substr(sizeof(SET_THRESHOLD_PREFIX) - 1);
-        const size_t separator = arguments.find(' ');
-        if (separator == std::string::npos ||
-            !set_threshold(arguments.substr(0, separator), arguments.substr(separator + 1)))
-        {
-            ESP_LOGW(TAG, "Invalid threshold update command: %s", ethernet_command_text.c_str());
-            return false;
-        }
-        ESP_LOGI(TAG, "Threshold %.*s updated to %s",
-                 static_cast<int>(separator), arguments.c_str(), arguments.c_str() + separator + 1);
-        return true;
-    }
-
     if (ethernet_command_text == "K96 ON")
     {
         k96_manual_override = true;
@@ -502,6 +483,7 @@ bool handle_command()
 
 static esp_err_t send_system_status_packet()
 {
+
     MainSystemStatusPacket system_status_packet  = {};
     system_status_packet.sensor_data = sensor_data;
     system_status_packet.operating_mode = static_cast<uint8_t>(mode);
@@ -510,10 +492,23 @@ static esp_err_t send_system_status_packet()
     system_status_packet.status_ok = status_ok ? 1 : 0;
     system_status_packet.pressure_system_on = pressure_system_active ? 1 : 0;
     system_status_packet.k96_on = K96_is_on() ? 1 : 0;
-    system_status_packet.heater_mask = active_heater_mask;
+
+    for(int i=0; i<number_channels_thermal; i++){ //adds the dutycycles to the groundstation array
+        system_status_packet.thermal_heater_duty_cycle[i]=thermal_data_received_array[i].duty_cycle;
+    }
+
+
     system_status_packet.thermal_online = thermal_status.online ? 1 : 0;
     system_status_packet.thermal_state = thermal_status.state;
-    system_status_packet.thermal_error = thermal_status.error;
+
+    for(int i=0; i<number_channels_thermal; i++){ //adds the errors to the groundstation array
+        system_status_packet.thermal_error[i] = thermal_data_received_array[i].error;
+    }
+
+    if(thermal_data_received_array[0].global_error!=0){ //The first element of array shows if global error if error[0]//10==1 => no i2c and error[0]//10==2 0=> crc8 error
+        system_status_packet.thermal_error[0]=thermal_data_received_array[0].global_error*10;
+    }
+
     system_status_packet.pressure_state = pressure_status.state;
     system_status_packet.pressure_error = pressure_status.error_code;
     system_status_packet.pressure_relay_mask = pressure_status.relay_mask & 0x0F;
@@ -616,9 +611,13 @@ int16_t thermal_target=2000;
 #define THERMAL_WATCHDOG_TOL 3000
 int16_t thermal_watchdog_tolerance = THERMAL_WATCHDOG_TOL; // 1 according to SEDv3. Number of subsequent times where the thermal slave is reset. If reset more than this number of times, the thermal MCU will be considered lost.
 bool thermal_mcu_lost=false; // To track if the thermal slave is lost.
-
-//Data recieved from thermal this struct is defined under slaves.h For errors 0 is thats ok anything else is error
-ThermalDataValues thermal_data_received_array[8];
+//Data recieved from thermal
+uint8_t received_channel_id_thermal; //Reason i seperate recieved and sent is to be able to compare later if data packet made it
+uint8_t received_mode_thermal;
+uint8_t received_power_thermal;
+uint16_t received_target_thermal;
+uint8_t status_thermal;
+uint8_t error_thermal;
 int16_t thermal_current_temperatures[8];
 
 // The chamber heater is controlled from the two K96 NTCs. Do not pass an
@@ -651,11 +650,11 @@ static int16_t chamber_heater_temperature(const SensorData &sensor_data)
 static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_ms){
     uint8_t chosen_channel_id_thermal=0x00; //0x00- 0x07
     //temperature array used for temperature data for thermal
-    thermal_current_temperatures[0] = static_cast<int16_t>(std::lround(sensor_data.Tt2 * 100.0f)); //SD-card heater
+    thermal_current_temperatures[0] = static_cast<int16_t>(std::lround(sensor_data.Tt2 * 100.0f));
     // H2 / channel 1: chamber heater, referenced to the average K96 NTC0/NTC1.
     thermal_current_temperatures[1] = chamber_heater_temperature(sensor_data);
-    thermal_current_temperatures[2] = static_cast<int16_t>(std::lround(sensor_data.Tp3 * 100.0f)); //Outlet
-    thermal_current_temperatures[3] = static_cast<int16_t>(std::lround(sensor_data.Tt3 * 100.0f)); //Inlet
+    thermal_current_temperatures[2] = static_cast<int16_t>(std::lround(sensor_data.Tp3 * 100.0f));
+    thermal_current_temperatures[3] = static_cast<int16_t>(std::lround(sensor_data.Tt3 * 100.0f));
     thermal_current_temperatures[4] = static_cast<int16_t>(std::lround(sensor_data.Tp5 * 100.0f));
     thermal_current_temperatures[5] = static_cast<int16_t>(std::lround(sensor_data.Tp6 * 100.0f));
     thermal_current_temperatures[6] = static_cast<int16_t>(std::lround(sensor_data.Tt1 * 100.0f));
@@ -675,23 +674,24 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
 
     if (thermal_tx_ok)
     {
-        if (thermal_receive_big_packet(
-            thermal_mcu,
-            thermal_data_received_array
-        ))
+        if (thermal_test_receive_package(  //when passing variable to this one remember to pass as &channel_id for all pointer
+    thermal_mcu,
+    &received_channel_id_thermal,
+    &received_mode_thermal,
+    &received_power_thermal,
+    &received_target_thermal,
+    &status_thermal,
+    &error_thermal))
         {
             //Info recieved from thermal Used for trouble-shooting
             last_thermal_ping_time = current_time_ms;
-            for(int i=0;i<8;i++){
-            ESP_LOGI(TAG, "Feedback from thermal slave - Channel: %u, Mode: %u, Power: %u, Target: %f, Error: %u,Global Error: %u, ",
-            i, 
-            thermal_data_received_array[i].mode,
-            thermal_data_received_array[i].duty_cycle,
-            thermal_data_received_array[i].target,
-            thermal_data_received_array[i].error,
-            thermal_data_received_array[i].global_error);
-            }
-            
+            ESP_LOGI(TAG, "Feedback from thermal slave - Channel: %u, Mode: %u, Power: %u, Target: %u, Status: %u, Error: %u",
+            received_channel_id_thermal, 
+            received_mode_thermal,
+            received_power_thermal,
+            received_target_thermal,
+            status_thermal,
+            error_thermal);
         }
         else
         {
@@ -855,85 +855,16 @@ static bool reset_thresholds(const std::string &target)
     return true;
 }
 
-static bool set_threshold(const std::string &target, const std::string &value)
-{
-    char *end = nullptr;
-    errno = 0;
-
-    if (target == "MAX_PRESSURE" || target == "CHAMBER_PRESSURE" ||
-        target == "INLET_TEMPERATURE")
-    {
-        const float parsed = std::strtof(value.c_str(), &end);
-        if (errno == ERANGE || end == value.c_str() || *end != '\0' || !std::isfinite(parsed))
-            return false;
-
-        if (target == "MAX_PRESSURE")
-        {
-            if (parsed < 0.0f || parsed > 1000.0f) return false;
-            max_pressure_threshold = parsed;
-        }
-        else if (target == "CHAMBER_PRESSURE")
-        {
-            if (parsed < 0.0f || parsed > 1000.0f) return false;
-            max_chamber_pressure_threshold = parsed;
-        }
-        else
-        {
-            if (parsed < -100.0f || parsed > 200.0f) return false;
-            min_inlet_temperature_threshold = parsed;
-        }
-        return true;
-    }
-
-    const long parsed = std::strtol(value.c_str(), &end, 10);
-    if (errno == ERANGE || end == value.c_str() || *end != '\0')
-        return false;
-
-    if (target == "CONNECTION_LOSS")
-    {
-        if (parsed < 0 || parsed > std::numeric_limits<int>::max()) return false;
-        max_loops_without_connection = static_cast<int>(parsed);
-    }
-    else if (target == "WATCHDOG_TIMEOUT")
-    {
-        if (parsed < 1 || parsed > std::numeric_limits<uint16_t>::max()) return false;
-        current_slave_watchdog_timeout = static_cast<uint16_t>(parsed);
-    }
-    else if (target == "THERMAL_WATCHDOG_TOLERANCE")
-    {
-        if (parsed < 1 || parsed > std::numeric_limits<int16_t>::max()) return false;
-        thermal_watchdog_tolerance = static_cast<int16_t>(parsed);
-    }
-    else if (target == "PRESSURE_WATCHDOG_TOLERANCE")
-    {
-        if (parsed < 1 || parsed > std::numeric_limits<int16_t>::max()) return false;
-        pressure_watchdog_tolerance = static_cast<int16_t>(parsed);
-    }
-    else if (target == "RETRY_INTERVAL")
-    {
-        if (parsed < 1 || parsed > std::numeric_limits<int32_t>::max()) return false;
-        loop_retry_connection = static_cast<int32_t>(parsed);
-    }
-    else
-    {
-        return false;
-    }
-
-    return true;
-}
-
 // ESP-IDF expects main in C
 extern "C" void app_main()
 {
     init_gpio_pins();
-    feed_watchdog(system_ok);
     init_spi();
     wiz_init();
     // Try to establish Ethernet for 5 seconds before proceeding. This is to ensure that the system can still run even if Ethernet is not available.
     TickType_t start_time = xTaskGetTickCount();
     while ((xTaskGetTickCount() - start_time) < pdMS_TO_TICKS(5000) && !wizphy_getphylink()){
         ESP_LOGW(TAG, "Ethernet link not established yet. Retrying...");
-        feed_watchdog(system_ok);
         vTaskDelay(pdMS_TO_TICKS(500));
     }
         
@@ -957,7 +888,7 @@ extern "C" void app_main()
     //wiz_connect(targetip, REMOTE_PORT);
     setSn_IR(WIZ_SOCKET, Sn_IR_CON);
 
-    wiz_ensure_connected(targetip, REMOTE_PORT, system_ok);
+    wiz_ensure_connected(targetip, REMOTE_PORT);
     wiz_ping(targetip, "h\n");
 
     // Set baseline slave watchdog timestamps here, AFTER Ethernet blocks!
@@ -978,7 +909,7 @@ void loop()
     TickType_t current_time_start = xTaskGetTickCount();
     uint32_t current_time_ms = current_time_start * portTICK_PERIOD_MS;
     status_packet_sent_this_loop = false; // Could be removed
-    feed_watchdog(system_ok);
+    //feed_watchdog(system_ok);
     //wiz_connect(targetip, REMOTE_PORT);
 
 
@@ -1316,7 +1247,7 @@ void loop()
     // Delay only the remaining time so the full loop period stays near 1 second.
     TickType_t current_time_stop = xTaskGetTickCount();
     TickType_t elapsed_ticks = current_time_stop - current_time_start;
-    TickType_t target_period_ticks = pdMS_TO_TICKS(200);
+    TickType_t target_period_ticks = pdMS_TO_TICKS(1000);
     if (elapsed_ticks < target_period_ticks)
     {
         time_loop = static_cast<uint16_t>(target_period_ticks - elapsed_ticks);
