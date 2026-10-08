@@ -767,6 +767,110 @@ lydiatestingstyle {
   white-space: nowrap;
 }
 
+.reset-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 8px;
+}
+
+.reset-checkbox-grid label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 3px 6px;
+  min-width: 0;
+  padding: 5px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.reset-checkbox-grid label:hover,
+.reset-checkbox-grid label:focus-within {
+  background: #242a23;
+}
+
+.reset-checkbox-grid input {
+  grid-row: span 2;
+  accent-color: var(--accent);
+}
+
+.reset-checkbox-grid span {
+  min-width: 0;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.reset-checkbox-grid small {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.reset-apply {
+  width: 100%;
+  min-height: 34px;
+  margin-top: 8px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: #242a23;
+  color: var(--text);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.reset-apply:hover,
+.reset-apply:focus-visible {
+  background: var(--accent);
+  color: #111;
+  outline: none;
+}
+
+.threshold-note {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.threshold-value-grid {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(90px, 0.7fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.threshold-value-grid label {
+  min-width: 0;
+  color: var(--text);
+  font-size: 0.75rem;
+}
+
+.threshold-value-grid input {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: 5px 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background: #10130f;
+  color: var(--text);
+}
+
+.threshold-value-grid button {
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background: #242a23;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.threshold-value-grid button:hover,
+.threshold-value-grid button:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
 .command-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

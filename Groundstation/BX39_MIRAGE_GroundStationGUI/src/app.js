@@ -419,6 +419,53 @@
     });
   });
 
+    const RESET_COMMAND_OPTIONS = {
+    overrides: [
+      { commandId: "resetOverrideAll", target: "ALL", label: "reset all overrides", wireCommand: "RESET OVERRIDE ALL" },
+      { commandId: "resetOverrideMode", target: "MODE", label: "reset mode override", wireCommand: "RESET OVERRIDE MODE" },
+      { commandId: "resetOverrideK96", target: "K96", label: "reset K96 override", wireCommand: "RESET OVERRIDE K96" },
+      { commandId: "resetOverrideHeaters", target: "HEATERS", label: "reset heater overrides", wireCommand: "RESET OVERRIDE HEATERS" }
+    ],
+    thresholds: [
+      { commandId: "resetThresholdAll", target: "ALL", label: "reset all thresholds", wireCommand: "RESET THRESHOLD ALL" },
+      { commandId: "resetThresholdMaxPressure", target: "MAX_PRESSURE", label: "reset flight pressure threshold", wireCommand: "RESET THRESHOLD MAX_PRESSURE" },
+      { commandId: "resetThresholdConnectionLoss", target: "CONNECTION_LOSS", label: "reset connection-loss threshold", wireCommand: "RESET THRESHOLD CONNECTION_LOSS" },
+      { commandId: "resetThresholdChamberPressure", target: "CHAMBER_PRESSURE", label: "reset chamber-pressure threshold", wireCommand: "RESET THRESHOLD CHAMBER_PRESSURE" },
+      { commandId: "resetThresholdInletTemperature", target: "INLET_TEMPERATURE", label: "reset inlet-temperature threshold", wireCommand: "RESET THRESHOLD INLET_TEMPERATURE" },
+      { commandId: "resetThresholdWatchdogTimeout", target: "WATCHDOG_TIMEOUT", label: "reset watchdog timeout", wireCommand: "RESET THRESHOLD WATCHDOG_TIMEOUT" },
+      { commandId: "resetThresholdThermalTolerance", target: "THERMAL_WATCHDOG_TOLERANCE", label: "reset thermal watchdog tolerance", wireCommand: "RESET THRESHOLD THERMAL_WATCHDOG_TOLERANCE" },
+      { commandId: "resetThresholdPressureTolerance", target: "PRESSURE_WATCHDOG_TOLERANCE", label: "reset pressure watchdog tolerance", wireCommand: "RESET THRESHOLD PRESSURE_WATCHDOG_TOLERANCE" },
+      { commandId: "resetThresholdRetryInterval", target: "RETRY_INTERVAL", label: "reset connection retry interval", wireCommand: "RESET THRESHOLD RETRY_INTERVAL" }
+    ]
+  };
+
+  Object.keys(RESET_COMMAND_OPTIONS).forEach(function (group) {
+    RESET_COMMAND_OPTIONS[group].forEach(function (option) {
+      COMMANDS[option.commandId] = {
+        label: option.label,
+        wireCommand: option.wireCommand,
+        aliases: [],
+        effect: function (sim) {
+          if (group === "overrides") {
+            if (option.target === "ALL" || option.target === "MODE") {
+              sim.manual_mode_overwrite = false;
+            }
+            if (option.target === "ALL" || option.target === "K96") {
+              sim.k96_manual_override = false;
+              sim.k96_manual_state = false;
+            }
+            if (option.target === "ALL" || option.target === "HEATERS") {
+              sim.heaterMask = 0;
+              sim.heatingEnabled = false;
+              sim.heaterSettings = {};
+            }
+          }
+          return option.label + " applied";
+        }
+      };
+    });
+  });
+
   const dom = {
     overallHealth: document.getElementById("overallHealth"),
     healthDetails: document.getElementById("healthDetails"),
@@ -1375,6 +1422,107 @@
         document.querySelectorAll("[data-heater-checkbox]").forEach(function (checkbox) {
           checkbox.checked = selectAll;
         });
+      });
+    });
+
+    document.querySelectorAll("[data-reset-select]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        const section = button.closest("[data-reset-section]");
+        const group = button.dataset.resetGroup;
+        const selectAll = button.dataset.resetSelect === "all";
+        section.querySelectorAll('[data-reset-checkbox="' + group + '"]').forEach(function (checkbox) {
+          checkbox.checked = selectAll;
+        });
+        section.querySelector('[data-reset-all="' + group + '"]').checked = false;
+      });
+    });
+
+    document.querySelectorAll("[data-reset-all]").forEach(function (checkbox) {
+      checkbox.addEventListener("change", function () {
+        if (!checkbox.checked) {
+          return;
+        }
+        const group = checkbox.dataset.resetAll;
+        checkbox.closest("[data-reset-section]").querySelectorAll('[data-reset-checkbox="' + group + '"]').forEach(function (individual) {
+          individual.checked = false;
+        });
+      });
+    });
+
+    document.querySelectorAll("[data-reset-checkbox]").forEach(function (checkbox) {
+      checkbox.addEventListener("change", function () {
+        if (checkbox.checked) {
+          const group = checkbox.dataset.resetCheckbox;
+          checkbox.closest("[data-reset-section]").querySelector('[data-reset-all="' + group + '"]').checked = false;
+        }
+      });
+    });
+
+    document.querySelectorAll("[data-reset-apply]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        const group = button.dataset.resetApply;
+        const section = button.closest("[data-reset-section]");
+        const allSelection = section.querySelector('[data-reset-all="' + group + '"]:checked');
+        const selected = Array.from(section.querySelectorAll('[data-reset-checkbox="' + group + '"]:checked'));
+        const commandIds = allSelection
+          ? [allSelection.dataset.resetCommandId]
+          : selected.map(function (checkbox) {
+            return checkbox.dataset.resetCommandId;
+          });
+
+        if (!commandIds.length) {
+          log.add("warn", "Reset command rejected", "Select one or more " + group + " to reset");
+          return;
+        }
+
+        const resetsHeaters = group === "overrides" && (
+          Boolean(allSelection) ||
+          selected.some(function (checkbox) {
+            return checkbox.dataset.resetCommandId === "resetOverrideHeaters";
+          })
+        );
+        if (resetsHeaters && !window.confirm("Resetting heater settings restores defaults and disables every heater. Continue?")) {
+          return;
+        }
+
+        button.disabled = true;
+        commandIds.reduce(function (chain, commandId) {
+          return chain.then(function () {
+            return sendCommand(commandId, "button");
+          });
+        }, Promise.resolve())
+          .catch(function () {
+            return undefined;
+          })
+          .finally(function () {
+            button.disabled = false;
+          });
+      });
+    });
+
+    document.querySelectorAll("[data-threshold-set]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        const input = document.getElementById(button.dataset.thresholdInput);
+        if (!input || input.value.trim() === "" || !input.reportValidity()) {
+          log.add("warn", "Threshold update rejected", "Enter a valid value within the field's allowed range");
+          return;
+        }
+
+        const value = Number(input.value);
+        if (!Number.isFinite(value)) {
+          log.add("warn", "Threshold update rejected", "Threshold values must be finite numbers");
+          return;
+        }
+
+        const commandId = registerThresholdValueCommand(button.dataset.thresholdSet, value);
+        button.disabled = true;
+        sendCommand(commandId, "button")
+          .catch(function () {
+            return undefined;
+          })
+          .finally(function () {
+            button.disabled = false;
+          });
       });
     });
 
