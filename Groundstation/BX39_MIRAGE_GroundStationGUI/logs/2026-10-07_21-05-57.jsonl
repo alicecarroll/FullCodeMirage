@@ -1,0 +1,12 @@
+{"capturedAt":"2026-10-07T21:05:57.941+02:00","event":"session","data":{"phase":"started"}}
+{"capturedAt":"2026-10-07T21:06:48.969+02:00","event":"connection","data":{"phase":"payload_connected","address":"192.168.0.2:5000"}}
+{"capturedAt":"2026-10-07T21:06:49.766+02:00","event":"connection","data":{"phase":"payload_disconnected"}}
+{"capturedAt":"2026-10-07T21:06:57.376+02:00","event":"connection","data":{"phase":"payload_connected","address":"192.168.0.2:5000"}}
+{"capturedAt":"2026-10-07T21:06:58.176+02:00","event":"connection","data":{"phase":"payload_disconnected"}}
+{"capturedAt":"2026-10-07T21:07:05.993+02:00","event":"connection","data":{"phase":"payload_connected","address":"192.168.0.2:5000"}}
+{"capturedAt":"2026-10-07T21:07:06.825+02:00","event":"connection","data":{"phase":"payload_disconnected"}}
+{"capturedAt":"2026-10-07T21:07:14.669+02:00","event":"connection","data":{"phase":"payload_connected","address":"192.168.0.2:5000"}}
+{"capturedAt":"2026-10-07T21:07:15.505+02:00","event":"connection","data":{"phase":"payload_disconnected"}}
+{"capturedAt":"2026-10-07T21:07:23.319+02:00","event":"connection","data":{"phase":"payload_connected","address":"192.168.0.2:5000"}}
+{"capturedAt":"2026-10-07T21:07:24.155+02:00","event":"connection","data":{"phase":"payload_disconnected"}}
+{"capturedAt":"2026-10-07T21:07:28.602+02:00","event":"session","data":{"phase":"stopped"}}

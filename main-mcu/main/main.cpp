@@ -86,6 +86,20 @@ static bool k96_manual_state = false;
 MainSystemStatusPacket system_status_packet = {};
 static HeaterSystem *heater_system = nullptr;
 
+//Values for thermal slave
+uint8_t number_channels_thermal=8;  //0-8 depending on the number of switches used
+//Variables for thermal under this comment will need to have value assigned in loop. Currently using placeholders (Remove comment when this has changed)
+uint8_t thermal_mode=1; //0 bang bang 1 PID 155-255 D_cycle
+int16_t thermal_currentTemp=2000; // 5000 = 50,0C  
+int16_t thermal_target=2000;
+int16_t thermal_watchdog_tolerance=3000; // 1 according to SEDv3. Number of subsequent times where the thermal slave is reset. If reset more than this number of times, the thermal MCU will be considered lost.
+bool thermal_mcu_lost=false; // To track if the thermal slave is lost.
+
+//Data recieved from thermal this struct is defined under slaves.h For errors 0 is thats ok anything else is error
+ThermalDataValues thermal_data_received_array[8];
+int16_t thermal_current_temperatures[8];
+
+
 struct QueuedPressureCommand {
     uint8_t command;
     uint8_t info;
@@ -448,7 +462,8 @@ bool handle_command()
 
 void log_system_status_packet()
 {
-    system_status_packet = {};
+
+    MainSystemStatusPacket system_status_packet  = {};
     system_status_packet.sensor_data = sensor_data;
     system_status_packet.operating_mode = static_cast<uint8_t>(mode);
     system_status_packet.command_received = command_received ? 1 : 0;
@@ -456,10 +471,23 @@ void log_system_status_packet()
     system_status_packet.status_ok = status_ok ? 1 : 0;
     system_status_packet.pressure_system_on = pressure_system_active ? 1 : 0;
     system_status_packet.k96_on = K96_is_on() ? 1 : 0;
-    system_status_packet.heater_mask = active_heater_mask;
+
+    for(int i=0; i<number_channels_thermal; i++){ //adds the dutycycles to the groundstation array
+        system_status_packet.thermal_heater_duty_cycle[i]=thermal_data_received_array[i].duty_cycle;
+    }
+
+
     system_status_packet.thermal_online = thermal_status.online ? 1 : 0;
     system_status_packet.thermal_state = thermal_status.state;
-    system_status_packet.thermal_error = thermal_status.error;
+
+    for(int i=0; i<number_channels_thermal; i++){ //adds the errors to the groundstation array
+        system_status_packet.thermal_error[i] = thermal_data_received_array[i].error;
+    }
+
+    if(thermal_data_received_array[0].global_error!=0){ //The first element of array shows if global error if error[0]//10==1 => no i2c and error[0]//10==2 0=> crc8 error
+        system_status_packet.thermal_error[0]=thermal_data_received_array[0].global_error*10;
+    }
+
     system_status_packet.pressure_state = pressure_status.state;
     system_status_packet.pressure_error = pressure_status.error_code;
     system_status_packet.pressure_relay_mask = pressure_status.relay_mask & 0x0F;
@@ -582,22 +610,6 @@ static void handle_ethernet_receive_status(esp_err_t esp_err_status)
     }
 }
 
-//Values for thermal slave
-uint8_t number_channels_thermal=8;  //0-8 depending on the number of switches used
-//Variables for thermal under this comment will need to have value assigned in loop. Currently using placeholders (Remove comment when this has changed)
-uint8_t thermal_mode=1; //0 bang bang 1 PID 155-255 D_cycle
-int16_t thermal_currentTemp=2000; // 5000 = 50,0C  
-int16_t thermal_target=2000;
-int16_t thermal_watchdog_tolerance=3000; // 1 according to SEDv3. Number of subsequent times where the thermal slave is reset. If reset more than this number of times, the thermal MCU will be considered lost.
-bool thermal_mcu_lost=false; // To track if the thermal slave is lost.
-//Data recieved from thermal
-uint8_t received_channel_id_thermal; //Reason i seperate recieved and sent is to be able to compare later if data packet made it
-uint8_t received_mode_thermal;
-uint8_t received_power_thermal;
-uint16_t received_target_thermal;
-uint8_t status_thermal;
-uint8_t error_thermal;
-int16_t thermal_current_temperatures[8];
 
 // The chamber heater is controlled from the two K96 NTCs. Do not pass an
 // invalid or stale chamber temperature to the thermal MCU: -99.00 C is its
@@ -629,11 +641,11 @@ static int16_t chamber_heater_temperature(const SensorData &sensor_data)
 static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_ms){
     uint8_t chosen_channel_id_thermal=0x00; //0x00- 0x07
     //temperature array used for temperature data for thermal
-    thermal_current_temperatures[0] = static_cast<int16_t>(std::lround(sensor_data.Tt2 * 100.0f));
+    thermal_current_temperatures[0] = static_cast<int16_t>(std::lround(sensor_data.Tt2 * 100.0f)); //SD-card heater
     // H2 / channel 1: chamber heater, referenced to the average K96 NTC0/NTC1.
     thermal_current_temperatures[1] = chamber_heater_temperature(sensor_data);
-    thermal_current_temperatures[2] = static_cast<int16_t>(std::lround(sensor_data.Tp3 * 100.0f));
-    thermal_current_temperatures[3] = static_cast<int16_t>(std::lround(sensor_data.Tt3 * 100.0f));
+    thermal_current_temperatures[2] = static_cast<int16_t>(std::lround(sensor_data.Tp3 * 100.0f)); //Outlet
+    thermal_current_temperatures[3] = static_cast<int16_t>(std::lround(sensor_data.Tt3 * 100.0f)); //Inlet
     thermal_current_temperatures[4] = static_cast<int16_t>(std::lround(sensor_data.Tp5 * 100.0f));
     thermal_current_temperatures[5] = static_cast<int16_t>(std::lround(sensor_data.Tp6 * 100.0f));
     thermal_current_temperatures[6] = static_cast<int16_t>(std::lround(sensor_data.Tt1 * 100.0f));
@@ -653,24 +665,23 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
 
     if (thermal_tx_ok)
     {
-        if (thermal_test_receive_package(  //when passing variable to this one remember to pass as &channel_id for all pointer
-    thermal_mcu,
-    &received_channel_id_thermal,
-    &received_mode_thermal,
-    &received_power_thermal,
-    &received_target_thermal,
-    &status_thermal,
-    &error_thermal))
+        if (thermal_receive_big_packet(
+            thermal_mcu,
+            thermal_data_received_array
+        ))
         {
             //Info recieved from thermal Used for trouble-shooting
             last_thermal_ping_time = current_time_ms;
-            ESP_LOGI(TAG, "Feedback from thermal slave - Channel: %u, Mode: %u, Power: %u, Target: %u, Status: %u, Error: %u",
-            received_channel_id_thermal, 
-            received_mode_thermal,
-            received_power_thermal,
-            received_target_thermal,
-            status_thermal,
-            error_thermal);
+            for(int i=0;i<8;i++){
+            ESP_LOGI(TAG, "Feedback from thermal slave - Channel: %u, Mode: %u, Power: %u, Target: %f, Error: %u,Global Error: %u, ",
+            i, 
+            thermal_data_received_array[i].mode,
+            thermal_data_received_array[i].duty_cycle,
+            thermal_data_received_array[i].target,
+            thermal_data_received_array[i].error,
+            thermal_data_received_array[i].global_error);
+            }
+            
         }
         else
         {

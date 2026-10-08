@@ -39,11 +39,12 @@ SENSOR_STRUCT_FORMAT = (
     "HHfHH"     # LPL block: uflt_ir, flt_ir, uflt_conc, uflt_error, flt_error
     "HHfHH"     # SPL block: uflt_ir, flt_ir, uflt_conc, uflt_error, flt_error
     "H"         # K96_error (uint16_t)
-    "6BH14B16s" # Flags, K96 state, subsystem status, SD/controller status, 128-bit captured_errors
+    "6B8B"       # Flags, K96 state, 8x heater dutycycle,
+    "BB8B11B16s"  #thermal online, thermal status, 8thermal error SD/controller status, 128-bit captured_errors
 )
 
 STATUS_PACKET_SIZE = struct.calcsize(SENSOR_STRUCT_FORMAT)
-EXPECTED_STATUS_PACKET_SIZE = 217
+EXPECTED_STATUS_PACKET_SIZE = 230
 if STATUS_PACKET_SIZE != EXPECTED_STATUS_PACKET_SIZE:
     raise RuntimeError(
         f"groundstation packet layout is {STATUS_PACKET_SIZE} bytes; "
@@ -163,7 +164,7 @@ def evaluate_health(frame: dict[str, Any]) -> str:
         return "fault"
     if frame.get("capturedErrors", 0):
         return "fault"
-    if frame.get("thermalError", 0):
+    if any(frame.get("thermalErrors", [])):
         return "warning"
     if frame.get("controller") == "MAIN_MCU_SAFE_SHUTDOWN":
         return "fault"
@@ -260,10 +261,17 @@ def parse_status_packet(data: bytes, seq: int = 0, timestamp_ms: int | None = No
         status_ok,
         pressure_system_on,
         k96_on,
-        heater_mask,
+        *heater_duties, #Should unpack 8 heater dutycycle values into a list but if problem might be this
         thermal_online,
-        thermal_state,
-        thermal_error,
+        thermal_state, 
+        error_s0,
+        error_s1,
+        error_s2,
+        error_s3,
+        error_s4,
+        error_s5,
+        error_s6,
+        error_s7,
         pressure_state,
         pressure_error,
         pressure_relay_mask,
@@ -277,7 +285,7 @@ def parse_status_packet(data: bytes, seq: int = 0, timestamp_ms: int | None = No
         controller_state,
         captured_errors_bytes,
     ) = values
-
+    thermal_errors=[error_s0,error_s1,error_s2,error_s3, error_s4,error_s5,error_s6,error_s7]
     captured_errors = int.from_bytes(captured_errors_bytes, byteorder="little")
     timestamp = timestamp_ms if timestamp_ms is not None else int(time.time() * 1000)
     link_status = "DROPOUT" if connection_lost else "ONLINE"
@@ -318,12 +326,12 @@ def parse_status_packet(data: bytes, seq: int = 0, timestamp_ms: int | None = No
         "pump1DutyPct": int(pressure_pump1_pwm),
         "pump2DutyPct": int(pressure_pump2_pwm),
         "compressorDutyPct": int(pressure_compressor_pwm),
-        "heaterDutyPct": 100 if heater_mask else 0,
+        "heaterDutyPct": 0,
         "coolerDutyPct": 0,
         "outletValveOpen": bool(pressure_valve_open),
         "pressureSystemOn": bool(pressure_system_on),
         "k96On": bool(k96_on),
-        "heaterMask": int(heater_mask),
+        "heaterMask": int(9), ##Was int(heater_mask) before but was removed i dunno what to do with this or what its used for /sixten
         "peripherals": {
             "pump1": bool(pressure_pump1_pwm),
             "pump2": bool(pressure_pump2_pwm),
@@ -337,21 +345,22 @@ def parse_status_packet(data: bytes, seq: int = 0, timestamp_ms: int | None = No
             "relay3": bool(pressure_relay_mask & 0x04),
             "relay4": bool(pressure_relay_mask & 0x08),
         },
-        "heater1ActuationPct": 100 if heater_mask & (1 << 0) else 0,
-        "heater2ActuationPct": 100 if heater_mask & (1 << 1) else 0,
-        "heater3ActuationPct": 100 if heater_mask & (1 << 2) else 0,
-        "heater4ActuationPct": 100 if heater_mask & (1 << 3) else 0,
-        "heater5ActuationPct": 100 if heater_mask & (1 << 4) else 0,
-        "heater6ActuationPct": 100 if heater_mask & (1 << 5) else 0,
-        "heater7ActuationPct": 100 if heater_mask & (1 << 6) else 0,
-        "heater8ActuationPct": 100 if heater_mask & (1 << 7) else 0,
+        "heater1ActuationPct": heater_duties[0],
+        "heater2ActuationPct": heater_duties[1],
+        "heater3ActuationPct": heater_duties[2],
+        "heater4ActuationPct": heater_duties[3],
+        "heater5ActuationPct": heater_duties[4],
+        "heater6ActuationPct": heater_duties[5],
+        "heater7ActuationPct": heater_duties[6],
+        "heater8ActuationPct": heater_duties[7],
         "onboardLogging": bool(onboard_logging),
         "storageFreePct": int(storage_free_pct),
         "controller": CONTROLLER_STATES.get(controller_state, f"MAIN_MCU_STATE_{controller_state}"),
         "controllerReady": controller_state == 1,
         "thermalOnline": bool(thermal_online),
         "thermalState": int(thermal_state),
-        "thermalError": int(thermal_error),
+        "thermalErrors": [int(e) for e in thermal_errors],
+        "thermalError": 1 if any(thermal_errors) else 0,
         "pressureState": int(pressure_state),
         "pressureStateName": PRESSURE_STATES.get(pressure_state, f"STATE_{pressure_state}"),
         "pressureError": int(pressure_error),
@@ -429,10 +438,10 @@ def parse_status_packet(data: bytes, seq: int = 0, timestamp_ms: int | None = No
             "status_ok": int(status_ok),
             "pressure_system_on": int(pressure_system_on),
             "k96_on": int(k96_on),
-            "heater_mask": int(heater_mask),
+            "heater_mask": int(9), #was int(heater_mask)
             "thermal_online": int(thermal_online),
             "thermal_state": int(thermal_state),
-            "thermal_error": int(thermal_error),
+            "thermal_error": 1 if any(thermal_errors) else 0,
             "pressure_state": int(pressure_state),
             "pressure_error": int(pressure_error),
             "pressure_relay_mask": int(pressure_relay_mask),
