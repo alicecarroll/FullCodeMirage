@@ -4,6 +4,8 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 
+#include <algorithm>
+#include <cmath>
 #include <string.h>
 
 namespace {
@@ -16,11 +18,19 @@ uint8_t applied_mode = 0;
 float target_pressure = 3.2f; //in pressure chamber
 float inlet_upper = 1.5f, inlet_lower = 1.0f; //inlet upper and lower boundaries for compressor inlet
 float compressor_safe_start_inlet_upper = 1.7f; //inlet upper boundary for compressor safe start. Otherwise it might scream at low duty cycles.
+// Leave 0.20 bar of headroom below the 1.70 bar safe-start ceiling for
+// sensor/update latency and pressure rise after the prefill pumps stop.
+constexpr float INLET_PREFILL_MAX_BAR = 1.5f;
+constexpr uint32_t INLET_START_WAIT_MAX_MS = 7000;
+constexpr float CHAMBER_TARGET_TOLERANCE_BAR = 0.1f;
 // In reality, the difference between interstage and pressure chamber is also relevant. I don't know how to account for that. 
 float pwm1 = 0.0f, pwm2 = 0.0f, pwm3 = 0.0f;
 //constexpr float FLUSH_COMPLETE_PRESSURE_BAR = 0.05f; //Why so low?
 constexpr uint8_t ERR_NONE = 0, ERR_CHAMBER_SENSOR = 1, ERR_INLET_SENSOR = 2;
+constexpr uint8_t ERR_INLET_START_TIMEOUT = 3;
 bool pwm_targets_initialized = false; // to keep track of one-time-initialisation of pwm targets
+bool inlet_start_wait_active = false;
+TickType_t inlet_start_wait_started = 0;
 
 
 TickType_t measurement_time_start;
@@ -41,6 +51,10 @@ float flow_rate;
 float flushtarget = 0.225; // flushtarget = -Setup.V*np.log(0.05) which means that 95% of the air should be exchanged
 
 bool compressed = false;
+
+bool chamber_at_target() {
+    return std::fabs(status.chamber_pressure - target_pressure) <= CHAMBER_TARGET_TOLERANCE_BAR;
+}
 
 uint8_t clamp_pwm(uint8_t pwm) { return pwm > 100 ? 100 : pwm; }
 void set_pump1(uint8_t pwm) { pwm = clamp_pwm(pwm); pressure_pump1_set(pwm); status.pump1_pwm = pwm; }
@@ -112,6 +126,7 @@ void set_measurement_outputs() {
 }
 void stop_pressure_train(bool open_valve) {
     clear_overrides();
+    inlet_start_wait_active = false;
     set_pump1(0);
     set_pump2(0);
     set_compressor(0);
@@ -330,6 +345,7 @@ void pressure_execute_command(uint8_t command, uint8_t info) {
 
 void pressure_update() {
     adjust_pressure_target();
+    if (status.state != PRESSURE_COMPRESSION) inlet_start_wait_active = false;
     ESP_LOGI("pressure", "Starting pressure update. State: %d, Chamber: %.3f bar, Inlet: %.3f bar, Ambient: %.3f bar",
              status.state, status.chamber_pressure, status.compressor_inlet_pressure, status.ambient_pressure);
     //ESP_LOGI("Sensors2: ", "Ambient pressure: %.3f, Inlet of Compressor %.3f, Chamber pressure: %.3f", status.ambient_pressure, status.compressor_inlet_pressure, status.chamber_pressure);
@@ -354,7 +370,14 @@ void pressure_update() {
         //    return;
         //}
 
-        if (status.compressor_inlet_pressure >= inlet_upper) {
+        const float inlet_fill_target = std::min(inlet_upper, INLET_PREFILL_MAX_BAR);
+        if (status.compressor_inlet_pressure >= inlet_fill_target) {
+            // Stop filling in this update, not one update after changing state.
+            if (!manual_pump1) set_pump1(0);
+            if (!manual_pump2) set_pump2(0);
+            if (!manual_compressor) set_compressor(0);
+            if (!manual_valve) set_valve(false);
+            inlet_start_wait_active = false;
             status.state = PRESSURE_COMPRESSION;
             flushstep_start = xTaskGetTickCount();
             return;
@@ -381,11 +404,25 @@ void pressure_update() {
         else if (status.compressor_inlet_pressure > compressor_safe_start_inlet_upper) {
             if (!manual_compressor) set_compressor(0);
             if (!manual_valve) set_valve(false);
-            status.state = PRESSURE_COMPRESSION; // Making it explicit that we want to remain in compression state
+            const TickType_t now = xTaskGetTickCount();
+            if (!inlet_start_wait_active) {
+                inlet_start_wait_active = true;
+                inlet_start_wait_started = now;
+            }
+            if (now - inlet_start_wait_started >= pdMS_TO_TICKS(INLET_START_WAIT_MAX_MS)) {
+                stop_pressure_train(false);
+                status.error = ERR_INLET_START_TIMEOUT;
+                status.state = PRESSURE_ERROR;
+                ESP_LOGE("pressure", "Compressor inlet remained above %.3f bar for 7 seconds. Stopping pressure train.", compressor_safe_start_inlet_upper);
+                return;
+            }
             ESP_LOGI("pressure", "Compressor inlet pressure too high: %.3f bar. Waiting for it to drop.", status.compressor_inlet_pressure);
             return;
         }
         else {
+            // Exclude an idle high-inlet wait from exchanged-air integration.
+            if (inlet_start_wait_active) flushstep_start = xTaskGetTickCount();
+            inlet_start_wait_active = false;
             if (compressor_can_start()) {
                 set_pwm_target_pump3();
                 if (!manual_valve) set_valve(false); //The valve must be closed to allow the compressor to pressurise the chamber.
@@ -405,7 +442,7 @@ void pressure_update() {
         flushsum = flushsum + 1/V*Qout*flushticks*portTICK_PERIOD_MS/1000/60;
         flushstep_start = xTaskGetTickCount();
 
-        if (abs(status.chamber_pressure - target_pressure) < 0.1) {
+        if (chamber_at_target()) {
                 ESP_LOGI("pressure", "Chamber pressure at target (%.3f bar): %.3f bar, Inlet: %.3f bar", target_pressure, status.chamber_pressure, status.compressor_inlet_pressure);
                 // If the chamber pressure is at target and the inlet is emptied, we can check if we can go to measurement. 
                 if (flushsum > flushtarget) {
@@ -442,7 +479,8 @@ void pressure_update() {
         TickType_t current_time = xTaskGetTickCount();
         TickType_t elapsed_ticks = current_time - measurement_time_start;
         if (elapsed_ticks*portTICK_PERIOD_MS/1000 >= measure_time) {
-            status.state = PRESSURE_PREPRESSURISATION;
+            status.state = PRESSURE_AIR_EXCHANGE;
+            if (!manual_valve) set_valve(true);
             ESP_LOGI("pressure", "Measurement done at %.3f bar", status.chamber_pressure);
             bool compressed = false;
         }
@@ -453,7 +491,7 @@ void pressure_update() {
         set_valve(true);
         ESP_LOGI("pressure", "Air exchange state. Chamber: %.3f bar, Inlet: %.3f bar, Ambient: %.3f bar",
                  status.chamber_pressure, status.compressor_inlet_pressure, status.ambient_pressure);
-        if ((abs(status.chamber_pressure - target_pressure) <= 0.1) && (flushsum > flushtarget)) {
+        if (chamber_at_target() && (flushsum > flushtarget)) {
             status.state = PRESSURE_MEASUREMENT;
             flushsum = 0.0;
             set_valve(false);
@@ -472,7 +510,7 @@ void pressure_update() {
         set_pump2(0);
         set_compressor(50);
         set_valve(false);
-        if ((status.compressor_inlet_pressure <= inlet_lower) and (abs(status.chamber_pressure - target_pressure) > 0.1)){
+        if ((status.compressor_inlet_pressure <= inlet_lower) and !chamber_at_target()){
             if (!manual_compressor) set_compressor(0);
             if (!manual_valve) set_valve(false);
             status.state = PRESSURE_PREPRESSURISATION;
