@@ -77,10 +77,13 @@ static bool status_update_requested = false;
 static bool status_packet_sent_this_loop = false;
 static MainControllerState controller_state = MAIN_CONTROLLER_BOOTING;
 static bool restart_requested = false;
+static bool datetime_request_sent = false;
+static std::string pending_datetime_response;
 static std::string ethernet_command_text;
 bool manual_mode_overwrite = false; // To track if manual mode overwrite is active
 static bool k96_manual_override = false;
 static bool k96_manual_state = false;
+MainSystemStatusPacket system_status_packet = {};
 static HeaterSystem *heater_system = nullptr;
 
 //Values for thermal slave
@@ -457,7 +460,7 @@ bool handle_command()
     return false;
 }
 
-static esp_err_t send_system_status_packet()
+void log_system_status_packet()
 {
 
     MainSystemStatusPacket system_status_packet  = {};
@@ -499,8 +502,25 @@ static esp_err_t send_system_status_packet()
     system_status_packet.storage_free_pct = storage_available ? storage_free_pct : 0;
     system_status_packet.controller_state = static_cast<uint8_t>(controller_state);
     system_status_packet.captured_errors = captured_errors;
+}
 
+static esp_err_t send_system_status_packet()
+{
+    log_system_status_packet();
     return wiz_send((uint8_t *)&system_status_packet, MAIN_SYSTEM_STATUS_PACKET_SIZE);
+}
+
+static void request_datetime_if_needed()
+{
+    if (datetime_request_sent || sd_datetime_is_synchronized() || getSn_SR(WIZ_SOCKET) != SOCK_ESTABLISHED) {
+        return;
+    }
+
+    static constexpr char request[] = "MIRAGE_DATETIME_REQUEST\n";
+    if (wiz_send(reinterpret_cast<const uint8_t *>(request), sizeof(request) - 1) == ESP_OK) {
+        datetime_request_sent = true;
+        ESP_LOGI(TAG, "Requested datetime from groundstation");
+    }
 }
 
 static void handle_ethernet_send_status(esp_err_t esp_err_status)
@@ -533,6 +553,18 @@ static void handle_ethernet_receive_status(esp_err_t esp_err_status)
 
     case ESP_OK:
         // Command received from the gateway / ground GUI.
+        ethernet_command_text = to_upper_copy(ethernet_recieve_buf, ethernet_recieve_buf_bytes_read);
+        trim_in_place(ethernet_command_text);
+        if (ethernet_command_text.rfind("DATETIME_RESPONSE:", 0) == 0) {
+            pending_datetime_response = ethernet_command_text;
+            command_received = false;
+            con_lost = false;
+            status_ok = true;
+            loops_since_connection = 0;
+            connection_reestablished(&con_lost, &loss_timestamp_us);
+            return;
+        }
+
         if (mode == 1)
         {
             mode = 2;
@@ -764,6 +796,7 @@ extern "C" void app_main()
     init_i2c();
     init_uart();
     init_sensors();
+    reset_ds3231_time();
     //static HeaterSystem initialized_heater_system;
     //heater_system_init(&initialized_heater_system);
     //heater_system = &initialized_heater_system;
@@ -811,6 +844,9 @@ void loop()
         if (wiz_connect(targetip, REMOTE_PORT)== ESP_OK)
         {
             status_ok = true;
+            if (!sd_datetime_is_synchronized()) {
+                datetime_request_sent = false;
+            }
             connection_reestablished(&con_lost, &loss_timestamp_us);
         }
         else
@@ -820,6 +856,7 @@ void loop()
             connection_lost(&con_lost, &loss_timestamp_us);
         }
     }
+    request_datetime_if_needed();
     // Check for commands
     loops_since_connection++; //Will be reset in handle_ethernet_receive_status if connection is ok.
     esp_err_t esp_err_status_receive = wiz_receive(ethernet_recieve_buf, ethernet_recieve_buf_size, &ethernet_recieve_buf_bytes_read);
@@ -833,10 +870,18 @@ void loop()
 
     // Read I2C Data Block
     read_sensors();
+    log_system_status_packet();
     //buffer_SD_data_binary_single(); //est time: 1.5 ms
     //buffer_SD_data_csv_single();      //est time: 3 ms
     //buffer_SD_data_binary(sensor_data); //4k - est time: 1.5 ms every 8th loop
-    buffer_SD_data_csv(&sensor_data);      //4k - est time: 3 ms every 8th loop
+    //buffer_SD_data_csv(&sensor_data);      //4k - est time: 3 ms every 8th loop
+    buffer_SD_data_csv(&system_status_packet);
+    if (!pending_datetime_response.empty() &&
+        sd_apply_datetime_response(pending_datetime_response.c_str())) {
+        pending_datetime_response.clear();
+        ESP_LOGI(TAG, "Groundstation datetime applied to SD card filename");
+    }
+    //META data log
     print_sensor_data(&sensor_data);
 
     // Status Check Block

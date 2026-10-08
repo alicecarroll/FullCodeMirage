@@ -51,6 +51,14 @@ if STATUS_PACKET_SIZE != EXPECTED_STATUS_PACKET_SIZE:
         f"main MCU transmits {EXPECTED_STATUS_PACKET_SIZE} bytes"
     )
 
+DATETIME_REQUEST = b"MIRAGE_DATETIME_REQUEST\n"
+DATETIME_RESPONSE_PREFIX = "DATETIME_RESPONSE:"
+
+
+def format_datetime_response(now: datetime | None = None) -> bytes:
+    current = now if now is not None else datetime.now().astimezone()
+    return f"{DATETIME_RESPONSE_PREFIX}{current.strftime('%Y-%m-%dT%H:%M:%S')}\n".encode("ascii")
+
 MODE_NAMES = {
     1: "TEST_LOOP",
     2: "STANDBY",
@@ -662,11 +670,30 @@ class PayloadTCPHandler(socketserver.BaseRequestHandler):
         self.state.attach_payload(self.request, self.client_address)
 
     def handle(self) -> None:
+        stream_buffer = bytearray()
         while True:
-            packet = recv_exact(self.request, STATUS_PACKET_SIZE)
-            if not packet:
+            chunk = self.request.recv(4096)
+            if not chunk:
                 break
-            self.state.next_frame(packet)
+            stream_buffer.extend(chunk)
+
+            while stream_buffer:
+                request_index = stream_buffer.find(DATETIME_REQUEST)
+                if request_index >= 0:
+                    complete_packet_bytes = request_index - (request_index % STATUS_PACKET_SIZE)
+                    for offset in range(0, complete_packet_bytes, STATUS_PACKET_SIZE):
+                        self.state.next_frame(bytes(stream_buffer[offset:offset + STATUS_PACKET_SIZE]))
+                    del stream_buffer[:request_index + len(DATETIME_REQUEST)]
+                    self.request.sendall(format_datetime_response())
+                    self.state.log("datetime", {"phase": "response_sent"})
+                    continue
+
+                if len(stream_buffer) < STATUS_PACKET_SIZE:
+                    break
+
+                packet = bytes(stream_buffer[:STATUS_PACKET_SIZE])
+                del stream_buffer[:STATUS_PACKET_SIZE]
+                self.state.next_frame(packet)
 
     def finish(self) -> None:
         self.state.detach_payload(self.request)
