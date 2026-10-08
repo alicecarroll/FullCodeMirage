@@ -284,7 +284,7 @@ static esp_err_t create_new_metadata_log(void)
     }
     fclose(f);
 
-    const char *header = "HH,MM,SS,mode,command_received, connection_lost, status_ok, pressure_system_on, k96_on, heater_mask, thermal_online, thermal_state, thermal_error, pressure_state, pressure_error, pressure_relay_mask, pressure_pump1_pwm, pressure_pump2_pwm, pressure_compressor_pwm, pressure_manual_override, pressure_valve_open, onboard_logging, storage_free_pct, controller_state\n";
+    const char *header = "HH,MM,SS,mode,command_received,connection_lost,status_ok,pressure_system_on,k96_on,heater1_duty,heater2_duty,heater3_duty,heater4_duty,heater5_duty,heater6_duty,heater7_duty,heater8_duty,thermal_online,thermal_state,thermal_error1,thermal_error2,thermal_error3,thermal_error4,thermal_error5,thermal_error6,thermal_error7,thermal_error8,pressure_state,pressure_error,pressure_relay_mask,pressure_pump1_pwm,pressure_pump2_pwm,pressure_compressor_pwm,pressure_manual_override,pressure_valve_open,onboard_logging,storage_free_pct,controller_state,captured_errors_low_hex,captured_errors_high_hex\n";
         
     if (sd_write(current_metadata_filename, (const uint8_t *)header, strlen(header)) != ESP_OK)
     {
@@ -342,7 +342,7 @@ void buffer_SD_data_csv(MainSystemStatusPacket *system_status_packet)//SensorDat
 
     // Create temp CSV line to store (increased size to 1024 to fit all expanded sensor fields)
     static char line[1024];
-    static char sline[128];
+    static char sline[192];
 
     int n = snprintf(line, sizeof(line),
         "%02u,%02u,%02u,"
@@ -380,9 +380,9 @@ void buffer_SD_data_csv(MainSystemStatusPacket *system_status_packet)//SensorDat
         sensor_datas->K96_SPL_uflt_Error, sensor_datas->K96_SPL_flt_Error, sensor_datas->K96_error
     );
 
-    //CapturedErrors *cerr = system_status_packet->captured_errors; ---> could be nice to also save 
+    //CapturedErrors *cerr = system_status_packet->captured_errors;  
     int m = snprintf(sline, sizeof(sline),
-        "%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u\n",
+        "%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%016llX,%016llX\n",
         sensor_datas->hours,
         sensor_datas->minutes,
         sensor_datas->seconds,
@@ -392,7 +392,17 @@ void buffer_SD_data_csv(MainSystemStatusPacket *system_status_packet)//SensorDat
         system_status_packet->status_ok,
         system_status_packet->pressure_system_on,
         system_status_packet->k96_on,
-        //system_status_packet->heater_mask,
+
+        system_status_packet->thermal_heater_duty_cycle[0],
+        system_status_packet->thermal_heater_duty_cycle[1],
+        system_status_packet->thermal_heater_duty_cycle[2],
+        system_status_packet->thermal_heater_duty_cycle[3],
+        system_status_packet->thermal_heater_duty_cycle[4],
+        system_status_packet->thermal_heater_duty_cycle[5],
+        system_status_packet->thermal_heater_duty_cycle[6],
+        system_status_packet->thermal_heater_duty_cycle[7],
+        system_status_packet->thermal_online,
+        system_status_packet->thermal_state,
         system_status_packet->thermal_error[0],
         system_status_packet->thermal_error[1],
         system_status_packet->thermal_error[2],
@@ -401,9 +411,7 @@ void buffer_SD_data_csv(MainSystemStatusPacket *system_status_packet)//SensorDat
         system_status_packet->thermal_error[5],
         system_status_packet->thermal_error[6],
         system_status_packet->thermal_error[7],
-        system_status_packet->thermal_online,
-        system_status_packet->thermal_state,
-        //system_status_packet->thermal_error,
+
         system_status_packet->pressure_state,
         system_status_packet->pressure_error,
         system_status_packet->pressure_relay_mask,
@@ -412,10 +420,12 @@ void buffer_SD_data_csv(MainSystemStatusPacket *system_status_packet)//SensorDat
         system_status_packet->pressure_compressor_pwm,
         system_status_packet->pressure_manual_override,
         system_status_packet->pressure_valve_open,
+
         system_status_packet->onboard_logging,
         system_status_packet->storage_free_pct,
-        system_status_packet->controller_state
-        //cerr.high
+        system_status_packet->controller_state,
+        static_cast<unsigned long long>(system_status_packet->captured_errors.low),
+        static_cast<unsigned long long>(system_status_packet->captured_errors.high)
         );
 
     // Check if snprintf encountered an error or truncation
