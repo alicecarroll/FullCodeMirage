@@ -125,6 +125,8 @@ void safe_off() {
 }
 
 float calc_projected_chamber_pressure() {
+    // This code is not working well. I will omit it for now.
+    if (true) return status.chamber_pressure;
     const float pressure_rate = sensor_history_valid && sensor_update_interval > 0
         ? (status.chamber_pressure - previous_chamber_pressure) /
           (sensor_update_interval * portTICK_PERIOD_MS / 1000.0f)
@@ -134,6 +136,8 @@ float calc_projected_chamber_pressure() {
 }
 
 float calc_projected_inlet_pressure() {
+    // This code is not working well. I will omit it for now.
+    if (true) return status.compressor_inlet_pressure;
     const float pressure_rate = sensor_history_valid && sensor_update_interval > 0
         ? (status.compressor_inlet_pressure - previous_compressor_inlet_pressure) /
           (sensor_update_interval * portTICK_PERIOD_MS / 1000.0f)
@@ -147,7 +151,15 @@ bool stop_pumps_if_sensor_invalid() {
     const bool sensor_timeout = now - last_sensor_update > pdMS_TO_TICKS(1000);
     const float projected_chamber_pressure = calc_projected_chamber_pressure();
     const float projected_inlet_pressure = calc_projected_inlet_pressure();
-    if (!sensor_timeout && projected_chamber_pressure <= target_pressure && projected_inlet_pressure <= inlet_upper) return false;
+    //if (!sensor_timeout && projected_chamber_pressure <= target_pressure && projected_inlet_pressure <= inlet_upper) return false;
+    if (sensor_timeout) {
+        ESP_LOGW("pressure", "Sensor timeout. No valid sensor data for more than 1 second. Stopping pumps.");
+        return true;
+    }
+    return false;
+
+    // I will not use the projected pressures for now, as they are not working well. I will just use the current pressures.
+    /*
     else if (!sensor_timeout && projected_chamber_pressure > target_pressure) {
         ESP_LOGW("pressure", "Chamber pressure too high. Projected: %.2f bar, Target: %.2f bar. Stopping compressor.", projected_chamber_pressure, target_pressure);
         set_compressor(0);
@@ -162,6 +174,7 @@ bool stop_pumps_if_sensor_invalid() {
         set_compressor(0);
     }
     return true;
+    */
 }
 void mode_changed(uint8_t mode) {
     if (mode == applied_mode) return;
@@ -217,6 +230,7 @@ void pressure_update_external_sensors(const float sensors[7]) {
     if (external_sensors_valid) {
         sensor_update_interval = now - last_sensor_update;
         previous_chamber_pressure = status.chamber_pressure;
+        previous_compressor_inlet_pressure = status.compressor_inlet_pressure;
         sensor_history_valid = sensor_update_interval > 0;
     }
     last_sensor_update = now;
@@ -324,7 +338,11 @@ void pressure_update() {
        ESP_LOGE("pressure", "External sensors not valid. Cannot update pressure control.");
         return;
     }
-    if (stop_pumps_if_sensor_invalid()) return;
+    if (stop_pumps_if_sensor_invalid()) {
+        safe_off(); 
+        ESP_LOGE("pressure", "Sensor invalid. Stopping all pumps and valves.");
+        return;
+    }
     if (status.state == PRESSURE_PREPRESSURISATION) {
         ESP_LOGI("pressure", "Prepressurisation state. Chamber: %.3f bar, Inlet: %.3f bar, Ambient: %.3f bar",
                  status.chamber_pressure, status.compressor_inlet_pressure, status.ambient_pressure);
@@ -353,7 +371,7 @@ void pressure_update() {
         if (!manual_pump2) set_pump2(0);
 
         // Before turning the compressor on we should check that there is not too much pressure in the chamber. If there is, we should first flush the chamber to avoid overpressurisation.
-        if (abs(status.chamber_pressure - target_pressure) > 0.1) {
+        if ((status.chamber_pressure - target_pressure) > 0.1) {
             if (!manual_compressor) set_compressor(0);
             status.state = PRESSURE_AIR_EXCHANGE;
             ESP_LOGI("pressure", "Chamber pressure too high: %.3f bar. Starting air exchange.", status.chamber_pressure);
@@ -370,9 +388,15 @@ void pressure_update() {
         else {
             if (compressor_can_start()) {
                 set_pwm_target_pump3();
+                if (!manual_valve) set_valve(false); //The valve must be closed to allow the compressor to pressurise the chamber.
             }
-            set_pwm_target_pump3();
-            if (!manual_valve) set_valve(false); //The valve must be closed to allow the compressor to pressurise the chamber.
+            else {
+                if (!manual_compressor) set_compressor(0);
+                if (!manual_valve) set_valve(false);
+                status.state = PRESSURE_COMPRESSION; // Making it explicit that we want to remain in compression state
+                ESP_LOGI("pressure", "Compressor cannot start due to high inlet pressure: %.3f bar. Waiting for it to drop.", status.compressor_inlet_pressure);
+                return;
+            }
         }
 
         flushstep_stop = xTaskGetTickCount();
@@ -409,6 +433,8 @@ void pressure_update() {
         }
             
     } else if (status.state == PRESSURE_MEASUREMENT) {
+        ESP_LOGI("pressure", "Measurement state. Chamber: %.3f bar, Inlet: %.3f bar, Ambient: %.3f bar",
+                 status.chamber_pressure, status.compressor_inlet_pressure, status.ambient_pressure);
         if (!manual_pump1) set_pump1(0);
         if (!manual_pump2) set_pump2(0);
         if (!manual_valve) set_valve(false);
@@ -440,6 +466,8 @@ void pressure_update() {
         }
         
     } else if (status.state == PRESSURE_CORRECTION) { // What is this for - Jonathan 02.10.
+        ESP_LOGW("pressure", "Correction state. Chamber: %.3f bar, Inlet: %.3f bar, Ambient: %.3f bar",
+                 status.chamber_pressure, status.compressor_inlet_pressure, status.ambient_pressure);
         set_pump1(0);
         set_pump2(0);
         set_compressor(50);
@@ -469,6 +497,11 @@ void pressure_update() {
                  status.chamber_pressure, status.compressor_inlet_pressure, status.ambient_pressure);
         safe_off();
     } 
+    else {
+        ESP_LOGE("pressure", "Unknown state %d. Stopping all pumps and valves.", status.state);
+        safe_off();
+        status.state = PRESSURE_ERROR;
+    }
 }
 
 void pressure_cmd_standby() { pressure_execute_command(PRESSURE_CMD_SET_MODE, PRESSURE_MODE_STANDBY); }
