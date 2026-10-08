@@ -53,6 +53,7 @@ int16_t pressure_watchdog_count = 0; // Count of subsequent times the pressure s
 int32_t flightphase = 0; // To track flight phase: 0 = ascend, 1 = float, 2 = descend
 
 static const char *TAG = "main";
+MainSystemStatusPacket system_status_packet = {};
 
 // Ethernet
 uint8_t ethernet_recieve_buf[ETHERNET_BUF_SIZE] = {0};
@@ -845,7 +846,7 @@ void loop()
     //buffer_SD_data_binary_single(); //est time: 1.5 ms
     //buffer_SD_data_csv_single();      //est time: 3 ms
     //buffer_SD_data_binary(sensor_data); //4k - est time: 1.5 ms every 8th loop
-    buffer_SD_data_csv(&sensor_data);      //4k - est time: 3 ms every 8th loop
+    buffer_SD_data_csv(&system_status_packet);      //4k - est time: 3 ms every 8th loop
     print_sensor_data(&sensor_data);
 
     // Status Check Block
