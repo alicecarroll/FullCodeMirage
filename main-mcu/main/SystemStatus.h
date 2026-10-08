@@ -13,8 +13,7 @@ enum MainControllerState : uint8_t {
 };
 
 #pragma pack(push, 1)
-typedef struct{
-//struct MainSystemStatusPacket{
+typedef struct {
     SensorData sensor_data;
     uint8_t operating_mode;
     uint8_t command_received;
@@ -40,8 +39,6 @@ typedef struct{
     CapturedErrors captured_errors;
 } MainSystemStatusPacket;
 #pragma pack(pop)
-
-extern MainSystemStatusPacket system_status_packet;
 
 // Keep this wire-size contract synchronized with groundstation_gateway.py and listener.py.
 static constexpr size_t MAIN_SYSTEM_STATUS_PACKET_SIZE = 230;

@@ -19,331 +19,122 @@
 #include "ErrorStatus.h"
 #include "Settings.h"
 #include "read_sensors.h"
-#include "SystemStatus.h"
-
 
 #include <stdio.h>
 #include <errno.h>
 #include <unistd.h>
-#include <time.h>
 
-#include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
 #include "driver/sdspi_host.h"
 #include "sdmmc_cmd.h"
 
-
-static const char *TAG = "SDCard";
-// Buffer configuration
-//#define SD_BUFFER_SIZE 4096
-//#define SENSOR_READING_SIZE sizeof(SensorData)
-
-
-//#define READINGS_PER_BUFFER //(SD_BUFFER_SIZE / SENSOR_READING_SIZE)//
-
-#define TOTAL_READING_SIZE sizeof(MainSystemStatusPacket)
-
-#define READINGS_PER_BUFFER (SD_BUFFER_SIZE / TOTAL_READING_SIZE)
-
-static constexpr size_t SD_HALF_BUFFER = SD_BUFFER_SIZE / 2;
-static uint8_t SD_buffer[SD_HALF_BUFFER];
-static uint8_t SD_buffer2[SD_HALF_BUFFER];
-
-static size_t SD_buffer_offset = 0;
-static size_t SD_buffer_offset2 = 0;
+        static const char *TAG = "SDCard";
 
 static sdmmc_card_t *s_card = NULL;
 static bool s_mounted = false;
-static char current_csv_filename[64] = "";
-static char current_metadata_filename[64] = "";
-static int64_t first_entry_time_us = -1;
-static bool datetime_synchronized = false;
 
-//SensorData *sensor_datas;
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+// hello
 
-static void create_generic_filename(const char *prefix,
-                                    char *buffer,
-                                    size_t buffer_size,
-                                    const char *extension)
-{
-    snprintf(buffer, buffer_size,
-             "%s_noDateTimeInformation%s", prefix, extension);
-}
-
-static void create_unique_csv_filename(void)
-{
-    create_generic_filename("sensor_data", current_csv_filename, sizeof(current_csv_filename), ".csv");
-}
-static void create_unique_metadata_filename(void)
-{
-    create_generic_filename("metadata", current_metadata_filename, sizeof(current_metadata_filename), ".log");
-}
-
-static void create_datetime_filename(const char *prefix,
-                                     char *buffer,
-                                     size_t buffer_size,
-                                     const struct tm *datetime,
-                                     const char *extension)
-{
-    // FAT filenames cannot contain ':', so use hyphens in the time portion.
-    snprintf(buffer, buffer_size,
-             "%s_%02d-%02d-%04dT%02d-%02d-%02d%s",
-             prefix,
-             datetime->tm_mday,
-             datetime->tm_mon + 1,
-             datetime->tm_year + 1900,
-             datetime->tm_hour,
-             datetime->tm_min,
-             datetime->tm_sec,
-             extension);
-}
-
-static bool is_leap_year(int year)
-{
-    return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
-}
-
-static void subtract_seconds(struct tm *datetime, uint32_t seconds)
-{
-    while (seconds > 0) {
-        if (datetime->tm_sec > 0) {
-            const uint32_t seconds_to_subtract = seconds < static_cast<uint32_t>(datetime->tm_sec)
-                                                     ? seconds
-                                                     : static_cast<uint32_t>(datetime->tm_sec);
-            datetime->tm_sec -= static_cast<int>(seconds_to_subtract);
-            seconds -= seconds_to_subtract;
-            continue;
-        }
-
-        datetime->tm_sec = 59;
-        if (datetime->tm_min > 0) {
-            --datetime->tm_min;
-        } else {
-            datetime->tm_min = 59;
-            if (datetime->tm_hour > 0) {
-                --datetime->tm_hour;
-            } else {
-                datetime->tm_hour = 23;
-                if (datetime->tm_mday > 1) {
-                    --datetime->tm_mday;
-                } else {
-                    if (datetime->tm_mon > 0) {
-                        --datetime->tm_mon;
-                    } else {
-                        datetime->tm_mon = 11;
-                        --datetime->tm_year;
-                    }
-                    static const uint8_t days_in_month[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-                    datetime->tm_mday = days_in_month[datetime->tm_mon];
-                    if (datetime->tm_mon == 1 && is_leap_year(datetime->tm_year + 1900)) {
-                        ++datetime->tm_mday;
-                    }
-                }
-            }
-        }
-        --seconds;
-    }
-}
-
-static bool rename_current_file(const char *old_name, const char *new_name)
-{
-    char old_path[SD_MAX_PATH_LEN];
-    char new_path[SD_MAX_PATH_LEN];
-    const int old_length = snprintf(old_path, sizeof(old_path), "%s/%s", SD_MOUNT_POINT, old_name);
-    const int new_length = snprintf(new_path, sizeof(new_path), "%s/%s", SD_MOUNT_POINT, new_name);
-    if (old_length < 0 || new_length < 0 ||
-        static_cast<size_t>(old_length) >= sizeof(old_path) ||
-        static_cast<size_t>(new_length) >= sizeof(new_path)) {
-        return false;
-    }
-    return rename(old_path, new_path) == 0;
-}
-
-bool sd_apply_datetime_response(const char *response)
-{
-    if (!s_mounted || datetime_synchronized || first_entry_time_us < 0 || response == nullptr) {
-        return false;
-    }
-
-    struct tm received_datetime = {};
-    if (sscanf(response, "DATETIME_RESPONSE:%d-%d-%dT%d:%d:%d",
-               &received_datetime.tm_year,
-               &received_datetime.tm_mon,
-               &received_datetime.tm_mday,
-               &received_datetime.tm_hour,
-               &received_datetime.tm_min,
-               &received_datetime.tm_sec) != 6) {
-        return false;
-    }
-    received_datetime.tm_year -= 1900;
-    --received_datetime.tm_mon;
-    if (received_datetime.tm_mon < 0 || received_datetime.tm_mon > 11 ||
-        received_datetime.tm_mday < 1 || received_datetime.tm_mday > 31 ||
-        received_datetime.tm_hour < 0 || received_datetime.tm_hour > 23 ||
-        received_datetime.tm_min < 0 || received_datetime.tm_min > 59 ||
-        received_datetime.tm_sec < 0 || received_datetime.tm_sec > 59) {
-        return false;
-    }
-
-    const int64_t elapsed_us = esp_timer_get_time() - first_entry_time_us;
-    subtract_seconds(&received_datetime, static_cast<uint32_t>(elapsed_us / 1000000));
-
-    char new_csv_filename[sizeof(current_csv_filename)];
-    char new_metadata_filename[sizeof(current_metadata_filename)];
-    create_datetime_filename("sensor_data", new_csv_filename, sizeof(new_csv_filename), &received_datetime, ".csv");
-    create_datetime_filename("metadata", new_metadata_filename, sizeof(new_metadata_filename), &received_datetime, ".log");
-
-    buffer_SD_data_flush();
-    if (!rename_current_file(current_csv_filename, new_csv_filename) ||
-        !rename_current_file(current_metadata_filename, new_metadata_filename)) {
-        ESP_LOGE(TAG, "Failed to rename generic SD files after datetime synchronization");
-        return false;
-    }
-
-    snprintf(current_csv_filename, sizeof(current_csv_filename), "%s", new_csv_filename);
-    snprintf(current_metadata_filename, sizeof(current_metadata_filename), "%s", new_metadata_filename);
-    datetime_synchronized = true;
-    ESP_LOGI(TAG, "SD files synchronized to first entry timestamp: %s", current_csv_filename);
-    return true;
-}
-
-bool sd_datetime_is_synchronized(void)
-{
-    return datetime_synchronized;
-}
 /*
-//
-static esp_err_t create_new_csv_file(void)
+* Buffers with immediate storing
+// ===================================================================
+// Option 1: Binary buffer (fastest, smallest)
+// ===================================================================
+void buffer_SD_data_binary_single()
 {
-    if (current_csv_filename[0] == '\0')
-    {
-        create_unique_csv_filename();
-    }
-
-    char path[SD_MAX_PATH_LEN];
-    snprintf(path, sizeof(path), "%s/%s", SD_MOUNT_POINT, current_csv_filename);
-
-    FILE *f = fopen(path, "wb");
-    if (!f)
-    {
-        ESP_LOGE_CAPTURED(ERROR_BIT_29, TAG, "Cannot create %s (errno %d)", path, errno);
-        return ESP_FAIL;
-    }
-    fclose(f);
-    ESP_LOGI(TAG, "Created new CSV file: %s", current_csv_filename);
-    return ESP_OK;
+    uint8_t buf[sizeof(sensor_data)];
+    memcpy(buf, &sensor_data, sizeof(buf));
+    sd_write("sensor_data.bin", buf, sizeof(buf));
+    ESP_LOGI(TAG, "Buffered %zu bytes (binary)", sizeof(buf));
 }
-//
+
+// ===================================================================
+// Option 2: CSV text format (readable, larger)
+// ===================================================================
+void buffer_SD_data_csv_single()
+{
+    char line[512];
+    int n = snprintf(line, sizeof(line),
+        "%u,%u,%u,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%u\n",
+        sensor_data.hours,
+        sensor_data.minutes,
+        sensor_data.seconds,
+        sensor_data.Tp1,
+        sensor_data.Tp2,
+        sensor_data.Tp3,
+        sensor_data.Tp6,
+        sensor_data.Pp3,
+        sensor_data.Tp4,
+        sensor_data.Pp1,
+        sensor_data.Pa1,
+        sensor_data.Ta1,
+        sensor_data.Ta2,
+        sensor_data.Ha1,
+        sensor_data.Tp5,
+        sensor_data.Pp2,
+        sensor_data.Tt1,
+        sensor_data.Tt2,
+        sensor_data.Tt3,
+        sensor_data.K96_CO2,
+        sensor_data.K96_pressure,
+        sensor_data.K96_temperature,
+        sensor_data.K96_humidity,
+        sensor_data.K96_error
+    );
+    sd_write("sensor_data.csv", (const uint8_t *)line, n);
+    ESP_LOGI(TAG, "Buffered %d bytes (CSV)", n);
+}
 */
 
-static esp_err_t create_new_csv_file(void)
-{
-    if (current_csv_filename[0] == '\0')
-    {
-        create_unique_csv_filename();
-    }
 
-    char path[SD_MAX_PATH_LEN];
-    snprintf(path, sizeof(path), "%s/%s", SD_MOUNT_POINT, current_csv_filename);
+// Buffer configuration
+//#define SD_BUFFER_SIZE 4096
+#define SENSOR_READING_SIZE sizeof(SensorData)
+#define READINGS_PER_BUFFER (SD_BUFFER_SIZE / SENSOR_READING_SIZE)
 
-    FILE *f = fopen(path, "wb");
-    if (!f)
-    {
-        ESP_LOGE_CAPTURED(ERROR_BIT_29, TAG, "Cannot create %s (errno %d)", path, errno);
-        return ESP_FAIL;
-    }
-    fclose(f);
-    
-    //write header
-    const char *header = "HH,MM,SS,TP1, TP2, TP3, TP6, PP3, TP4, PP1, PA1, TA1, TA2, TA3, HA1, TP5, PP2, TT1, TT2, TT3, K96_LPL, K96_LPL_flt, K96_SPL, K96_SPL_flt, K96_MPL, K96_MPL_flt, K96_ADuCdie_Temp, K96_ADuCdie_Temp_filtered, K96_NTC0_Temp, K96_NTC0_Temp_filtered, K96_NTC1_Temp, K96_NTC1_Temp_filtered, K96_RH, K96_RH_Temp, K96_MPL_uflt_IR_Signal, K96_MPL_flt_IR_Signal, K96_MPL_uflt_Conc, K96_MPL_flt_Conc, K96_MPL_uflt_Error, K96_LPL_uflt_IR_Signal, K96_LPL_flt_IR_Signal, K96_LPL_uflt_Conc, K96_LPL_uflt_Error, K96_LPL_flt_Error, K96_SPL_uflt_IR_Signal, K96_SPL_flt_IR_Signal, K96_SPL_uflt_Conc, K96_SPL_uflt_Error,K96_SPL_flt_Error, K96_error\n";
-    if (sd_write(current_csv_filename, (const uint8_t *)header, strlen(header)) != ESP_OK)
-    {
-        ESP_LOGW(TAG, "Sensor csv header write failed for %s", current_metadata_filename);
-    }
-
-    ESP_LOGI(TAG, "Created new CSV log: %s", current_csv_filename);
-    return ESP_OK;
-}
-
-static esp_err_t create_new_metadata_log(void)
-{
-    if (current_metadata_filename[0] == '\0')
-    {
-        create_unique_metadata_filename();
-    }
-
-    char path[SD_MAX_PATH_LEN];
-    snprintf(path, sizeof(path), "%s/%s", SD_MOUNT_POINT, current_metadata_filename);
-
-    FILE *f = fopen(path, "wb");
-    if (!f)
-    {
-        ESP_LOGE_CAPTURED(ERROR_BIT_29, TAG, "Cannot create metadata log %s (errno %d)", path, errno);
-        return ESP_FAIL;
-    }
-    fclose(f);
-
-    const char *header = "HH,MM,SS,mode,command_received, connection_lost, status_ok, pressure_system_on, k96_on, heater_mask, thermal_online, thermal_state, thermal_error, pressure_state, pressure_error, pressure_relay_mask, pressure_pump1_pwm, pressure_pump2_pwm, pressure_compressor_pwm, pressure_manual_override, pressure_valve_open, onboard_logging, storage_free_pct, controller_state\n";
-        
-    if (sd_write(current_metadata_filename, (const uint8_t *)header, strlen(header)) != ESP_OK)
-    {
-        ESP_LOGW(TAG, "Metadata log header write failed for %s", current_metadata_filename);
-    }
-
-    ESP_LOGI(TAG, "Created metadata log: %s", current_metadata_filename);
-    return ESP_OK;
-}
-
+static uint8_t SD_buffer[SD_BUFFER_SIZE];
+static size_t SD_buffer_offset = 0;
 
 // ===================================================================
 // Option 1: Binary buffer large (fastest, smallest)
 // ===================================================================
-//void buffer_SD_data_binary(const SensorData *sensor_data)
-//{
-//    // Check if there's space for another reading
-//    if (SD_buffer_offset + TOTAL_READING_SIZE <= SD_HALF_BUFFER)
-//    {
-//        // Copy current sensor reading into buffer
-//        memcpy(&SD_buffer[SD_buffer_offset], sensor_data, SENSOR_READING_SIZE);
-//        SD_buffer_offset += SENSOR_READING_SIZE;
-//    }
-//    
-//    // Write to SD when buffer is full
-//    if (SD_buffer_offset >= SD_HALF_BUFFER)
-//    {
-//        esp_err_t err = sd_write("sensor_data.bin", SD_buffer, SD_HALF_BUFFER);
-//        if (err == ESP_OK)
-//        {
-//            ESP_LOGI(TAG, "Wrote %d readings (%zu bytes) to SD", 
-//                     READINGS_PER_BUFFER, SD_HALF_BUFFER);
-//        }
-//        else
-//        {
-//            ESP_LOGE_CAPTURED(ERROR_BIT_24, TAG, "Failed to write buffer to SD");
-//        }
-//        SD_buffer_offset = 0;  // Reset for next batch
-//    }
-//}
-
-void buffer_SD_data_csv(MainSystemStatusPacket *system_status_packet)//SensorData *sensor_data)
+void buffer_SD_data_binary(const SensorData *sensor_data)
 {
-    if (system_status_packet == nullptr){
-        ESP_LOGE(TAG,"System status packet is nullpointer"); 
-        return;
+    // Check if there's space for another reading
+    if (SD_buffer_offset + SENSOR_READING_SIZE <= SD_BUFFER_SIZE)
+    {
+        // Copy current sensor reading into buffer
+        memcpy(&SD_buffer[SD_buffer_offset], sensor_data, SENSOR_READING_SIZE);
+        SD_buffer_offset += SENSOR_READING_SIZE;
     }
-    SensorData *sensor_datas = &system_status_packet->sensor_data;
-
-    if (first_entry_time_us < 0) {
-        first_entry_time_us = esp_timer_get_time();
+    
+    // Write to SD when buffer is full
+    if (SD_buffer_offset >= SD_BUFFER_SIZE)
+    {
+        esp_err_t err = sd_write("sensor_data.bin", SD_buffer, SD_BUFFER_SIZE);
+        if (err == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Wrote %d readings (%zu bytes) to SD", 
+                     READINGS_PER_BUFFER, SD_BUFFER_SIZE);
+        }
+        else
+        {
+            ESP_LOGE_CAPTURED(ERROR_BIT_24, TAG, "Failed to write buffer to SD");
+        }
+        SD_buffer_offset = 0;  // Reset for next batch
     }
+}
 
-    if (sensor_datas == NULL) return;
+void buffer_SD_data_csv(SensorData *sensor_data)
+{
+    if (sensor_data == NULL) return;
 
     // Create temp CSV line to store (increased size to 1024 to fit all expanded sensor fields)
-    static char line[1024];
-    static char sline[128];
-
+    char line[1024];
     int n = snprintf(line, sizeof(line),
         "%02u,%02u,%02u,"
         "%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,"
@@ -356,78 +147,43 @@ void buffer_SD_data_csv(MainSystemStatusPacket *system_status_packet)//SensorDat
         "%u,%u,%.2f,"
         "%u,%u,%u,"
         "%u,%.2f,%u,%u,%u\n",
-        sensor_datas->hours,
-        sensor_datas->minutes,
-        sensor_datas->seconds,
-        sensor_datas->Tp1, sensor_datas->Tp2, sensor_datas->Tp3, sensor_datas->Tp6, 
-        sensor_datas->Pp3, sensor_datas->Tp4, sensor_datas->Pp1, sensor_datas->Pa1, 
-        sensor_datas->Ta1, sensor_datas->Ta2, sensor_datas->Ta3, sensor_datas->Ha1, 
-        sensor_datas->Tp5, sensor_datas->Pp2,
-        sensor_datas->Tt1, sensor_datas->Tt2, sensor_datas->Tt3,
+        sensor_data->hours,
+        sensor_data->minutes,
+        sensor_data->seconds,
+        sensor_data->Tp1, sensor_data->Tp2, sensor_data->Tp3, sensor_data->Tp6, 
+        sensor_data->Pp3, sensor_data->Tp4, sensor_data->Pp1, sensor_data->Pa1, 
+        sensor_data->Ta1, sensor_data->Ta2, sensor_data->Ta3, sensor_data->Ha1, 
+        sensor_data->Tp5, sensor_data->Pp2,
+        sensor_data->Tt1, sensor_data->Tt2, sensor_data->Tt3,
         // K96 fields mapping
-        (long)sensor_datas->K96_LPL_Signal, sensor_datas->K96_LPL_Signal_filtered,
-        (long)sensor_datas->K96_SPL_Signal, sensor_datas->K96_SPL_Signal_filtered,
-        (long)sensor_datas->K96_MPL_Signal, sensor_datas->K96_MPL_Signal_filtered,
-        sensor_datas->K96_ADuCdie_Temp, sensor_datas->K96_ADuCdie_Temp_filtered,
-        sensor_datas->K96_NTC0_Temp, sensor_datas->K96_NTC0_Temp_filtered,
-        sensor_datas->K96_NTC1_Temp, sensor_datas->K96_NTC1_Temp_filtered,
-        sensor_datas->K96_RH, sensor_datas->K96_RH_Temp,
-        sensor_datas->K96_MPL_uflt_IR_Signal, sensor_datas->K96_MPL_flt_IR_Signal,
-        sensor_datas->K96_MPL_uflt_Conc, sensor_datas->K96_MPL_flt_Conc, sensor_datas->K96_MPL_uflt_Error,
-        sensor_datas->K96_LPL_uflt_IR_Signal, sensor_datas->K96_LPL_flt_IR_Signal, sensor_datas->K96_LPL_uflt_Conc,
-        sensor_datas->K96_LPL_uflt_Error, sensor_datas->K96_LPL_flt_Error,
-        sensor_datas->K96_SPL_uflt_IR_Signal, sensor_datas->K96_SPL_flt_IR_Signal, sensor_datas->K96_SPL_uflt_Conc,
-        sensor_datas->K96_SPL_uflt_Error, sensor_datas->K96_SPL_flt_Error, sensor_datas->K96_error
+        (long)sensor_data->K96_LPL_Signal, sensor_data->K96_LPL_Signal_filtered,
+        (long)sensor_data->K96_SPL_Signal, sensor_data->K96_SPL_Signal_filtered,
+        (long)sensor_data->K96_MPL_Signal, sensor_data->K96_MPL_Signal_filtered,
+        sensor_data->K96_ADuCdie_Temp, sensor_data->K96_ADuCdie_Temp_filtered,
+        sensor_data->K96_NTC0_Temp, sensor_data->K96_NTC0_Temp_filtered,
+        sensor_data->K96_NTC1_Temp, sensor_data->K96_NTC1_Temp_filtered,
+        sensor_data->K96_RH, sensor_data->K96_RH_Temp,
+        sensor_data->K96_MPL_uflt_IR_Signal, sensor_data->K96_MPL_flt_IR_Signal,
+        sensor_data->K96_MPL_uflt_Conc, sensor_data->K96_MPL_flt_Conc, sensor_data->K96_MPL_uflt_Error,
+        sensor_data->K96_LPL_uflt_IR_Signal, sensor_data->K96_LPL_flt_IR_Signal, sensor_data->K96_LPL_uflt_Conc,
+        sensor_data->K96_LPL_uflt_Error, sensor_data->K96_LPL_flt_Error,
+        sensor_data->K96_SPL_uflt_IR_Signal, sensor_data->K96_SPL_flt_IR_Signal, sensor_data->K96_SPL_uflt_Conc,
+        sensor_data->K96_SPL_uflt_Error, sensor_data->K96_SPL_flt_Error, sensor_data->K96_error
     );
-
-    //CapturedErrors *cerr = system_status_packet->captured_errors; ---> could be nice to also save 
-    int m = snprintf(sline, sizeof(sline),
-        "%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u\n",
-        sensor_datas->hours,
-        sensor_datas->minutes,
-        sensor_datas->seconds,
-        system_status_packet->operating_mode,
-        system_status_packet->command_received,
-        system_status_packet->connection_lost,
-        system_status_packet->status_ok,
-        system_status_packet->pressure_system_on,
-        system_status_packet->k96_on,
-        system_status_packet->heater_mask,
-        system_status_packet->thermal_online,
-        system_status_packet->thermal_state,
-        system_status_packet->thermal_error,
-        system_status_packet->pressure_state,
-        system_status_packet->pressure_error,
-        system_status_packet->pressure_relay_mask,
-        system_status_packet->pressure_pump1_pwm,
-        system_status_packet->pressure_pump2_pwm,
-        system_status_packet->pressure_compressor_pwm,
-        system_status_packet->pressure_manual_override,
-        system_status_packet->pressure_valve_open,
-        system_status_packet->onboard_logging,
-        system_status_packet->storage_free_pct,
-        system_status_packet->controller_state
-        //cerr.high
-        );
 
     // Check if snprintf encountered an error or truncation
     if (n < 0 || (size_t)n >= sizeof(line))
     {
-        ESP_LOGE_CAPTURED(ERROR_BIT_25, TAG, "sensor CSV line formatting failed or was truncated!");
-        return;
-    }
-    if (m < 0 || (size_t)m >= sizeof(sline))
-    {
-        ESP_LOGE_CAPTURED(ERROR_BIT_25, TAG, "Meta data CSV line formatting failed or was truncated!");
+        ESP_LOGE_CAPTURED(ERROR_BIT_25, TAG, "CSV line formatting failed or was truncated!");
         return;
     }
 
     // If the line doesn't fit, flush current buffer first
     // Extra check since csv can be variable length and might exceed buffer size on its own,
     // in that case we should write it directly instead of trying to buffer it
-    if ((size_t)n + SD_buffer_offset >= SD_HALF_BUFFER)
+    if ((size_t)n + SD_buffer_offset >= SD_BUFFER_SIZE)
     {
-        esp_err_t err = sd_write(current_csv_filename, SD_buffer, SD_buffer_offset);
+        esp_err_t err = sd_write("sensor_data.csv", SD_buffer, SD_buffer_offset);
         if (err == ESP_OK)
         {
             ESP_LOGI(TAG, "Flushed %zu bytes CSV to SD", SD_buffer_offset);
@@ -438,34 +194,18 @@ void buffer_SD_data_csv(MainSystemStatusPacket *system_status_packet)//SensorDat
         }
         SD_buffer_offset = 0;
     }
-    if ((size_t)m + SD_buffer_offset2 >= SD_HALF_BUFFER)
-    {
-        esp_err_t err = sd_write(current_metadata_filename, SD_buffer2, SD_buffer_offset2);
-        if (err == ESP_OK)
-        {
-            ESP_LOGI(TAG, "Flushed %zu bytes log data to SD", SD_buffer_offset2);
-        }
-        else
-        {
-            ESP_LOGE_CAPTURED(ERROR_BIT_26, TAG, "Failed to flush log buffer to SD");
-        }
-        SD_buffer_offset2 = 0;
-    }
 
     // Append the line bytes into the buffer
     memcpy(&SD_buffer[SD_buffer_offset], line, (size_t)n);
-    memcpy(&SD_buffer2[SD_buffer_offset2], sline, (size_t)m);
     SD_buffer_offset += (size_t)n;
-    SD_buffer_offset2 += (size_t)m;
 
     // If buffer full after append, write it out
-    if (SD_buffer_offset >= SD_HALF_BUFFER)
+    if (SD_buffer_offset >= SD_BUFFER_SIZE)
     {
-        //esp_err_t err = sd_write("sensor_data.csv", SD_buffer, SD_HALF_BUFFER);
-        esp_err_t err = sd_write(current_csv_filename, SD_buffer, SD_buffer_offset);
+        esp_err_t err = sd_write("sensor_data.csv", SD_buffer, SD_BUFFER_SIZE);
         if (err == ESP_OK)
         {
-            ESP_LOGI(TAG, "Wrote %zu bytes CSV to SD", SD_HALF_BUFFER);
+            ESP_LOGI(TAG, "Wrote %zu bytes CSV to SD", SD_BUFFER_SIZE);
         }
         else
         {
@@ -473,87 +213,19 @@ void buffer_SD_data_csv(MainSystemStatusPacket *system_status_packet)//SensorDat
         }
         SD_buffer_offset = 0;  // Reset for next batch
     }
-    if (SD_buffer_offset2 >= SD_HALF_BUFFER)
-    {
-        //esp_err_t err = sd_write("sensor_data.csv", SD_buffer, SD_HALF_BUFFER);
-        esp_err_t err = sd_write(current_metadata_filename, SD_buffer2, SD_buffer_offset2);
-        if (err == ESP_OK)
-        {
-            ESP_LOGI(TAG, "Wrote %zu bytes log data to SD", SD_HALF_BUFFER);
-        }
-        else
-        {
-            ESP_LOGE_CAPTURED(ERROR_BIT_27, TAG, "Failed to write log buffer to SD");
-        }
-        SD_buffer_offset2 = 0;  // Reset for next batch
-    }
 }
-/*
-void log_metadata(MetaData *meta_data)
-{
-    if (event_type == nullptr || current_metadata_filename[0] == '\0')
-    {
-        return;
-    }
-
-    time_t now = time(NULL);
-    struct tm timeinfo;
-    localtime_r(&now, &timeinfo);
-
-    char line[256];
-    int n = snprintf(line, sizeof(line),
-                     "%02d,%02d,%02d,%s,%d,%d,0x%02X,%d,%d,%d\n",
-                     timeinfo.tm_hour,
-                     timeinfo.tm_min,
-                     timeinfo.tm_sec,
-                     event_type,
-                     mode,
-                     flight_phase,
-                     heater_mask,
-                     pump_value,
-                     secondary_value,
-                     tertiary_value);
-
-    if (n < 0 || (size_t)n >= sizeof(line))
-    {
-        ESP_LOGE_CAPTURED(ERROR_BIT_25, TAG, "Metadata log line formatting failed or was truncated");
-        return;
-    }
-
-    esp_err_t err = sd_write(current_metadata_filename, (const uint8_t *)line, (size_t)n);
-    if (err != ESP_OK)
-    {
-        ESP_LOGE_CAPTURED(ERROR_BIT_26, TAG, "Failed to log metadata event %s", event_type);
-    }
-}
-
-*/
-
 
 // Flush remaining data (call before shutdown)
 void buffer_SD_data_flush()
 {
-    const char *csv_filename = current_csv_filename[0] != '\0' ? current_csv_filename : "sensor_data.csv";
-
     if (SD_buffer_offset > 0)
     {
-        esp_err_t err = sd_write(csv_filename, SD_buffer, SD_buffer_offset);
+        esp_err_t err = sd_write("sensor_data.bin", SD_buffer, SD_buffer_offset);
         if (err == ESP_OK)
         {
             ESP_LOGI(TAG, "Flushed %zu bytes to SD", SD_buffer_offset);
         }
         SD_buffer_offset = 0;
-    }
-    const char *meta_filename = current_metadata_filename[0] != '\0' ? current_metadata_filename : "meta_data.csv";
-
-    if (SD_buffer_offset2 > 0)
-    {
-        esp_err_t err = sd_write(meta_filename, SD_buffer2, SD_buffer_offset2);
-        if (err == ESP_OK)
-        {
-            ESP_LOGI(TAG, "Flushed %zu bytes to SD", SD_buffer_offset2);
-        }
-        SD_buffer_offset2 = 0;
     }
 }
 
@@ -598,22 +270,6 @@ esp_err_t sd_mount(void)
     }
 
     s_mounted = true;
-    first_entry_time_us = -1;
-    datetime_synchronized = false;
-    create_unique_csv_filename();
-    create_unique_metadata_filename();
-    esp_err_t csv_err = create_new_csv_file();
-    if (csv_err != ESP_OK)
-    {
-        ESP_LOGW(TAG, "Failed to create initial CSV log file; continuing with mount");
-    }
-
-    esp_err_t metadata_err = create_new_metadata_log();
-    if (metadata_err != ESP_OK)
-    {
-        ESP_LOGW(TAG, "Failed to create metadata log file; continuing with mount");
-    }
-
     ESP_LOGI(TAG, "SD card mounted at %s", SD_MOUNT_POINT);
     return ESP_OK;
 }
@@ -659,14 +315,6 @@ bool sd_get_free_percent(uint8_t *free_percent)
 
 esp_err_t sd_write(const char *filename, const uint8_t *data, size_t length)
 {
-    
-    if (filename[0] == '\0')
-    {
-        create_new_csv_file();
-        create_new_metadata_log();
-        return ESP_FAIL;
-    }
-
     char path[SD_MAX_PATH_LEN];
     snprintf(path, sizeof(path), "%s/%s", SD_MOUNT_POINT, filename);
 
@@ -694,13 +342,6 @@ esp_err_t sd_write(const char *filename, const uint8_t *data, size_t length)
 esp_err_t sd_read(const char *filename, uint8_t *out_buf,
                   size_t buf_size, size_t *bytes_read)
 {
-    if (filename[0] == '\0')
-    {
-        create_new_csv_file();
-        create_unique_metadata_filename();
-
-    }
-
     char path[SD_MAX_PATH_LEN];
     snprintf(path, sizeof(path), "%s/%s", SD_MOUNT_POINT, filename);
 
@@ -737,13 +378,7 @@ esp_err_t sd_wipe_files(void)
             continue;
 
         char path[SD_MAX_PATH_LEN];
-        const int path_len = snprintf(path, sizeof(path), "%s/%s", SD_MOUNT_POINT, entry->d_name);
-        if (path_len < 0 || (size_t)path_len >= sizeof(path))
-        {
-            ESP_LOGE_CAPTURED(ERROR_BIT_33, TAG, "Path too long for directory entry %s", entry->d_name);
-            failed++;
-            continue;
-        }
+        //snprintf(path, sizeof(path), "%s/%s", SD_MOUNT_POINT, entry->d_name);
 
         if (unlink(path) != 0)
         {
@@ -757,14 +392,7 @@ esp_err_t sd_wipe_files(void)
     }
 
     closedir(dir);
-    SD_buffer_offset  = 0;
-    SD_buffer_offset2 = 0;
-    current_csv_filename[0]      = '\0';
-    current_metadata_filename[0] = '\0';
-    first_entry_time_us = -1;
-    datetime_synchronized = false;
-    create_new_csv_file();
-    create_new_metadata_log();
+
     if (failed > 0)
     {
         ESP_LOGW(TAG, "%d file(s) could not be deleted", failed);

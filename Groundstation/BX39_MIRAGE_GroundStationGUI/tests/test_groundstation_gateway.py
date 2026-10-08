@@ -4,7 +4,6 @@ import binascii
 import struct
 import tempfile
 import unittest
-from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -171,12 +170,6 @@ class StatusPacketParserTest(unittest.TestCase):
     def test_bad_packet_size_is_rejected(self):
         with self.assertRaises(ValueError):
             gateway.parse_status_packet(b"short")
-
-
-class DatetimeProtocolTest(unittest.TestCase):
-    def test_datetime_response_uses_ascii_wire_format(self):
-        response = gateway.format_datetime_response(datetime(2026, 10, 6, 12, 34, 56, tzinfo=timezone.utc))
-        self.assertEqual(response, b"DATETIME_RESPONSE:2026-10-06T12:34:56\n")
 
 
 class FrontendCommandContractTest(unittest.TestCase):

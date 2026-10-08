@@ -98,12 +98,12 @@ extern spi_device_handle_t WIZ_handle;
 
 // SD Card settings
 #define SD_MOUNT_POINT "/sdcard" // Used to build path name
-#define SD_MAX_PATH_LEN 96
+#define SD_MAX_PATH_LEN 64
 
 #define SD_BUFFER_SIZE 8 * 512 // In bytes, min 512 bytes
 
 #define SENSOR_READING_SIZE sizeof(SensorData)
-//#define READINGS_PER_BUFFER (SD_BUFFER_SIZE / SENSOR_READING_SIZE)
+#define READINGS_PER_BUFFER (SD_BUFFER_SIZE / SENSOR_READING_SIZE)
 
 
 // Uart
