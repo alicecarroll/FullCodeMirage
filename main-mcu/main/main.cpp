@@ -484,7 +484,7 @@ bool handle_command()
 static esp_err_t send_system_status_packet()
 {
 
-    MainSystemStatusPacket system_status_packet  = {};
+    ::system_status_packet  = {};
     system_status_packet.sensor_data = sensor_data;
     system_status_packet.operating_mode = static_cast<uint8_t>(mode);
     system_status_packet.command_received = command_received ? 1 : 0;
@@ -503,6 +503,15 @@ static esp_err_t send_system_status_packet()
 
     for(int i=0; i<number_channels_thermal; i++){ //adds the errors to the groundstation array
         system_status_packet.thermal_error[i] = thermal_data_received_array[i].error;
+        if (system_status_packet.thermal_error[i]!=0){
+            ESP_LOGE_CAPTURED(
+                static_cast<ErrorBit>(75 + i),
+                TAG,
+                "Thermal error on channel %d: %d",
+                i,
+                system_status_packet.thermal_error[i]
+            );
+        }
     }
 
     if(thermal_data_received_array[0].global_error!=0){ //The first element of array shows if global error if error[0]//10==1 => no i2c and error[0]//10==2 0=> crc8 error

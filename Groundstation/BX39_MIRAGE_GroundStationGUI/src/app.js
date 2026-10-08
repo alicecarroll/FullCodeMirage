@@ -3,7 +3,7 @@
 
   const MAX_SAMPLES = 120;
   const TELEMETRY_PERIOD_MS = 1000;
-  const EXPECTED_PACKET_SIZE = 217;
+  const EXPECTED_PACKET_SIZE = 230;
 
   const RELAY_LINES = [
     { id: "relay1", label: "PDB relay 1", pin: "GPIO48 / PDB pin 1" },
@@ -1807,7 +1807,10 @@
     const linkQuality = sample.valid ? sample.linkQuality : 0;
 
     setChip(dom.overallHealth, healthLabel(health), health);
-    renderHealthDetails(sample && sample.valid ? sample.errors : []);
+    renderHealthDetails(
+      sample && sample.valid ? sample.errors : [],
+      sample && sample.valid ? sample.thermalErrors : []
+    );
     setChip(dom.missionMode, resolveMissionMode(display), "neutral");
     setChip(dom.linkState, linkLabel(linkStatus), linkStatus === "ONLINE" ? "healthy" : linkStatus === "DEGRADED" ? "warning" : "dropout");
 
@@ -1838,22 +1841,6 @@
       setMetricState(dom.metricTemperature, temperatureState(display.chamberTempC_K96));
       setMetricState(dom.metricHumidity, humidityState(display.humidityRh_ambient));
       setMetricState(dom.metricLink, linkStatus === "DROPOUT" ? "dropout" : linkQuality < 75 ? "warning" : "healthy");
-       // Loop through each of the 8 thermal switch errors
-      if (display && Array.isArray(display.thermalErrors)) {
-        display.thermalErrors.forEach((errorCode, index) => {
-          if (errorCode !== 0) {
-            const channelInfo = THERMAL_CHANNELS[index];
-            const errorText = THERMAL_ERROR_MODES[errorCode] || `Error code ${errorCode}`;
-            
-            // Log warning when an error is detected
-            log.add(
-              "warn", 
-              `Thermal CH${index + 1} Error`, 
-              `${channelInfo ? channelInfo.label : 'Switch ' + index}: ${errorText}`
-            );
-          }
-        });
-      }
     }
 
     renderActuatorState(display);
@@ -2723,21 +2710,41 @@
     }
   }
 
-  function renderHealthDetails(errors) {
+  function renderHealthDetails(errors, thermalErrors) {
     const detected = Array.isArray(errors) ? errors : [];
+    const thermalDetected = Array.isArray(thermalErrors)
+      ? thermalErrors.reduce(function (entries, errorCode, index) {
+          if (errorCode !== 0) {
+            const channelInfo = THERMAL_CHANNELS[index];
+            const errorText = THERMAL_ERROR_MODES[errorCode] || `Error code ${errorCode}`;
+            entries.push({
+              thermalChannel: index + 1,
+              message: `${channelInfo ? channelInfo.label : "Switch " + index}: ${errorText}`
+            });
+          }
+          return entries;
+        }, [])
+      : [];
+    const allErrors = detected.concat(thermalDetected);
+    const previousList = dom.healthDetails.querySelector("ul");
+    const previousScrollTop = previousList ? previousList.scrollTop : 0;
+
     dom.healthDetails.innerHTML = "<strong>Detected errors</strong>";
-    if (!detected.length) {
+    if (!allErrors.length) {
       dom.healthDetails.insertAdjacentHTML("beforeend", '<span class="health-empty">No captured errors in this loop</span>');
       return;
     }
 
     const list = document.createElement("ul");
-    detected.forEach(function (error) {
+    allErrors.forEach(function (error) {
       const item = document.createElement("li");
-      item.textContent = "Bit " + error.bit + ": " + error.message;
+      item.textContent = error.thermalChannel
+        ? `Thermal CH${error.thermalChannel} Error: ${error.message}`
+        : "Bit " + error.bit + ": " + error.message;
       list.appendChild(item);
     });
     dom.healthDetails.appendChild(list);
+    list.scrollTop = previousScrollTop;
   }
 
   function setMetricState(element, state) {
