@@ -510,26 +510,6 @@ static void read_ds3231(uint8_t *hours, uint8_t *minutes, uint8_t *seconds)
     }
 }
 
-void reset_ds3231_time()
-// This is necessary, because the rtc can have a wrong time if the main-mcu was powered for longer but only recently flashed.
-{
-    sel_mux_channel(multiplex_RTC_Tp2);
-    vTaskDelay(pdMS_TO_TICKS(20));
-
-    uint8_t data[] = {0x00, 0x00, 0x00, 0x00};
-    esp_err_t err = i2c_master_write_to_device(
-        I2C_master,
-        RTC_addr,
-        data,
-        sizeof(data),
-        pdMS_TO_TICKS(20));
-
-    if (err != ESP_OK)
-    {
-        ESP_LOGE_CAPTURED(ERROR_BIT_74, TAG, "- RTC reset failed: %s", esp_err_to_name(err));
-    }
-}
-
 // Collect all sensor data
 void read_sensors()
 {

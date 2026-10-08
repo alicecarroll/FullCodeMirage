@@ -100,7 +100,6 @@ void read_ms5803(
 
 
 void read_sensors();
-void reset_ds3231_time();
 
 
     /**
