@@ -45,6 +45,7 @@ bool system_ok = true;
 
 // Watchdog variables for tracking slave pings locally inside the loop
 #define SLAVE_WATCHDOG_TIMEOUT_MS 5000
+uint16_t current_slave_watchdog_timeout = SLAVE_WATCHDOG_TIMEOUT_MS;
 uint32_t last_thermal_ping_time = 0;
 uint32_t last_pressure_ping_time = 0;
 int16_t thermal_watchdog_count = 0; // Count of subsequent times the thermal slave is reset
@@ -67,7 +68,8 @@ bool con_lost = false; // To track connection status
 bool status_ok = true;
 CapturedErrors captured_errors = {};
 CapturedErrors captured_errors_for_k96 = {}; // To store the captured errors for K96 before clearing them
-int32_t LOOP_RETRY_CONNECTION = 10; // Number of loops to wait before retrying connection
+#define LOOP_RETRY_CONNECTION 10 // Number of loops to wait before retrying connection
+int32_t loop_retry_connection = LOOP_RETRY_CONNECTION; // Number of loops to wait before retrying connection
 int64_t loss_timestamp_us = -1; // To track when connection was lost for termination
 int loops_since_connection = 0; // To buffer short con losses for stable running
 static SlaveStatus thermal_status = {};
@@ -84,18 +86,14 @@ static bool k96_manual_override = false;
 static bool k96_manual_state = false;
 static HeaterSystem *heater_system = nullptr;
 
-//Values for thermal slave
-uint8_t number_channels_thermal=8;  //0-8 depending on the number of switches used
-//Variables for thermal under this comment will need to have value assigned in loop. Currently using placeholders (Remove comment when this has changed)
-uint8_t thermal_mode=1; //0 bang bang 1 PID 155-255 D_cycle
-int16_t thermal_currentTemp=2000; // 5000 = 50,0C  
-int16_t thermal_target=2000;
-int16_t thermal_watchdog_tolerance=3000; // 1 according to SEDv3. Number of subsequent times where the thermal slave is reset. If reset more than this number of times, the thermal MCU will be considered lost.
-bool thermal_mcu_lost=false; // To track if the thermal slave is lost.
+//Thresholds 
+float max_pressure_threshold = P_STRATOSPHERE; // Maximum pressure threshold for status check
+int max_loops_without_connection = LOOP_WO_CONNECTION;
+float max_chamber_pressure_threshold = CHAMBER_P_SHUTTER_THRESHOLD; // Maximum chamber pressure threshold for status check
+float min_inlet_temperature_threshold = INLET_TEMPERATURE_THRESHOLD; // Minimum inlet temperature threshold for status check
 
-//Data recieved from thermal this struct is defined under slaves.h For errors 0 is thats ok anything else is error
-ThermalDataValues thermal_data_received_array[8];
-int16_t thermal_current_temperatures[8];
+static bool reset_overrides(const std::string &target);
+static bool reset_thresholds(const std::string &target);
 
 
 struct QueuedPressureCommand {
@@ -395,6 +393,32 @@ bool handle_command()
         return true;
     }
 
+    constexpr char RESET_OVERRIDE_PREFIX[] = "RESET OVERRIDE ";
+    if (ethernet_command_text.rfind(RESET_OVERRIDE_PREFIX, 0) == 0)
+    {
+        const std::string target = ethernet_command_text.substr(sizeof(RESET_OVERRIDE_PREFIX) - 1);
+        if (reset_overrides(target))
+        {
+            ESP_LOGI(TAG, "Override reset: %s", target.c_str());
+            return true;
+        }
+        ESP_LOGW(TAG, "Unknown override reset target: %s", target.c_str());
+        return false;
+    }
+
+    constexpr char RESET_THRESHOLD_PREFIX[] = "RESET THRESHOLD ";
+    if (ethernet_command_text.rfind(RESET_THRESHOLD_PREFIX, 0) == 0)
+    {
+        const std::string target = ethernet_command_text.substr(sizeof(RESET_THRESHOLD_PREFIX) - 1);
+        if (reset_thresholds(target))
+        {
+            ESP_LOGI(TAG, "Threshold reset: %s", target.c_str());
+            return true;
+        }
+        ESP_LOGW(TAG, "Unknown threshold reset target: %s", target.c_str());
+        return false;
+    }
+
     if (ethernet_command_text == "K96 ON")
     {
         k96_manual_override = true;
@@ -588,6 +612,23 @@ static void handle_ethernet_receive_status(esp_err_t esp_err_status)
     }
 }
 
+//Values for thermal slave
+uint8_t number_channels_thermal=8;  //0-8 depending on the number of switches used
+//Variables for thermal under this comment will need to have value assigned in loop. Currently using placeholders (Remove comment when this has changed)
+uint8_t thermal_mode=1; //0 bang bang 1 PID 155-255 D_cycle
+int16_t thermal_currentTemp=2000; // 5000 = 50,0C  
+int16_t thermal_target=2000;
+#define THERMAL_WATCHDOG_TOL 3000
+int16_t thermal_watchdog_tolerance = THERMAL_WATCHDOG_TOL; // 1 according to SEDv3. Number of subsequent times where the thermal slave is reset. If reset more than this number of times, the thermal MCU will be considered lost.
+bool thermal_mcu_lost=false; // To track if the thermal slave is lost.
+//Data recieved from thermal
+uint8_t received_channel_id_thermal; //Reason i seperate recieved and sent is to be able to compare later if data packet made it
+uint8_t received_mode_thermal;
+uint8_t received_power_thermal;
+uint16_t received_target_thermal;
+uint8_t status_thermal;
+uint8_t error_thermal;
+int16_t thermal_current_temperatures[8];
 
 // The chamber heater is controlled from the two K96 NTCs. Do not pass an
 // invalid or stale chamber temperature to the thermal MCU: -99.00 C is its
@@ -619,11 +660,11 @@ static int16_t chamber_heater_temperature(const SensorData &sensor_data)
 static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_ms){
     uint8_t chosen_channel_id_thermal=0x00; //0x00- 0x07
     //temperature array used for temperature data for thermal
-    thermal_current_temperatures[0] = static_cast<int16_t>(std::lround(sensor_data.Tt2 * 100.0f)); //SD-card heater
+    thermal_current_temperatures[0] = static_cast<int16_t>(std::lround(sensor_data.Tt2 * 100.0f));
     // H2 / channel 1: chamber heater, referenced to the average K96 NTC0/NTC1.
     thermal_current_temperatures[1] = chamber_heater_temperature(sensor_data);
-    thermal_current_temperatures[2] = static_cast<int16_t>(std::lround(sensor_data.Tp3 * 100.0f)); //Outlet
-    thermal_current_temperatures[3] = static_cast<int16_t>(std::lround(sensor_data.Tt3 * 100.0f)); //Inlet
+    thermal_current_temperatures[2] = static_cast<int16_t>(std::lround(sensor_data.Tp3 * 100.0f));
+    thermal_current_temperatures[3] = static_cast<int16_t>(std::lround(sensor_data.Tt3 * 100.0f));
     thermal_current_temperatures[4] = static_cast<int16_t>(std::lround(sensor_data.Tp5 * 100.0f));
     thermal_current_temperatures[5] = static_cast<int16_t>(std::lround(sensor_data.Tp6 * 100.0f));
     thermal_current_temperatures[6] = static_cast<int16_t>(std::lround(sensor_data.Tt1 * 100.0f));
@@ -643,23 +684,24 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
 
     if (thermal_tx_ok)
     {
-        if (thermal_receive_big_packet(
-            thermal_mcu,
-            thermal_data_received_array
-        ))
+        if (thermal_test_receive_package(  //when passing variable to this one remember to pass as &channel_id for all pointer
+    thermal_mcu,
+    &received_channel_id_thermal,
+    &received_mode_thermal,
+    &received_power_thermal,
+    &received_target_thermal,
+    &status_thermal,
+    &error_thermal))
         {
             //Info recieved from thermal Used for trouble-shooting
             last_thermal_ping_time = current_time_ms;
-            for(int i=0;i<8;i++){
-            ESP_LOGI(TAG, "Feedback from thermal slave - Channel: %u, Mode: %u, Power: %u, Target: %f, Error: %u,Global Error: %u, ",
-            i, 
-            thermal_data_received_array[i].mode,
-            thermal_data_received_array[i].duty_cycle,
-            thermal_data_received_array[i].target,
-            thermal_data_received_array[i].error,
-            thermal_data_received_array[i].global_error);
-            }
-            
+            ESP_LOGI(TAG, "Feedback from thermal slave - Channel: %u, Mode: %u, Power: %u, Target: %u, Status: %u, Error: %u",
+            received_channel_id_thermal, 
+            received_mode_thermal,
+            received_power_thermal,
+            received_target_thermal,
+            status_thermal,
+            error_thermal);
         }
         else
         {
@@ -672,7 +714,7 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
     }
 
     //Watchdog reset for thermal
-    if ((current_time_ms - last_thermal_ping_time) > SLAVE_WATCHDOG_TIMEOUT_MS)
+    if ((current_time_ms - last_thermal_ping_time) > current_slave_watchdog_timeout)
     {
         ESP_LOGW(TAG, "!!! Watchdog Triggered: Thermal MCU timed out. Resetting device via Pin %d !!!", Thermal_reset_PIN);
         slave_reset(thermal_mcu);
@@ -689,8 +731,9 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
 
 //Pressure
 bool shutters_open = false; // To track if shutters are open
-int16_t pressure_watchdog_tolerance=3000; // 1 according to SEDv3. Number of subsequent times where the pressure slave is reset. If reset more than this number of times, the pressure MCU will be considered lost.
-bool pressure_mcu_lost=false; // To track if the pressure slave is lost.
+#define PRESSURE_WATCHDOG_TOL 3000
+int16_t pressure_watchdog_tolerance = PRESSURE_WATCHDOG_TOL; // 1 according to SEDv3. Number of subsequent times where the pressure slave is reset. If reset more than this number of times, the pressure MCU will be considered lost.
+bool pressure_mcu_lost = false; // To track if the pressure slave is lost.
 
 static void commands_comms_pressure_mcu(uint8_t cmd, uint8_t info_bit=0)
 {
@@ -740,7 +783,7 @@ static void comms_pressure_default(SensorData &sensor_data, uint32_t current_tim
     }
 
     // Watchdog reset for pressure
-    if ((current_time_ms - last_pressure_ping_time) > SLAVE_WATCHDOG_TIMEOUT_MS)
+    if ((current_time_ms - last_pressure_ping_time) > current_slave_watchdog_timeout)
     {
         ESP_LOGW(TAG, "!!! Watchdog Triggered: Pressure MCU timed out. Resetting device via Pin %d !!!", Pressure_reset_PIN);
         slave_reset(pressure_mcu);
@@ -752,6 +795,74 @@ static void comms_pressure_default(SensorData &sensor_data, uint32_t current_tim
             ESP_LOGE_CAPTURED(ERROR_BIT_54, TAG, "!!! Pressure MCU considered lost after %d resets. Manual intervention required. !!!", pressure_watchdog_count);
         }
     }
+}
+
+static bool reset_overrides(const std::string &target)
+{
+    const bool reset_all = target == "ALL";
+    const bool reset_heaters = reset_all || target == "HEATERS";
+    if (reset_heaters && heater_system == nullptr)
+    {
+        ESP_LOGE(TAG, "Cannot reset heater overrides before heater system initialization");
+        return false;
+    }
+
+    if (reset_all || target == "MODE")
+    {
+        manual_mode_overwrite = false;
+    }
+    if (reset_all || target == "K96")
+    {
+        k96_manual_override = false;
+        k96_manual_state = false;
+    }
+    //TEST(Lydia)
+    //This should reset the heaters. Will the init call cause issues?
+    if (reset_heaters)
+    {
+        heater_system_init(heater_system);
+        active_heater_mask = 0x00;
+    }
+
+    return reset_all || target == "MODE" || target == "K96" || target == "HEATERS";
+}
+
+static bool reset_thresholds(const std::string &target)
+{
+    const bool reset_all = target == "ALL";
+
+    if (reset_all || target == "MAX_PRESSURE")
+        max_pressure_threshold = P_STRATOSPHERE;
+    else if (target == "CONNECTION_LOSS")
+        max_loops_without_connection = LOOP_WO_CONNECTION;
+    else if (target == "CHAMBER_PRESSURE")
+        max_chamber_pressure_threshold = CHAMBER_P_SHUTTER_THRESHOLD;
+    else if (target == "INLET_TEMPERATURE")
+        min_inlet_temperature_threshold = INLET_TEMPERATURE_THRESHOLD;
+    else if (target == "WATCHDOG_TIMEOUT")
+        current_slave_watchdog_timeout = SLAVE_WATCHDOG_TIMEOUT_MS;
+    else if (target == "THERMAL_WATCHDOG_TOLERANCE")
+        thermal_watchdog_tolerance = THERMAL_WATCHDOG_TOL;
+    else if (target == "PRESSURE_WATCHDOG_TOLERANCE")
+        pressure_watchdog_tolerance = PRESSURE_WATCHDOG_TOL;
+    else if (target == "RETRY_INTERVAL")
+        loop_retry_connection = LOOP_RETRY_CONNECTION;
+    else if (!reset_all)
+        return false;
+
+    if (reset_all)
+    {
+        max_pressure_threshold = P_STRATOSPHERE;
+        max_loops_without_connection = LOOP_WO_CONNECTION;
+        max_chamber_pressure_threshold = CHAMBER_P_SHUTTER_THRESHOLD;
+        min_inlet_temperature_threshold = INLET_TEMPERATURE_THRESHOLD;
+        current_slave_watchdog_timeout = SLAVE_WATCHDOG_TIMEOUT_MS;
+        thermal_watchdog_tolerance = THERMAL_WATCHDOG_TOL;
+        pressure_watchdog_tolerance = PRESSURE_WATCHDOG_TOL;
+        loop_retry_connection = LOOP_RETRY_CONNECTION;
+    }
+
+    return true;
 }
 
 // ESP-IDF expects main in C
@@ -815,8 +926,8 @@ void loop()
 
 
     // Ethernet Receive Block
-    if (con_lost && loops_since_connection % LOOP_RETRY_CONNECTION == 0)
-    // Try to reestablish connection if lost every LOOP_RETRY_CONNECTION loops
+    if (con_lost && loops_since_connection % loop_retry_connection == 0)
+    // Try to reestablish connection if lost every loop_retry_connection loops
     {
         if (wiz_connect(targetip, REMOTE_PORT)== ESP_OK)
         {
@@ -850,7 +961,7 @@ void loop()
     print_sensor_data(&sensor_data);
 
     // Status Check Block
-    if (sensor_data.Pa1 < P_STRATOSPHERE)
+    if (sensor_data.Pa1 < max_pressure_threshold)
     {
         if (flightphase == 0) // If flightphase was in ascent, switch it to float
         {
@@ -942,7 +1053,7 @@ void loop()
             //if (slave_read_status(pressure_mcu, &pressure_status)) {
             //    last_pressure_ping_time = current_time_ms;
             //}
-            //if ((current_time_ms - last_pressure_ping_time) > SLAVE_WATCHDOG_TIMEOUT_MS) {
+            //if ((current_time_ms - last_pressure_ping_time) > current_slave_watchdog_timeout) {
             //    ESP_LOGE(TAG, "!!! Watchdog Triggered: Pressure MCU timed out. Resetting device via Pin %d !!!", Preassure_reset_PIN);
             //    slave_reset(pressure_mcu);
             //    last_pressure_ping_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
@@ -1019,12 +1130,12 @@ void loop()
         }
 
         // Elevation check in terms of pressure
-        if (sensor_data.Pa1 < P_STRATOSPHERE)
+        if (sensor_data.Pa1 < max_pressure_threshold)
         {
-            if (loops_since_connection > LOOP_WO_CONNECTION) // If connection lost for more than LOOP_WO_CONNECTION loops, enter safe mode
+            if (loops_since_connection > max_loops_without_connection) // If connection lost for more than LOOP_WO_CONNECTION loops, enter safe mode
             {
                 mode = 2; // Standby
-                ESP_LOGE_CAPTURED(ERROR_BIT_55, TAG, "Connection lost for more than %d loops. Entering standby mode.", LOOP_WO_CONNECTION);
+                ESP_LOGE_CAPTURED(ERROR_BIT_55, TAG, "Connection lost for more than %d loops. Entering standby mode.", max_loops_without_connection);
                 //con_lost = true;
                 //connection_lost(&con_lost, &loss_timestamp_us);
                 //wiz_ping(targetip, "Connection lost. Entering safe mode."); // Why are we pinging when the connection is lost? This seems counterintuitive. If the connection is lost, how can we ping? This might be a logic error or a misunderstanding of the system's state.
@@ -1045,7 +1156,7 @@ void loop()
         //} 
         //Check if pressure in chamber is above threshold, if so, stop pressurisation system. 
         //if (sensor_data.Pp2 + sensor_data.Pa1 > CHAMBER_P_SHUTTER_THRESHOLD) //Why adding the ambient pressure?
-        if (sensor_data.Pp2 > CHAMBER_P_SHUTTER_THRESHOLD)
+        if (sensor_data.Pp2 > max_chamber_pressure_threshold)
         {
             commands_comms_pressure_mcu(PRESSURE_CMD_STOP_PRESSURISATION);
             commands_comms_pressure_mcu(PRESSURE_CMD_VALVE_OPEN);
@@ -1055,7 +1166,7 @@ void loop()
 
         // Thermal check block to see if temperatures are out of limits 
         // Check if inlet temperature is below threshold. If so, stop the pressurisation system and increase inlet temperature first.
-        if (sensor_data.Tt3 < INLET_TEMPERATURE_THRESHOLD)
+        if (sensor_data.Tt3 < min_inlet_temperature_threshold)
         {
             //Thermal communication: increase inlet temperature
             commands_comms_pressure_mcu(PRESSURE_CMD_STOP_PRESSURISATION);
@@ -1148,7 +1259,7 @@ void loop()
     // Delay only the remaining time so the full loop period stays near 1 second.
     TickType_t current_time_stop = xTaskGetTickCount();
     TickType_t elapsed_ticks = current_time_stop - current_time_start;
-    TickType_t target_period_ticks = pdMS_TO_TICKS(200);
+    TickType_t target_period_ticks = pdMS_TO_TICKS(1000);
     if (elapsed_ticks < target_period_ticks)
     {
         time_loop = static_cast<uint16_t>(target_period_ticks - elapsed_ticks);
