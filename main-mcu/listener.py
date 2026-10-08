@@ -1,58 +1,31 @@
+"""Console listener sharing the GUI gateway's packed telemetry contract."""
+import argparse
+import importlib.util
+import json
+from pathlib import Path
 import socket
-import struct
 import threading
 
 
-HOST = "0.0.0.0"
-PORT = 5001
-
-
-def recv_exact(conn, size):
-    data = b""
-
-    while len(data) < size:
-        try:
-            chunk = conn.recv(size-len(data))
-        except socket.timeout:
-            raise
-
-        if not chunk:
-            return None
-
-        data += chunk
-
-    return data
-
-def describe_heaters(mask):
-    names = [f"H{index + 1}" for index in range(8) if mask & (1 << index)]
-    return ", ".join(names) if names else "none"
-
-
-MODE_NAMES = {
-    1: "Test Loop",
-    2: "Standby",
-    3: "Measurement",
-    4: "Humidity",
-}
+GATEWAY_PATH = Path(__file__).resolve().parents[1] / "Groundstation" / "BX39_MIRAGE_GroundStationGUI" / "groundstation_gateway.py"
+spec = importlib.util.spec_from_file_location("groundstation_gateway", GATEWAY_PATH)
+gateway = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gateway)
 
 
 def command_sender(conn, stop_event):
-    print("Type heater commands like: HEATER ON 1, HEATER OFF 1, HEATER ALL ON, HEATER ALL OFF")
+    print("Type payload commands; quit/exit ends this connection.")
     while not stop_event.is_set():
         try:
-            command = input()
+            command = input().strip()
         except EOFError:
             stop_event.set()
             break
-
-        command = command.strip()
         if not command:
             continue
-
         if command.lower() in {"quit", "exit"}:
             stop_event.set()
             break
-
         try:
             conn.sendall(command.encode("utf-8"))
             print(f"Sent command: {command}")
@@ -61,94 +34,43 @@ def command_sender(conn, stop_event):
             stop_event.set()
             break
 
-server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-server.bind((HOST, PORT))
-server.listen(5)
-print(f"Listening on {HOST}:{PORT}...")
 
-while True:  # outer loop: always wait for a (new) connection
-    print("Waiting for connection...")
-    conn, addr = server.accept()
-    conn.settimeout(5.0)
-    print("Connected by", addr)
-    stop_event = threading.Event()
-    sender_thread = threading.Thread(target=command_sender, args=(conn, stop_event), daemon=True)
-    sender_thread.start()
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=5001)
+    parser.add_argument("--legacy-status", action="store_true", help="receive older 230-byte status without current telemetry")
+    args = parser.parse_args()
+    packet_size = gateway.LEGACY_STATUS_PACKET_SIZE if args.legacy_status else gateway.STATUS_PACKET_SIZE
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((args.host, args.port))
+        server.listen(5)
+        print(f"Listening on {args.host}:{args.port}, expecting {packet_size}-byte telemetry...")
+        while True:
+            conn, addr = server.accept()
+            conn.settimeout(5.0)
+            print("Connected by", addr)
+            stop_event = threading.Event()
+            sender = threading.Thread(target=command_sender, args=(conn, stop_event), daemon=True)
+            sender.start()
+            try:
+                seq = 0
+                while not stop_event.is_set():
+                    data = gateway.recv_exact(conn, packet_size)
+                    seq += 1
+                    frame = gateway.parse_status_packet(data, seq=seq)
+                    current = frame["pressureCurrentA"]
+                    print(f"Current: {current:.3f} A" if current is not None else "Current: unavailable")
+                    if frame["pressureOvercurrentTripped"]:
+                        print("OVERCURRENT LATCHED: all four pressure relays OFF; pressure MCU restart required")
+                    print(json.dumps(frame, indent=2, allow_nan=False))
+            except (ConnectionError, OSError, ValueError) as exc:
+                print(f"Connection ended: {exc}")
+            finally:
+                stop_event.set()
+                conn.close()
 
-    try:
-        while not stop_event.is_set():  # inner loop: handle this connection until it drops
-            # Must match MainSystemStatusPacket in SystemStatus.h exactly:
-            # SensorData (179 bytes) + status tail (38 bytes) = 217 bytes.
-            fmt = (
-                '<3B17f'
-                'ididid'
-                '8f'
-                'HHffH'
-                'HHfHH'
-                'HHfHH'
-                'H'
-                '6BH14B16s'
-            )
-            size = struct.calcsize(fmt)
-            expected_packet_size = 217
-            if size != expected_packet_size:
-                raise RuntimeError(f"listener packet layout is {size} bytes, expected {expected_packet_size}")
 
-            data = recv_exact(conn, size)
-
-            if not data:
-                # Peer closed the connection gracefully (0 bytes = clean close)
-                print("Connection closed by peer.")
-                break
-
-            if len(data) == size:
-                values = struct.unpack(fmt, data)
-                (seconds, minutes, hours,
-                Tp1, Tp2, Tp3, Tp6, Pp3, Tp4, Pp1, Pa1, Ta1, Ta2,Ta3, Ha1, Tp5, Pp2,
-                Tt1, Tt2, Tt3,
-                K96_CO2, K96_CH4, K96_H2O, K96_pressure, K96_temperature, K96_humidity,
-                K96_error,
-                operating_mode, command_received, connection_lost, status_ok,
-                pressure_system_on, k96_on, heater_mask, thermal_online, thermal_state,
-                thermal_error, pressure_state, pressure_error, relay_mask,
-                pump1_pwm, pump2_pwm, compressor_pwm,
-                manual_override, valve_open, onboard_logging, storage_free_pct,
-                controller_state, captured_errors_bytes) = values
-                captured_errors = int.from_bytes(captured_errors_bytes, byteorder="little")
-
-                print(f"Mode: {operating_mode} ({MODE_NAMES.get(operating_mode, 'Unknown')})")
-                print(f"Ethernet command received: {'yes' if command_received else 'no'}")
-                print(f"Connection lost: {'yes' if connection_lost else 'no'} | Status OK: {'yes' if status_ok else 'no'}")
-                print(f"Pressure system active: {'yes' if pressure_system_on else 'no'} | K96: {'on' if k96_on else 'off'} | Active heaters: {describe_heaters(heater_mask)}")
-                print(f"Thermal MCU: {'online' if thermal_online else 'offline'} | state={thermal_state} | error={thermal_error}")
-                print(f"Pressure MCU: state={pressure_state} | error={pressure_error} | relays=0x{relay_mask:02X} | "
-                      f"VP1={pump1_pwm}% | VP2={pump2_pwm}% | compressor={compressor_pwm}% | "
-                      f"valve={'open' if valve_open else 'closed'} | "
-                      f"manual_override={'yes' if manual_override else 'no'}")
-                print(f"SD logging: {'yes' if onboard_logging else 'no'} | free={storage_free_pct}% | "
-                      f"controller_state={controller_state}")
-
-                print(f"Time: {hours:02}:{minutes:02}:{seconds:02}")
-                print(f"Ambient: Ta1(Tmp117)= {Ta1:.2}, Pa1(MS5803)={Pa1:.6f}, Ta2(MS5803)={Ta2:.6f}, Ha1={Ha1:.2f}, Ta3(SHT45)={Ta3:.2f}") 
-                print(f"Temperatures of the pumps: Tp1={Tp1:.2f}, Tp2={Tp2:.2f}, Tp3={Tp3:.2f}")
-                print(f"Temperatures and pressures between the pumps: \nPipe2: Tp6={Tp6:.2f}, Pp3={Pp3:.6f}, Pipe3: Tp4={Tp4:.2f}, Pp1={Pp1:.6f}")
-                print(f"Temperature and pressure in the chamber Tp5={Tp5:.2f}, Pp2={Pp2:.6f}")
-                print(f"Temperatures of outlet and inlet: Tt1={Tt1:.2f}, Tt3={Tt3:.2f}")
-                print(f"SD card temperature: Tt2={Tt2:.2f}")
-                print(f"K96_CO2={K96_CO2:.2f}, K96_CH4={K96_CH4:.2f}, K96_H2O={K96_H2O:.2f}")
-                print ("#"*80)
-
-    except ConnectionResetError:
-        # Peer closed the connection abruptly (RST packet) — e.g. ESP32 rebooted/crashed
-        print("Connection was reset by peer.")
-    except socket.timeout:
-            print("No data received for 5 seconds")
-            break
-    except OSError as e:
-        # Catch other socket-related errors so the whole program doesn't crash
-        print(f"Socket error: {e}")
-    finally:
-        stop_event.set()
-        conn.close()
-        # loop goes back to server.accept() and waits for the ESP32 to reconnect
+if __name__ == "__main__":
+    main()

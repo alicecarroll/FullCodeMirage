@@ -45,6 +45,12 @@ void queue_status() {
     frame[5] = status.pump2_pwm;
     frame[6] = status.compressor_pwm;
     frame[7] = crc8(frame, 7);
+    frame[8] = static_cast<uint8_t>(status.current_ma >> 8);
+    frame[9] = static_cast<uint8_t>(status.current_ma & 0xFF);
+    frame[10] = (status.current_valid ? PRESSURE_CURRENT_VALID : 0) |
+                (status.overcurrent_tripped ? PRESSURE_CURRENT_TRIPPED : 0) |
+                (status.current_adc_saturated ? PRESSURE_CURRENT_ADC_SATURATED : 0);
+    frame[11] = crc8(frame, 11);
     i2c_reset_tx_fifo(I2C_PORT);
     i2c_slave_write_buffer(I2C_PORT, frame, sizeof(frame), 0);
 }
@@ -70,6 +76,7 @@ void i2c_task(void *) {
     size_t buffered = 0;
     while (true) {
         const int received = i2c_slave_read_buffer(I2C_PORT, rx + buffered, sizeof(rx) - buffered, pdMS_TO_TICKS(10));
+        pressure_update_current(); // safety first, before commands or automatic outputs
         if (received > 0) buffered += static_cast<size_t>(received);
         while (buffered > 0) {
             size_t frame_length = 0;
@@ -81,8 +88,8 @@ void i2c_task(void *) {
             buffered -= frame_length;
             memmove(rx, rx + frame_length, buffered);
         }
-        queue_status();
         pressure_update();
+        queue_status();
     }
 }
 }

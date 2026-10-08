@@ -36,6 +36,10 @@ typedef struct
     uint8_t compressor_pwm;
     bool valve_open;
     bool relay_manual_override;
+    uint16_t current_ma;      // GPIO12: 1 V = 1 A, so calibrated mV = mA
+    bool current_valid;
+    bool overcurrent_tripped; // active cutoff; clears once a valid reading is below the limit
+    bool current_adc_saturated;
 
 } PressureStatus;
 
@@ -46,6 +50,9 @@ void pressure_init();
 
 // Called every loop
 void pressure_update();
+
+// Read local current and enforce the relay interlock before processing commands.
+void pressure_update_current();
 
 // Called by the communication task when the Main MCU sends its sensor frame.
 void pressure_update_external_sensors(const float sensors[7]);

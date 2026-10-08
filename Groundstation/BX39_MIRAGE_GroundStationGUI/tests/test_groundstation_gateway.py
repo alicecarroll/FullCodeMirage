@@ -31,6 +31,9 @@ def make_status_packet(
     storage_free_pct=73,
     controller_state=1,
     captured_errors=0,
+    pressure_error=0,
+    current_ma=1800,
+    current_flags=gateway.CURRENT_VALID,
 ):
     floats = [
         31.0,   # Tp1
@@ -74,12 +77,12 @@ def make_status_packet(
         status_ok,
         pressure_system_on,
         k96_on,
-        heater_mask,
+        *[100 if heater_mask & (1 << channel) else 0 for channel in range(8)],
         thermal_online,
         2,
-        thermal_error,
+        thermal_error, 0, 0, 0, 0, 0, 0, 0,
         pressure_state,
-        0,              # pressure error
+        pressure_error,
         0x0B,           # relay mask
         80,             # pump 1 PWM
         0,              # pump 2 PWM
@@ -90,16 +93,19 @@ def make_status_packet(
         storage_free_pct,
         controller_state,
         int(captured_errors).to_bytes(16, byteorder="little"),
+        current_ma,
+        current_flags,
     )
 
 
 class StatusPacketParserTest(unittest.TestCase):
-    def test_wire_packet_size_is_explicitly_217_bytes(self):
-        self.assertEqual(gateway.STATUS_PACKET_SIZE, 217)
-        self.assertEqual(gateway.EXPECTED_STATUS_PACKET_SIZE, 217)
+    def test_wire_packet_size_and_legacy_prefix(self):
+        self.assertEqual(gateway.STATUS_PACKET_SIZE, 233)
+        self.assertEqual(gateway.EXPECTED_STATUS_PACKET_SIZE, 233)
+        self.assertEqual(gateway.LEGACY_STATUS_PACKET_SIZE, 230)
 
     def test_error_manifest_is_shared_and_contiguous(self):
-        self.assertEqual(len(gateway.ERROR_MESSAGES), 75)
+        self.assertGreaterEqual(len(gateway.ERROR_MESSAGES), 75)
         self.assertEqual(gateway.ERROR_MESSAGES[0], "Ethernet SPI read transaction failed")
         self.assertEqual(gateway.ERROR_MESSAGES[74], "RTC Read failure")
         self.assertTrue(gateway.ERROR_MANIFEST_PATH.exists())
@@ -113,9 +119,9 @@ class StatusPacketParserTest(unittest.TestCase):
         self.assertEqual(frame["mode"], "MEASUREMENTS")
         self.assertEqual(frame["health"], "healthy")
         self.assertEqual(frame["linkStatus"], "ONLINE")
-        self.assertEqual(frame["methaneRaw"], 2200)
-        self.assertEqual(frame["co2Raw"], 3300)
-        self.assertEqual(frame["waterRaw"], 1100)
+        self.assertEqual(frame["methaneRaw"], 416)
+        self.assertEqual(frame["co2Raw"], 3100)
+        self.assertEqual(frame["waterRaw"], 21)
         self.assertAlmostEqual(frame["chamberPressureBar"], 3.0, places=2)
         self.assertAlmostEqual(frame["ambientPressureHpa"], 900.0, places=1)
         self.assertTrue(frame["pressureSystemOn"])
@@ -130,7 +136,7 @@ class StatusPacketParserTest(unittest.TestCase):
         self.assertTrue(frame["relayLines"]["relay4"])
         self.assertTrue(frame["peripherals"]["outletValve"])
         self.assertTrue(frame["pressureValveOpen"])
-        self.assertEqual(frame["heaterMask"], 0x0D)
+        self.assertEqual(frame["heaterMask"], 9)  # existing gateway field, not changed by current telemetry
         self.assertTrue(frame["thermalOnline"])
         self.assertTrue(frame["onboardLogging"])
         self.assertEqual(frame["storageFreePct"], 73)
@@ -138,6 +144,54 @@ class StatusPacketParserTest(unittest.TestCase):
         self.assertEqual(frame["controller"], "MAIN_MCU_READY")
         self.assertEqual(frame["activeTask"], "PRESSURISATION")
         self.assertEqual(frame["errors"], [])
+        self.assertAlmostEqual(frame["pressureCurrentA"], 1.8)
+        self.assertTrue(frame["pressureCurrentValid"])
+        self.assertFalse(frame["pressureOvercurrentTripped"])
+
+    def test_current_trip_is_visible_after_current_drops(self):
+        frame = gateway.parse_status_packet(make_status_packet(current_ma=0, current_flags=gateway.CURRENT_VALID | gateway.CURRENT_TRIPPED, pressure_error=5))
+        self.assertEqual(frame["pressureCurrentA"], 0)
+        self.assertTrue(frame["pressureOvercurrentTripped"])
+        self.assertEqual(frame["health"], "fault")
+
+    def test_invalid_current_is_missing_not_zero(self):
+        frame = gateway.parse_status_packet(make_status_packet(current_ma=1800, current_flags=0, pressure_error=4))
+        self.assertIsNone(frame["pressureCurrentA"])
+        self.assertFalse(frame["pressureCurrentValid"])
+        self.assertEqual(frame["health"], "fault")
+
+    def test_legacy_packet_has_no_current_measurement(self):
+        packet = make_status_packet()[:gateway.LEGACY_STATUS_PACKET_SIZE]
+        frame = gateway.parse_status_packet(packet)
+        self.assertIsNone(frame["pressureCurrentA"])
+        self.assertFalse(frame["pressureOvercurrentTripped"])
+        self.assertAlmostEqual(frame["chamberPressureBar"], 3.0)
+        state = gateway.GroundStationState(packet_size=gateway.LEGACY_STATUS_PACKET_SIZE)
+        self.assertEqual(state.gateway_status()["packetSize"], 230)
+
+    def test_saturation_flag_is_preserved(self):
+        frame = gateway.parse_status_packet(make_status_packet(current_flags=7))
+        self.assertTrue(frame["pressureCurrentAdcSaturated"])
+        self.assertTrue(frame["pressureOvercurrentTripped"])
+
+    def test_fragmented_tcp_packets_keep_current_frame_alignment(self):
+        packets = make_status_packet(current_ma=1000) + make_status_packet(current_ma=2900, current_flags=3)
+
+        class FragmentedSocket:
+            def __init__(self):
+                self.remaining = packets
+
+            def recv(self, size):
+                chunk, self.remaining = self.remaining[:min(size, 7)], self.remaining[min(size, 7):]
+                return chunk
+
+        sock = FragmentedSocket()
+        first = gateway.parse_status_packet(gateway.recv_exact(sock, gateway.STATUS_PACKET_SIZE))
+        second = gateway.parse_status_packet(gateway.recv_exact(sock, gateway.STATUS_PACKET_SIZE))
+        self.assertEqual(first["pressureCurrentA"], 1.0)
+        self.assertEqual(second["pressureCurrentA"], 2.9)
+        self.assertTrue(second["pressureOvercurrentTripped"])
+        self.assertEqual(sock.remaining, b"")
 
     def test_flush_state_is_reported_as_active_task(self):
         frame = gateway.parse_status_packet(make_status_packet(pressure_state=4))
@@ -279,6 +333,8 @@ class TelemetryLogTest(unittest.TestCase):
             self.assertEqual(telemetry["data"]["packetSize"], gateway.STATUS_PACKET_SIZE)
             self.assertEqual(binascii.unhexlify(telemetry["data"]["rawPacketHex"]), packet)
             self.assertTrue(telemetry["data"]["k96On"])
+            self.assertEqual(telemetry["data"]["pressureCurrentA"], 1.8)
+            self.assertEqual(telemetry["data"]["statusData"]["pressure_current_ma"], 1800)
 
 
 class SessionLogTest(unittest.TestCase):

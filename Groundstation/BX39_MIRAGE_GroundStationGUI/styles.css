@@ -539,6 +539,20 @@ h3 {
   vertical-align: middle;
 }
 
+.supply-current { background: var(--accent); }
+.current-card .chart-head { flex-wrap: wrap; }
+.current-card .chart-head strong { font-variant-numeric: tabular-nums; }
+.current-status-row { padding: 2px 10px 6px; }
+.current-status-row .chip { white-space: normal; }
+.current-legend { padding: 0 10px 4px; color: var(--muted); font-size: 0.75rem; }
+.current-cutoff-key {
+  display: inline-block;
+  width: 18px;
+  border-top: 2px dashed var(--fault);
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
 .methane { background: #61d394; }
 .co2 { background: #7aa6ff; }
 .water { background: #f0c15b; }
@@ -1311,6 +1325,10 @@ lydiatestingstyle {
 
   .view-switch {
     width: 100%;
+  }
+
+  .chart-grid {
+    min-width: 0;
   }
 
   .terminal-form {

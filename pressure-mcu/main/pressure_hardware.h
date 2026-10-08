@@ -9,4 +9,4 @@ void pressure_pump2_set(uint8_t pwm);
 void pressure_compressor_set(uint8_t pwm);
 void pressure_valve_set(bool open);
 void pressure_relay_set(uint8_t relay, bool on);
-
+bool pressure_current_read(uint16_t *current_ma, bool *adc_saturated);

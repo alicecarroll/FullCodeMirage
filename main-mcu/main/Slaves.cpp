@@ -372,13 +372,15 @@ bool pressure_receive_package(
     SlaveDevice slave,
     PressureStatusData* status_out
 ) {
+    // Never forward a stale measurement when the slave read fails.
+    status_out->current_flags &= PRESSURE_CURRENT_TRIPPED;
     uint8_t mux_channel; 
     gpio_num_t reset_pin;
 
     if (!select_slave(slave, &mux_channel, &reset_pin)) return false;
     if (sel_mux_channel(mux_channel) != ESP_OK) return false;
 
-    const int data_length = 8;
+    const int data_length = PRESSURE_STATUS_FRAME_SIZE;
     uint8_t data[data_length] = {};
 
     esp_err_t err = i2c_master_read_from_device(
@@ -390,8 +392,16 @@ bool pressure_receive_package(
         return false;
     }
 
-    if (data[data_length - 1] != computeCRC8(data, data_length - 1)) {
+    if (data[PRESSURE_STATUS_LEGACY_FRAME_SIZE - 1] != computeCRC8(data, PRESSURE_STATUS_LEGACY_FRAME_SIZE - 1)) {
         return false; // CRC mismatch
+    }
+
+    // The original eight-byte status prefix remains readable by old firmware.
+    // Only trust current telemetry when its extension also has a valid CRC.
+    constexpr uint8_t known_flags = PRESSURE_CURRENT_VALID | PRESSURE_CURRENT_TRIPPED | PRESSURE_CURRENT_ADC_SATURATED;
+    if (data[data_length - 1] == computeCRC8(data, data_length - 1) && (data[10] & ~known_flags) == 0) {
+        status_out->current_ma = (static_cast<uint16_t>(data[8]) << 8) | data[9];
+        status_out->current_flags = data[10];
     }
 
     status_out->channel_id = data[0];

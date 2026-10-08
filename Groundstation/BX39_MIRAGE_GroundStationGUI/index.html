@@ -259,6 +259,20 @@
               </div>
               <canvas id="pressureChart" aria-label="Pressure trend"></canvas>
             </article>
+            <article class="chart-card current-card">
+              <div class="chart-head">
+                <h3>Supply Current</h3>
+                <strong id="currentValue">-- A</strong>
+              </div>
+              <div class="current-status-row">
+                <span id="currentSafetyState" class="chip" data-state="neutral" role="status">No current telemetry</span>
+              </div>
+              <div class="chart-legend current-legend">
+                <span><i class="legend-dot supply-current"></i>GPIO12 · 1 V = 1 A</span>
+                <span><i class="current-cutoff-key"></i>2.9 A cutoff</span>
+              </div>
+              <canvas id="currentChart" role="img" aria-label="Supply current in amps, with a dashed 2.9 amp relay cutoff line" aria-describedby="currentValue currentSafetyState"></canvas>
+            </article>
             <article class="chart-card">
               <div class="chart-head">
                 <h3>Internal Temperatures</h3>

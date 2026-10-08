@@ -37,11 +37,14 @@ typedef struct {
     uint8_t storage_free_pct;
     uint8_t controller_state;
     CapturedErrors captured_errors;
+    uint16_t pressure_current_ma;
+    uint8_t pressure_current_flags;
 } MainSystemStatusPacket;
 #pragma pack(pop)
 
 extern MainSystemStatusPacket system_status_packet;
 
 // Keep this wire-size contract synchronized with groundstation_gateway.py and listener.py.
-static constexpr size_t MAIN_SYSTEM_STATUS_PACKET_SIZE = 230;
+static constexpr size_t MAIN_SYSTEM_STATUS_PACKET_SIZE = 233;
 static_assert(sizeof(MainSystemStatusPacket) == MAIN_SYSTEM_STATUS_PACKET_SIZE, "Groundstation packet size changed");
+static_assert(offsetof(MainSystemStatusPacket, pressure_current_ma) == 230, "Legacy telemetry prefix changed");

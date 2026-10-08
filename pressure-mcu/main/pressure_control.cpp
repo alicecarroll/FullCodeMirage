@@ -28,6 +28,9 @@ float pwm1 = 0.0f, pwm2 = 0.0f, pwm3 = 0.0f;
 //constexpr float FLUSH_COMPLETE_PRESSURE_BAR = 0.05f; //Why so low?
 constexpr uint8_t ERR_NONE = 0, ERR_CHAMBER_SENSOR = 1, ERR_INLET_SENSOR = 2;
 constexpr uint8_t ERR_INLET_START_TIMEOUT = 3;
+constexpr uint8_t ERR_CURRENT_SENSOR = PRESSURE_ERROR_CURRENT_SENSOR, ERR_OVERCURRENT = PRESSURE_ERROR_OVERCURRENT;
+TickType_t last_current_log = 0;
+bool current_shutdown_standby = false;
 bool pwm_targets_initialized = false; // to keep track of one-time-initialisation of pwm targets
 bool inlet_start_wait_active = false;
 TickType_t inlet_start_wait_started = 0;
@@ -57,11 +60,15 @@ bool chamber_at_target() {
 }
 
 uint8_t clamp_pwm(uint8_t pwm) { return pwm > 100 ? 100 : pwm; }
-void set_pump1(uint8_t pwm) { pwm = clamp_pwm(pwm); pressure_pump1_set(pwm); status.pump1_pwm = pwm; }
-void set_pump2(uint8_t pwm) { pwm = clamp_pwm(pwm); pressure_pump2_set(pwm); status.pump2_pwm = pwm; }
-void set_compressor(uint8_t pwm) { pwm = clamp_pwm(pwm); pressure_compressor_set(pwm); status.compressor_pwm = pwm; }
+void set_pump1(uint8_t pwm) { pwm = status.overcurrent_tripped || !status.current_valid ? 0 : clamp_pwm(pwm); pressure_pump1_set(pwm); status.pump1_pwm = pwm; }
+void set_pump2(uint8_t pwm) { pwm = status.overcurrent_tripped || !status.current_valid ? 0 : clamp_pwm(pwm); pressure_pump2_set(pwm); status.pump2_pwm = pwm; }
+void set_compressor(uint8_t pwm) { pwm = status.overcurrent_tripped || !status.current_valid ? 0 : clamp_pwm(pwm); pressure_compressor_set(pwm); status.compressor_pwm = pwm; }
 void set_valve(bool open) { pressure_valve_set(open); status.valve_open = open; }
 void set_relay(uint8_t relay, bool on) {
+    if (on && (status.overcurrent_tripped || !status.current_valid)) {
+        ESP_LOGW("pressure", "Relay %u activation blocked by current safety interlock", relay);
+        return;
+    }
     pressure_relay_set(relay, on);
     const uint8_t bit = static_cast<uint8_t>(1U << (relay - 1));
     status.relay_mask = on ? status.relay_mask | bit : status.relay_mask & ~bit;
@@ -192,6 +199,16 @@ bool stop_pumps_if_sensor_invalid() {
     */
 }
 void mode_changed(uint8_t mode) {
+    if (current_shutdown_standby) {
+        // Main continuously repeats its mode. That is not a manual restart.
+        if (mode == applied_mode) return;
+        if (mode != PRESSURE_MODE_STANDBY) {
+            applied_mode = mode;
+            return;
+        }
+        // An explicit switch back to standby permits a later mode change.
+        current_shutdown_standby = false;
+    }
     if (mode == applied_mode) return;
     applied_mode = mode;
     clear_overrides();
@@ -238,6 +255,49 @@ void pressure_init() {
     status.error = ERR_NONE;
     set_pump1(0); set_pump2(0); set_compressor(0); set_valve(false);
     for (uint8_t relay = 1; relay <= 4; ++relay) set_relay(relay, false);
+    pressure_update_current();
+}
+
+void pressure_update_current() {
+    uint16_t current_ma = 0;
+    bool saturated = false;
+    status.current_valid = pressure_current_read(&current_ma, &saturated);
+    status.current_adc_saturated = status.current_valid && saturated;
+    if (status.current_valid) status.current_ma = current_ma;
+
+    const bool was_tripped = status.overcurrent_tripped;
+    status.overcurrent_tripped = status.current_valid &&
+        (current_ma >= PRESSURE_OVERCURRENT_LIMIT_MA || saturated);
+    const bool just_tripped = status.overcurrent_tripped && !was_tripped;
+    if (status.overcurrent_tripped || !status.current_valid) {
+        // Independent of mode and manual overrides. De-energize relays first.
+        for (uint8_t relay = 1; relay <= 4; ++relay) set_relay(relay, false);
+        stop_pressure_train(false);
+        current_shutdown_standby = true;
+        status.error = status.overcurrent_tripped ? ERR_OVERCURRENT : ERR_CURRENT_SENSOR;
+        status.state = PRESSURE_STANDBY;
+    } else if (status.error == ERR_CURRENT_SENSOR || status.error == ERR_OVERCURRENT) {
+        // Recovery unlocks manual controls, but does not restore any outputs.
+        status.error = ERR_NONE;
+        status.state = PRESSURE_STANDBY;
+    }
+
+    // Never put potentially blocking console logging ahead of relay shutdown.
+    if (just_tripped) {
+        ESP_LOGE("pressure", "OVERCURRENT: %.3f A on GPIO12%s; STANDBY, all four relays OFF; manual continuation allowed below 2.900 A", current_ma / 1000.0f, saturated ? " (ADC saturated)" : "");
+    } else if (was_tripped && status.current_valid && !status.overcurrent_tripped) {
+        ESP_LOGI("pressure", "Current below cutoff; remaining in STANDBY with outputs OFF. Manual controls available; no restart required");
+    }
+
+    const TickType_t now = xTaskGetTickCount();
+    if (now - last_current_log >= pdMS_TO_TICKS(200)) {
+        last_current_log = now;
+        if (status.current_valid) {
+            ESP_LOGI("pressure_current", "GPIO12: %.3f V = %.3f A, cutoff 2.900 A, trip=%s", current_ma / 1000.0f, current_ma / 1000.0f, status.overcurrent_tripped ? "ACTIVE" : "clear");
+        } else {
+            ESP_LOGE("pressure_current", "GPIO12 current unavailable; STANDBY, all relays OFF");
+        }
+    }
 }
 
 void pressure_update_external_sensors(const float sensors[7]) {
@@ -283,6 +343,11 @@ void adjust_pressure_target(){
 }
 
 void pressure_execute_command(uint8_t command, uint8_t info) {
+    if (status.overcurrent_tripped || !status.current_valid) {
+        ESP_LOGW("pressure", "Command 0x%02X rejected: %s", command,
+                 status.overcurrent_tripped ? "current still at/above cutoff or ADC saturated" : "current sensor unavailable");
+        return;
+    }
     switch (command) {
         // Legacy ON commands do not carry a PWM value. They must mean full
         // speed; explicit partial duty cycles use the *_PWM commands below.
@@ -305,6 +370,13 @@ void pressure_execute_command(uint8_t command, uint8_t info) {
             break;
         case PRESSURE_CMD_START_PRESSURISATION:
             clear_overrides();
+            if (current_shutdown_standby) {
+                // This explicit start command, unlike repeated mode packets,
+                // is the operator's request to power the pressure train again.
+                set_relay(2, true);
+                set_relay(3, true);
+                current_shutdown_standby = false;
+            }
             status.state = PRESSURE_COMPRESSION;
             status.error = ERR_NONE;
             set_valve(false);
@@ -317,6 +389,11 @@ void pressure_execute_command(uint8_t command, uint8_t info) {
             break;
         case PRESSURE_CMD_START_PREPRESSURISATION:
             clear_overrides();
+            if (current_shutdown_standby) {
+                set_relay(2, true);
+                set_relay(3, true);
+                current_shutdown_standby = false;
+            }
             status.state = PRESSURE_PREPRESSURISATION;
             status.error = ERR_NONE;
             set_measurement_outputs();
@@ -344,6 +421,13 @@ void pressure_execute_command(uint8_t command, uint8_t info) {
 }
 
 void pressure_update() {
+    if (status.overcurrent_tripped || !status.current_valid) return;
+    if (current_shutdown_standby && status.state == PRESSURE_STANDBY) {
+        // Keep uncommanded outputs OFF, even when chamber pressure is high.
+        // safe_off honors explicit manual pump/valve commands after recovery.
+        safe_off();
+        return;
+    }
     adjust_pressure_target();
     if (status.state != PRESSURE_COMPRESSION) inlet_start_wait_active = false;
     ESP_LOGI("pressure", "Starting pressure update. State: %d, Chamber: %.3f bar, Inlet: %.3f bar, Ambient: %.3f bar",
