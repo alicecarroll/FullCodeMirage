@@ -460,7 +460,7 @@ bool handle_command()
 static esp_err_t send_system_status_packet()
 {
 
-    MainSystemStatusPacket system_status_packet  = {};
+    ::system_status_packet  = {};
     system_status_packet.sensor_data = sensor_data;
     system_status_packet.operating_mode = static_cast<uint8_t>(mode);
     system_status_packet.command_received = command_received ? 1 : 0;
