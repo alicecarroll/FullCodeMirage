@@ -57,47 +57,153 @@ void buffer_SD_data_binary_single()
 // ===================================================================
 void buffer_SD_data_csv_single()
 {
-    char line[512];
-    int n = snprintf(line, sizeof(line),
-        "%u,%u,%u,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%u\n",
-        sensor_data.hours,
-        sensor_data.minutes,
-        sensor_data.seconds,
-        sensor_data.Tp1,
-        sensor_data.Tp2,
-        sensor_data.Tp3,
-        sensor_data.Tp6,
-        sensor_data.Pp3,
-        sensor_data.Tp4,
-        sensor_data.Pp1,
-        sensor_data.Pa1,
-        sensor_data.Ta1,
-        sensor_data.Ta2,
-        sensor_data.Ha1,
-        sensor_data.Tp5,
-        sensor_data.Pp2,
-        sensor_data.Tt1,
-        sensor_data.Tt2,
-        sensor_data.Tt3,
-        sensor_data.K96_CO2,
-        sensor_data.K96_pressure,
-        sensor_data.K96_temperature,
-        sensor_data.K96_humidity,
-        sensor_data.K96_error
-    );
-    sd_write("sensor_data.csv", (const uint8_t *)line, n);
-    ESP_LOGI(TAG, "Buffered %d bytes (CSV)", n);
+    char old_path[SD_MAX_PATH_LEN];
+    char new_path[SD_MAX_PATH_LEN];
+    const int old_length = snprintf(old_path, sizeof(old_path), "%s/%s", SD_MOUNT_POINT, old_name);
+    const int new_length = snprintf(new_path, sizeof(new_path), "%s/%s", SD_MOUNT_POINT, new_name);
+    if (old_length < 0 || new_length < 0 ||
+        static_cast<size_t>(old_length) >= sizeof(old_path) ||
+        static_cast<size_t>(new_length) >= sizeof(new_path)) {
+        return false;
+    }
+    return rename(old_path, new_path) == 0;
 }
+
+bool sd_apply_datetime_response(const char *response)
+{
+    if (!s_mounted || datetime_synchronized || first_entry_time_us < 0 || response == nullptr) {
+        return false;
+    }
+
+    struct tm received_datetime = {};
+    if (sscanf(response, "DATETIME_RESPONSE:%d-%d-%dT%d:%d:%d",
+               &received_datetime.tm_year,
+               &received_datetime.tm_mon,
+               &received_datetime.tm_mday,
+               &received_datetime.tm_hour,
+               &received_datetime.tm_min,
+               &received_datetime.tm_sec) != 6) {
+        return false;
+    }
+    received_datetime.tm_year -= 1900;
+    --received_datetime.tm_mon;
+    if (received_datetime.tm_mon < 0 || received_datetime.tm_mon > 11 ||
+        received_datetime.tm_mday < 1 || received_datetime.tm_mday > 31 ||
+        received_datetime.tm_hour < 0 || received_datetime.tm_hour > 23 ||
+        received_datetime.tm_min < 0 || received_datetime.tm_min > 59 ||
+        received_datetime.tm_sec < 0 || received_datetime.tm_sec > 59) {
+        return false;
+    }
+
+    const int64_t elapsed_us = esp_timer_get_time() - first_entry_time_us;
+    subtract_seconds(&received_datetime, static_cast<uint32_t>(elapsed_us / 1000000));
+
+    char new_csv_filename[sizeof(current_csv_filename)];
+    char new_metadata_filename[sizeof(current_metadata_filename)];
+    create_datetime_filename("sensor_data", new_csv_filename, sizeof(new_csv_filename), &received_datetime, ".csv");
+    create_datetime_filename("metadata", new_metadata_filename, sizeof(new_metadata_filename), &received_datetime, ".log");
+
+    buffer_SD_data_flush();
+    if (!rename_current_file(current_csv_filename, new_csv_filename) ||
+        !rename_current_file(current_metadata_filename, new_metadata_filename)) {
+        ESP_LOGE(TAG, "Failed to rename generic SD files after datetime synchronization");
+        return false;
+    }
+
+    snprintf(current_csv_filename, sizeof(current_csv_filename), "%s", new_csv_filename);
+    snprintf(current_metadata_filename, sizeof(current_metadata_filename), "%s", new_metadata_filename);
+    datetime_synchronized = true;
+    ESP_LOGI(TAG, "SD files synchronized to first entry timestamp: %s", current_csv_filename);
+    return true;
+}
+
+bool sd_datetime_is_synchronized(void)
+{
+    return datetime_synchronized;
+}
+/*
+//
+static esp_err_t create_new_csv_file(void)
+{
+    if (current_csv_filename[0] == '\0')
+    {
+        create_unique_csv_filename();
+    }
+
+    char path[SD_MAX_PATH_LEN];
+    snprintf(path, sizeof(path), "%s/%s", SD_MOUNT_POINT, current_csv_filename);
+
+    FILE *f = fopen(path, "wb");
+    if (!f)
+    {
+        ESP_LOGE_CAPTURED(ERROR_BIT_29, TAG, "Cannot create %s (errno %d)", path, errno);
+        return ESP_FAIL;
+    }
+    fclose(f);
+    ESP_LOGI(TAG, "Created new CSV file: %s", current_csv_filename);
+    return ESP_OK;
+}
+//
 */
 
+static esp_err_t create_new_csv_file(void)
+{
+    if (current_csv_filename[0] == '\0')
+    {
+        create_unique_csv_filename();
+    }
 
-// Buffer configuration
-//#define SD_BUFFER_SIZE 4096
-#define SENSOR_READING_SIZE sizeof(SensorData)
-#define READINGS_PER_BUFFER (SD_BUFFER_SIZE / SENSOR_READING_SIZE)
+    char path[SD_MAX_PATH_LEN];
+    snprintf(path, sizeof(path), "%s/%s", SD_MOUNT_POINT, current_csv_filename);
 
-static uint8_t SD_buffer[SD_BUFFER_SIZE];
-static size_t SD_buffer_offset = 0;
+    FILE *f = fopen(path, "wb");
+    if (!f)
+    {
+        ESP_LOGE_CAPTURED(ERROR_BIT_29, TAG, "Cannot create %s (errno %d)", path, errno);
+        return ESP_FAIL;
+    }
+    fclose(f);
+    
+    //write header
+    const char *header = "HH,MM,SS,TP1, TP2, TP3, TP6, PP3, TP4, PP1, PA1, TA1, TA2, TA3, HA1, TP5, PP2, TT1, TT2, TT3, K96_LPL, K96_LPL_flt, K96_SPL, K96_SPL_flt, K96_MPL, K96_MPL_flt, K96_ADuCdie_Temp, K96_ADuCdie_Temp_filtered, K96_NTC0_Temp, K96_NTC0_Temp_filtered, K96_NTC1_Temp, K96_NTC1_Temp_filtered, K96_RH, K96_RH_Temp, K96_MPL_uflt_IR_Signal, K96_MPL_flt_IR_Signal, K96_MPL_uflt_Conc, K96_MPL_flt_Conc, K96_MPL_uflt_Error, K96_LPL_uflt_IR_Signal, K96_LPL_flt_IR_Signal, K96_LPL_uflt_Conc, K96_LPL_uflt_Error, K96_LPL_flt_Error, K96_SPL_uflt_IR_Signal, K96_SPL_flt_IR_Signal, K96_SPL_uflt_Conc, K96_SPL_uflt_Error,K96_SPL_flt_Error, K96_error\n";
+    if (sd_write(current_csv_filename, (const uint8_t *)header, strlen(header)) != ESP_OK)
+    {
+        ESP_LOGW(TAG, "Sensor csv header write failed for %s", current_metadata_filename);
+    }
+
+    ESP_LOGI(TAG, "Created new CSV log: %s", current_csv_filename);
+    return ESP_OK;
+}
+
+static esp_err_t create_new_metadata_log(void)
+{
+    if (current_metadata_filename[0] == '\0')
+    {
+        create_unique_metadata_filename();
+    }
+
+    char path[SD_MAX_PATH_LEN];
+    snprintf(path, sizeof(path), "%s/%s", SD_MOUNT_POINT, current_metadata_filename);
+
+    FILE *f = fopen(path, "wb");
+    if (!f)
+    {
+        ESP_LOGE_CAPTURED(ERROR_BIT_29, TAG, "Cannot create metadata log %s (errno %d)", path, errno);
+        return ESP_FAIL;
+    }
+    fclose(f);
+
+    const char *header = "HH,MM,SS,mode,command_received,connection_lost,status_ok,pressure_system_on,k96_on,heater1_duty,heater2_duty,heater3_duty,heater4_duty,heater5_duty,heater6_duty,heater7_duty,heater8_duty,thermal_online,thermal_state,thermal_error1,thermal_error2,thermal_error3,thermal_error4,thermal_error5,thermal_error6,thermal_error7,thermal_error8,pressure_state,pressure_error,pressure_relay_mask,pressure_pump1_pwm,pressure_pump2_pwm,pressure_compressor_pwm,pressure_manual_override,pressure_valve_open,onboard_logging,storage_free_pct,controller_state,captured_errors_low_hex,captured_errors_high_hex\n";
+        
+    if (sd_write(current_metadata_filename, (const uint8_t *)header, strlen(header)) != ESP_OK)
+    {
+        ESP_LOGW(TAG, "Metadata log header write failed for %s", current_metadata_filename);
+    }
+
+    ESP_LOGI(TAG, "Created metadata log: %s", current_metadata_filename);
+    return ESP_OK;
+}
+
 
 // ===================================================================
 // Option 1: Binary buffer large (fastest, smallest)
@@ -134,7 +240,9 @@ void buffer_SD_data_csv(SensorData *sensor_data)
     if (sensor_data == NULL) return;
 
     // Create temp CSV line to store (increased size to 1024 to fit all expanded sensor fields)
-    char line[1024];
+    static char line[1024];
+    static char sline[192];
+
     int n = snprintf(line, sizeof(line),
         "%02u,%02u,%02u,"
         "%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,"
@@ -156,20 +264,68 @@ void buffer_SD_data_csv(SensorData *sensor_data)
         sensor_data->Tp5, sensor_data->Pp2,
         sensor_data->Tt1, sensor_data->Tt2, sensor_data->Tt3,
         // K96 fields mapping
-        (long)sensor_data->K96_LPL_Signal, sensor_data->K96_LPL_Signal_filtered,
-        (long)sensor_data->K96_SPL_Signal, sensor_data->K96_SPL_Signal_filtered,
-        (long)sensor_data->K96_MPL_Signal, sensor_data->K96_MPL_Signal_filtered,
-        sensor_data->K96_ADuCdie_Temp, sensor_data->K96_ADuCdie_Temp_filtered,
-        sensor_data->K96_NTC0_Temp, sensor_data->K96_NTC0_Temp_filtered,
-        sensor_data->K96_NTC1_Temp, sensor_data->K96_NTC1_Temp_filtered,
-        sensor_data->K96_RH, sensor_data->K96_RH_Temp,
-        sensor_data->K96_MPL_uflt_IR_Signal, sensor_data->K96_MPL_flt_IR_Signal,
-        sensor_data->K96_MPL_uflt_Conc, sensor_data->K96_MPL_flt_Conc, sensor_data->K96_MPL_uflt_Error,
-        sensor_data->K96_LPL_uflt_IR_Signal, sensor_data->K96_LPL_flt_IR_Signal, sensor_data->K96_LPL_uflt_Conc,
-        sensor_data->K96_LPL_uflt_Error, sensor_data->K96_LPL_flt_Error,
-        sensor_data->K96_SPL_uflt_IR_Signal, sensor_data->K96_SPL_flt_IR_Signal, sensor_data->K96_SPL_uflt_Conc,
-        sensor_data->K96_SPL_uflt_Error, sensor_data->K96_SPL_flt_Error, sensor_data->K96_error
+        (long)sensor_datas->K96_LPL_Signal, sensor_datas->K96_LPL_Signal_filtered,
+        (long)sensor_datas->K96_SPL_Signal, sensor_datas->K96_SPL_Signal_filtered,
+        (long)sensor_datas->K96_MPL_Signal, sensor_datas->K96_MPL_Signal_filtered,
+        sensor_datas->K96_ADuCdie_Temp, sensor_datas->K96_ADuCdie_Temp_filtered,
+        sensor_datas->K96_NTC0_Temp, sensor_datas->K96_NTC0_Temp_filtered,
+        sensor_datas->K96_NTC1_Temp, sensor_datas->K96_NTC1_Temp_filtered,
+        sensor_datas->K96_RH, sensor_datas->K96_RH_Temp,
+        sensor_datas->K96_MPL_uflt_IR_Signal, sensor_datas->K96_MPL_flt_IR_Signal,
+        sensor_datas->K96_MPL_uflt_Conc, sensor_datas->K96_MPL_flt_Conc, sensor_datas->K96_MPL_uflt_Error,
+        sensor_datas->K96_LPL_uflt_IR_Signal, sensor_datas->K96_LPL_flt_IR_Signal, sensor_datas->K96_LPL_uflt_Conc,
+        sensor_datas->K96_LPL_uflt_Error, sensor_datas->K96_LPL_flt_Error,
+        sensor_datas->K96_SPL_uflt_IR_Signal, sensor_datas->K96_SPL_flt_IR_Signal, sensor_datas->K96_SPL_uflt_Conc,
+        sensor_datas->K96_SPL_uflt_Error, sensor_datas->K96_SPL_flt_Error, sensor_datas->K96_error
     );
+
+    //CapturedErrors *cerr = system_status_packet->captured_errors;  
+    int m = snprintf(sline, sizeof(sline),
+        "%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%02u,%016llX,%016llX\n",
+        sensor_datas->hours,
+        sensor_datas->minutes,
+        sensor_datas->seconds,
+        system_status_packet->operating_mode,
+        system_status_packet->command_received,
+        system_status_packet->connection_lost,
+        system_status_packet->status_ok,
+        system_status_packet->pressure_system_on,
+        system_status_packet->k96_on,
+
+        system_status_packet->thermal_heater_duty_cycle[0],
+        system_status_packet->thermal_heater_duty_cycle[1],
+        system_status_packet->thermal_heater_duty_cycle[2],
+        system_status_packet->thermal_heater_duty_cycle[3],
+        system_status_packet->thermal_heater_duty_cycle[4],
+        system_status_packet->thermal_heater_duty_cycle[5],
+        system_status_packet->thermal_heater_duty_cycle[6],
+        system_status_packet->thermal_heater_duty_cycle[7],
+        system_status_packet->thermal_online,
+        system_status_packet->thermal_state,
+        system_status_packet->thermal_error[0],
+        system_status_packet->thermal_error[1],
+        system_status_packet->thermal_error[2],
+        system_status_packet->thermal_error[3],
+        system_status_packet->thermal_error[4],
+        system_status_packet->thermal_error[5],
+        system_status_packet->thermal_error[6],
+        system_status_packet->thermal_error[7],
+
+        system_status_packet->pressure_state,
+        system_status_packet->pressure_error,
+        system_status_packet->pressure_relay_mask,
+        system_status_packet->pressure_pump1_pwm,
+        system_status_packet->pressure_pump2_pwm,
+        system_status_packet->pressure_compressor_pwm,
+        system_status_packet->pressure_manual_override,
+        system_status_packet->pressure_valve_open,
+
+        system_status_packet->onboard_logging,
+        system_status_packet->storage_free_pct,
+        system_status_packet->controller_state,
+        static_cast<unsigned long long>(system_status_packet->captured_errors.low),
+        static_cast<unsigned long long>(system_status_packet->captured_errors.high)
+        );
 
     // Check if snprintf encountered an error or truncation
     if (n < 0 || (size_t)n >= sizeof(line))

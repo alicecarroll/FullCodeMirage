@@ -3,7 +3,7 @@
 
   const MAX_SAMPLES = 120;
   const TELEMETRY_PERIOD_MS = 1000;
-  const EXPECTED_PACKET_SIZE = 217;
+  const EXPECTED_PACKET_SIZE = 230;
 
   const RELAY_LINES = [
     { id: "relay1", label: "PDB relay 1", pin: "GPIO48 / PDB pin 1" },
@@ -30,6 +30,17 @@
     { bit: 6, label: "Peltier stage 2" },
     { bit: 7, label: "backup thermal channel" }
   ];
+  const THERMAL_ERROR_MODES = {
+    0: "OK",
+    1: "NO Value from thermal (default)",
+    2: "Mode not legal",
+    3: "Invalid packet type",
+    4: "Temperature out of bounds",
+    5: "Timeout",
+    6: "Emergency off case",
+    10: "Master Read thermal failed",
+    20: "CRC8 Error"
+};
 
   const DEFAULT_HEATER_MASK = 0x0f;
   const DEFAULT_COOLER_MASK = 0x60;
@@ -1565,13 +1576,17 @@
         const targetValue = parseFloat(targetInput.value);
         const dutyValue = parseFloat(dutyInput.value);
 
-        const commandIds = selectedHeaters.map(function (heaterNumber) {
+        const commandIds = selectedHeaters.reduce(function (commands, heaterNumber) {
           const normalizedValue = (mode === "MANUAL")
             ? "heater " + heaterNumber + " mode manual duty " + String(Math.max(0, Math.min(100, Number.isFinite(dutyValue) ? dutyValue : 0)))
             : "heater " + heaterNumber + " mode " + mode.toLowerCase() + " target " + String(Number.isFinite(targetValue) ? targetValue : 25);
+          const configCommandId = parseHeaterControlCommand(normalizeCommand(normalizedValue));
 
-          return parseHeaterControlCommand(normalizeCommand(normalizedValue));
-        }).filter(Boolean);
+          if (configCommandId) {
+            commands.push(configCommandId, "heater" + heaterNumber + "On");
+          }
+          return commands;
+        }, []);
 
         if (!commandIds.length) {
           terminal.write("ERR HEATER_CONFIG; could not build command", "error");
@@ -1603,7 +1618,7 @@
     const normalized = normalizeCommand(raw);
 
     if (normalized === "help") {
-    terminal.write("commands: status, clear, start experiment, enter standby, start/stop pressurisation, open/close outlet valve, k96 on/off, pwm1 0-100, pwm2 0-100, pwm3 0-100, relay 1-4 on/off, pump 1/2 on/off, compressor on/off, heater n on/off, heater all on/off, heater n mode pid|bangbang|manual, heater n target -100 - 200, heater n duty 0-100, heater n mode manual duty 0-100, enable/disable cooling, flush chamber, restart main controller, emergency stop");
+      terminal.write("commands: status, clear, start experiment, enter standby, start/stop pressurisation, open/close outlet valve, k96 on/off, pwm1 0-100, pwm2 0-100, pwm3 0-100, relay 1-4 on/off, pump 1/2 on/off, compressor on/off, heater n on/off, heater all on/off, heater n mode pid|bangbang|manual, heater n target -100 - 200, heater n duty 0-100, heater n mode manual duty 0-100, enable/disable cooling, flush chamber, restart main controller, emergency stop");
       return;
     }
 
@@ -1734,7 +1749,10 @@
     const linkQuality = sample.valid ? sample.linkQuality : 0;
 
     setChip(dom.overallHealth, healthLabel(health), health);
-    renderHealthDetails(sample && sample.valid ? sample.errors : []);
+    renderHealthDetails(
+      sample && sample.valid ? sample.errors : [],
+      sample && sample.valid ? sample.thermalErrors : []
+    );
     setChip(dom.missionMode, resolveMissionMode(display), "neutral");
     setChip(dom.linkState, linkLabel(linkStatus), linkStatus === "ONLINE" ? "healthy" : linkStatus === "DEGRADED" ? "warning" : "dropout");
 
@@ -1953,7 +1971,8 @@
     ]) : "neutral";
     const linkState = linkStatus === "DROPOUT" ? "dropout" : linkStatus === "DEGRADED" ? "warn" : "on";
     const mainState = linkStatus === "DROPOUT" ? "dropout" : sample && sample.controllerReady === false ? "warn" : health === "fault" ? "fault" : health === "warning" ? "warn" : "on";
-    const thermalState = sample && sample.thermalOnline === false ? "fault" : sample && sample.thermalError ? "warn" : "on";
+    const hasThermalError = sample && Array.isArray(sample.thermalErrors) && sample.thermalErrors.some(err => err > 0);
+    const thermalState = sample && sample.thermalOnline === false ? "fault" : (sample && (sample.thermalError || hasThermalError)) ? "warn" : "on";
 
     setDiagramNodeState("diagramElLink", linkState);
     setDiagramNodeState("diagramMainMcu", mainState);
@@ -2001,7 +2020,7 @@
     setText(dom.diagramLinkValue, linkLabel(linkStatus).replace("E-Link ", "").toUpperCase());
     setText(dom.diagramMainValue, controllerDiagramLabel(sample));
     setText(dom.diagramPressureMcuValue, sample && sample.activeTask ? sample.activeTask.replace("_", " ") : pressureActive ? "ACTIVE" : "STANDBY");
-    setText(dom.diagramThermalMcuValue, sample && sample.thermalOnline === false ? "OFFLINE" : sample && sample.thermalError ? "WARN" : "ONLINE");
+    setText(dom.diagramThermalMcuValue, sample && sample.thermalOnline === false ? "OFFLINE" : (sample && (sample.thermalError || hasThermalError))? "WARN": "ONLINE");
     setText(dom.diagramStorageValue, legacyProtocol ? "UPDATE" : sample && sample.onboardLogging && Number.isFinite(sample.storageFreePct) ? sample.storageFreePct.toFixed(0) + "% FREE" : "UNAVAILABLE");
     setText(dom.diagramHeaterValue, heaterActive ? describeMask(state.heaterMask & DEFAULT_HEATER_MASK) : "OFF");
     setText(dom.diagramCoolerValue, coolerActive ? "ACTIVE" : "OFF");
@@ -2111,7 +2130,7 @@
     }
   }
 
-  
+
   function drawAllCharts() {
     drawChart(dom.gasChart, history, {
       yLabel: "raw",
@@ -2126,9 +2145,9 @@
       targetBand: { min: 2.85, max: 3.15, seriesMin: 2.2, seriesMax: 3.8 },
       yLabel: "bar",
       series: [
-        { key: "Interstage_1Bar", color: getColorFromCssClass("interstage-1","background-color"), min: 0.01, max: 5.0 },
-        { key: "Interstage_2Bar", color: getColorFromCssClass("interstage-2","background-color"), min: 0.01, max: 5.0 },
-        { key: "chamberPressureBar", color: getColorFromCssClass("chamber-pressure","background-color"), min: 0.01, max: 5.0 },
+        { key: "Interstage_1Bar", color: getColorFromCssClass("interstage-1", "background-color"), min: 0.01, max: 5.0 },
+        { key: "Interstage_2Bar", color: getColorFromCssClass("interstage-2", "background-color"), min: 0.01, max: 5.0 },
+        { key: "chamberPressureBar", color: getColorFromCssClass("chamber-pressure", "background-color"), min: 0.01, max: 5.0 },
       ]
     });
 
@@ -2136,26 +2155,28 @@
       targetBand: { min: 19, max: 24, seriesMin: -60, seriesMax: 80 },
       yLabel: "deg C",
       series: [
-        { key: "sdCardC", color: getColorFromCssClass("SD-temp","background-color"), min: -60, max: 80 },
-        { key: "pump1C", color: getColorFromCssClass("pump1-temp","background-color"), min: -60, max: 70 },
-        { key: "pump2C", color: getColorFromCssClass("pump2-temp","background-color"), min: -60, max: 70 },
-        { key: "compressorC", color: getColorFromCssClass("pump3-temp","background-color"), min: -60, max: 70 },
-        { key: "Interstage1_C", color: getColorFromCssClass("interstage1-temp","background-color"), min: -60, max: 70 },
-        { key: "Interstage2_C", color: getColorFromCssClass("interstage2-temp","background-color"), min: -60, max: 70 },
-        { key: "chamberTempC_MS", color: getColorFromCssClass("chamber-tempMS","background-color"), min: -60, max: 80 },
-        { key: "chamberTempC_K96", color: getColorFromCssClass("chamber-tempK96","background-color"), min: -60, max: 70 },
+        { key: "sdCardC", color: getColorFromCssClass("SD-temp", "background-color"), min: -60, max: 80 },
+        { key: "outletC", color: getColorFromCssClass("outlet-temp", "background-color"), min: -60, max: 80 },
+        { key: "inletC", color: getColorFromCssClass("inlet-temp", "background-color"), min: -60, max: 80 },
+        { key: "pump1C", color: getColorFromCssClass("pump1-temp", "background-color"), min: -60, max: 70 },
+        { key: "pump2C", color: getColorFromCssClass("pump2-temp", "background-color"), min: -60, max: 70 },
+        { key: "compressorC", color: getColorFromCssClass("pump3-temp", "background-color"), min: -60, max: 70 },
+        { key: "Interstage1_C", color: getColorFromCssClass("interstage1-temp", "background-color"), min: -60, max: 70 },
+        { key: "Interstage2_C", color: getColorFromCssClass("interstage2-temp", "background-color"), min: -60, max: 70 },
+        { key: "chamberTempC_MS", color: getColorFromCssClass("chamber-tempMS", "background-color"), min: -60, max: 80 },
+        { key: "chamberTempC_K96", color: getColorFromCssClass("chamber-tempK96", "background-color"), min: -60, max: 70 },
       ]
     });
 
     drawChart(dom.ambientChart, history, {
       yLabel: "bar/C/%",
       series: [
-        { key: "ambientPressureBar", color: getColorFromCssClass("ambient-pressure","background-color"), min: 0, max: 2 },
-        { key: "ambientTempC_TMP", color: getColorFromCssClass("temperature-tmp117","background-color"), min: -60, max: 80 },
-        { key: "ambientTempC_SHT", color: getColorFromCssClass("temperature-sht45","background-color"), min: -60, max: 80 },
-        { key: "ambientTempC_MS", color: getColorFromCssClass("temperature-ms5803","background-color"), min: -60, max: 80 },
-        { key: "humidityRh_ambient", color: getColorFromCssClass("ambient-humidity","background-color"), min: 0, max: 100 },
-        { key: "humidityRh_k96", color: getColorFromCssClass("humidity-k96","background-color"), min: 0, max: 100 }
+        { key: "ambientPressureBar", color: getColorFromCssClass("ambient-pressure", "background-color"), min: 0, max: 2 },
+        { key: "ambientTempC_TMP", color: getColorFromCssClass("temperature-tmp117", "background-color"), min: -60, max: 80 },
+        { key: "ambientTempC_SHT", color: getColorFromCssClass("temperature-sht45", "background-color"), min: -60, max: 80 },
+        { key: "ambientTempC_MS", color: getColorFromCssClass("temperature-ms5803", "background-color"), min: -60, max: 80 },
+        { key: "humidityRh_ambient", color: getColorFromCssClass("ambient-humidity", "background-color"), min: 0, max: 100 },
+        { key: "humidityRh_k96", color: getColorFromCssClass("humidity-k96", "background-color"), min: 0, max: 100 }
       ]
     });
 
@@ -2187,251 +2208,251 @@
   }
 
   function getColorFromCssClass(className, cssProperty = "color") {
-  if (!className) return "#ffffff";
-  
-  // Temporary hidden element to query stylesheet rules
-  const tempEl = document.createElement("div");
-  tempEl.className = className;
-  tempEl.style.display = "none";
-  document.body.appendChild(tempEl);
+    if (!className) return "#ffffff";
 
-  const computedColor = getComputedStyle(tempEl).getPropertyValue(cssProperty);
-  document.body.removeChild(tempEl);
+    // Temporary hidden element to query stylesheet rules
+    const tempEl = document.createElement("div");
+    tempEl.className = className;
+    tempEl.style.display = "none";
+    document.body.appendChild(tempEl);
 
-  return computedColor || "#ffffff";
-}
+    const computedColor = getComputedStyle(tempEl).getPropertyValue(cssProperty);
+    document.body.removeChild(tempEl);
+
+    return computedColor || "#ffffff";
+  }
 
   function drawChart(canvas, samples, config) {
-  if (!canvas) {
-    return;
-  }
+    if (!canvas) {
+      return;
+    }
 
-  // 1. STORE RECENT DATA & BIND MOUSE LISTENERS (ONCE)
-  canvas._lastSamples = samples;
-  canvas._lastConfig = config;
+    // 1. STORE RECENT DATA & BIND MOUSE LISTENERS (ONCE)
+    canvas._lastSamples = samples;
+    canvas._lastConfig = config;
 
-  if (!canvas._hoverListenersBound) {
-    canvas._hoverListenersBound = true;
+    if (!canvas._hoverListenersBound) {
+      canvas._hoverListenersBound = true;
 
-    canvas.addEventListener("mousemove", function (e) {
-      const rect = canvas.getBoundingClientRect();
-      canvas._hoverPos = {
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top
-      };
-      if (canvas._lastSamples && canvas._lastConfig) {
-        drawChart(canvas, canvas._lastSamples, canvas._lastConfig);
-      }
-    });
+      canvas.addEventListener("mousemove", function (e) {
+        const rect = canvas.getBoundingClientRect();
+        canvas._hoverPos = {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top
+        };
+        if (canvas._lastSamples && canvas._lastConfig) {
+          drawChart(canvas, canvas._lastSamples, canvas._lastConfig);
+        }
+      });
 
-    canvas.addEventListener("mouseleave", function () {
-      canvas._hoverPos = null;
-      if (canvas._lastSamples && canvas._lastConfig) {
-        drawChart(canvas, canvas._lastSamples, canvas._lastConfig);
-      }
-    });
-  }
-
-  const rect = canvas.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  const width = Math.max(260, Math.floor(rect.width));
-  const height = Math.max(110, Math.floor(rect.height));
-  const pixelWidth = Math.floor(width * dpr);
-  const pixelHeight = Math.floor(height * dpr);
-
-  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
-    canvas.width = pixelWidth;
-    canvas.height = pixelHeight;
-  }
-
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, width, height);
-
-  const hasYLabel = Boolean(config && config.yLabel);
-  const pad = { 
-    left: hasYLabel ? 62 : 46, 
-    top: 12, 
-    right: 12, 
-    bottom: 22 
-  };
-
-  const plotW = width - pad.left - pad.right;
-  const plotH = height - pad.top - pad.bottom;
-
-  ctx.fillStyle = "#111511";
-  ctx.fillRect(0, 0, width, height);
-
-  const yRange = getChartYRange(config, samples);
-
-  drawGrid(ctx, pad, plotW, plotH);
-  drawDropouts(ctx, samples, pad, plotW, plotH);
-
-  if (config.targetBand) {
-    const y1 = yFor(config.targetBand.max, yRange.min, yRange.max, pad, plotH);
-    const y2 = yFor(config.targetBand.min, yRange.min, yRange.max, pad, plotH);
-    ctx.fillStyle = "rgba(97, 211, 148, 0.09)";
-    ctx.fillRect(pad.left, y1, plotW, y2 - y1);
-    ctx.strokeStyle = "rgba(97, 211, 148, 0.28)";
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(pad.left, y1);
-    ctx.lineTo(pad.left + plotW, y1);
-    ctx.moveTo(pad.left, y2);
-    ctx.lineTo(pad.left + plotW, y2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  config.series.forEach(function (series) {
-    ctx.strokeStyle = series.color;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-
-    let started = false;
-    samples.forEach(function (sample, index) {
-      const value = sample && sample.valid ? sample[series.key] : null;
-      if (typeof value !== "number" || Number.isNaN(value)) {
-        started = false;
-        return;
-      }
-
-      const x = pad.left + xFor(index, samples.length, plotW);
-      const y = yFor(value, yRange.min, yRange.max, pad, plotH);
-
-      if (!started) {
-        ctx.moveTo(x, y);
-        started = true;
-      } else {
-        ctx.lineTo(x, y);
-      }
-    });
-
-    ctx.stroke();
-  });
-
-  drawAxes(ctx, samples, pad, plotW, plotH, config, yRange);
-
-  // 2. RENDER HOVER OVERLAY (CROSSHAIR & TOOLTIP)
-  if (canvas._hoverPos && samples && samples.length > 0) {
-    drawTooltip(ctx, canvas._hoverPos, samples, pad, plotW, plotH, config, yRange, width);
-  }
-}
-
-// 3. NEW HELPER FUNCTION TO DRAW HOVER CROSSHAIR AND FLOATING CARD
-function drawTooltip(ctx, hoverPos, samples, pad, plotW, plotH, config, yRange, canvasWidth) {
-  // Ignore hover if cursor is outside the plotting area
-  if (hoverPos.x < pad.left || hoverPos.x > pad.left + plotW) {
-    return;
-  }
-
-  // Calculate nearest sample index based on cursor X
-  const ratio = (hoverPos.x - pad.left) / plotW;
-  const rawIndex = Math.round(ratio * (samples.length - 1));
-  const index = Math.max(0, Math.min(samples.length - 1, rawIndex));
-  const sample = samples[index];
-
-  if (!sample) return;
-
-  const sampleX = pad.left + xFor(index, samples.length, plotW);
-
-  // Draw Vertical Crosshair Line
-  ctx.save();
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
-  ctx.lineWidth = 1;
-  ctx.setLineDash([3, 3]);
-  ctx.beginPath();
-  ctx.moveTo(sampleX, pad.top);
-  ctx.lineTo(sampleX, pad.top + plotH);
-  ctx.stroke();
-  ctx.restore();
-
-  // Draw Highlight Dots on Active Series Points
-  const activePoints = [];
-  config.series.forEach(function (series) {
-    const val = sample.valid ? sample[series.key] : null;
-    if (typeof val === "number" && !Number.isNaN(val)) {
-      const ptY = yFor(val, yRange.min, yRange.max, pad, plotH);
-      
-      // Outer ring
-      ctx.fillStyle = "#111511";
-      ctx.beginPath();
-      ctx.arc(sampleX, ptY, 5, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Colored core
-      ctx.fillStyle = series.color;
-      ctx.beginPath();
-      ctx.arc(sampleX, ptY, 3, 0, Math.PI * 2);
-      ctx.fill();
-
-      activePoints.push({
-        label: series.label || series.key,
-        color: series.color,
-        value: formatYAxisLabel(val)
+      canvas.addEventListener("mouseleave", function () {
+        canvas._hoverPos = null;
+        if (canvas._lastSamples && canvas._lastConfig) {
+          drawChart(canvas, canvas._lastSamples, canvas._lastConfig);
+        }
       });
     }
-  });
 
-  // Calculate Time Offset Label (e.g. "-12s" or "now")
-  const secondsAgo = samples.length - 1 - index;
-  const timeText = secondsAgo === 0 ? "now" : "-" + secondsAgo + "s";
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const width = Math.max(260, Math.floor(rect.width));
+    const height = Math.max(110, Math.floor(rect.height));
+    const pixelWidth = Math.floor(width * dpr);
+    const pixelHeight = Math.floor(height * dpr);
 
-  // Prepare Tooltip Content Lines
-  const lines = [timeText];
-  if (!sample.valid) {
-    lines.push("Status: DROPOUT");
-  } else {
-    activePoints.forEach(pt => lines.push(pt.label + ": " + pt.value));
-  }
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+    }
 
-  // Measure Tooltip Box Dimensions
-  ctx.font = "11px Consolas, monospace";
-  let boxW = 0;
-  lines.forEach(line => {
-    boxW = Math.max(boxW, ctx.measureText(line).width);
-  });
-  boxW += 16; // Internal padding
-  const lineH = 15;
-  const boxH = lines.length * lineH + 10;
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
 
-  // Position Tooltip Card (Flip to left if too close to right edge)
-  let boxX = sampleX + 12;
-  if (boxX + boxW > canvasWidth - 10) {
-    boxX = sampleX - boxW - 12;
-  }
-  let boxY = pad.top + 5;
+    const hasYLabel = Boolean(config && config.yLabel);
+    const pad = {
+      left: hasYLabel ? 62 : 46,
+      top: 12,
+      right: 12,
+      bottom: 22
+    };
 
-  // Draw Tooltip Card Background & Border
-  ctx.fillStyle = "rgba(18, 22, 18, 0.92)";
-  ctx.strokeStyle = "rgba(174, 184, 167, 0.35)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.roundRect ? ctx.roundRect(boxX, boxY, boxW, boxH, 4) : ctx.rect(boxX, boxY, boxW, boxH);
-  ctx.fill();
-  ctx.stroke();
+    const plotW = width - pad.left - pad.right;
+    const plotH = height - pad.top - pad.bottom;
 
-  // Render Tooltip Text Lines
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
+    ctx.fillStyle = "#111511";
+    ctx.fillRect(0, 0, width, height);
 
-  // Title / Time
-  ctx.fillStyle = "rgba(174, 184, 167, 0.65)";
-  ctx.fillText(lines[0], boxX + 8, boxY + 6);
+    const yRange = getChartYRange(config, samples);
 
-  // Series values
-  let currentY = boxY + 6 + lineH;
-  if (!sample.valid) {
-    ctx.fillStyle = "#b589ff";
-    ctx.fillText(lines[1], boxX + 8, currentY);
-  } else {
-    activePoints.forEach(pt => {
-      ctx.fillStyle = pt.color;
-      ctx.fillText(pt.label + ": " + pt.value, boxX + 8, currentY);
-      currentY += lineH;
+    drawGrid(ctx, pad, plotW, plotH);
+    drawDropouts(ctx, samples, pad, plotW, plotH);
+
+    if (config.targetBand) {
+      const y1 = yFor(config.targetBand.max, yRange.min, yRange.max, pad, plotH);
+      const y2 = yFor(config.targetBand.min, yRange.min, yRange.max, pad, plotH);
+      ctx.fillStyle = "rgba(97, 211, 148, 0.09)";
+      ctx.fillRect(pad.left, y1, plotW, y2 - y1);
+      ctx.strokeStyle = "rgba(97, 211, 148, 0.28)";
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(pad.left, y1);
+      ctx.lineTo(pad.left + plotW, y1);
+      ctx.moveTo(pad.left, y2);
+      ctx.lineTo(pad.left + plotW, y2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    config.series.forEach(function (series) {
+      ctx.strokeStyle = series.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+
+      let started = false;
+      samples.forEach(function (sample, index) {
+        const value = sample && sample.valid ? sample[series.key] : null;
+        if (typeof value !== "number" || Number.isNaN(value)) {
+          started = false;
+          return;
+        }
+
+        const x = pad.left + xFor(index, samples.length, plotW);
+        const y = yFor(value, yRange.min, yRange.max, pad, plotH);
+
+        if (!started) {
+          ctx.moveTo(x, y);
+          started = true;
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+
+      ctx.stroke();
     });
+
+    drawAxes(ctx, samples, pad, plotW, plotH, config, yRange);
+
+    // 2. RENDER HOVER OVERLAY (CROSSHAIR & TOOLTIP)
+    if (canvas._hoverPos && samples && samples.length > 0) {
+      drawTooltip(ctx, canvas._hoverPos, samples, pad, plotW, plotH, config, yRange, width);
+    }
   }
-}
+
+  // 3. NEW HELPER FUNCTION TO DRAW HOVER CROSSHAIR AND FLOATING CARD
+  function drawTooltip(ctx, hoverPos, samples, pad, plotW, plotH, config, yRange, canvasWidth) {
+    // Ignore hover if cursor is outside the plotting area
+    if (hoverPos.x < pad.left || hoverPos.x > pad.left + plotW) {
+      return;
+    }
+
+    // Calculate nearest sample index based on cursor X
+    const ratio = (hoverPos.x - pad.left) / plotW;
+    const rawIndex = Math.round(ratio * (samples.length - 1));
+    const index = Math.max(0, Math.min(samples.length - 1, rawIndex));
+    const sample = samples[index];
+
+    if (!sample) return;
+
+    const sampleX = pad.left + xFor(index, samples.length, plotW);
+
+    // Draw Vertical Crosshair Line
+    ctx.save();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(sampleX, pad.top);
+    ctx.lineTo(sampleX, pad.top + plotH);
+    ctx.stroke();
+    ctx.restore();
+
+    // Draw Highlight Dots on Active Series Points
+    const activePoints = [];
+    config.series.forEach(function (series) {
+      const val = sample.valid ? sample[series.key] : null;
+      if (typeof val === "number" && !Number.isNaN(val)) {
+        const ptY = yFor(val, yRange.min, yRange.max, pad, plotH);
+
+        // Outer ring
+        ctx.fillStyle = "#111511";
+        ctx.beginPath();
+        ctx.arc(sampleX, ptY, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Colored core
+        ctx.fillStyle = series.color;
+        ctx.beginPath();
+        ctx.arc(sampleX, ptY, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        activePoints.push({
+          label: series.label || series.key,
+          color: series.color,
+          value: formatYAxisLabel(val)
+        });
+      }
+    });
+
+    // Calculate Time Offset Label (e.g. "-12s" or "now")
+    const secondsAgo = samples.length - 1 - index;
+    const timeText = secondsAgo === 0 ? "now" : "-" + secondsAgo + "s";
+
+    // Prepare Tooltip Content Lines
+    const lines = [timeText];
+    if (!sample.valid) {
+      lines.push("Status: DROPOUT");
+    } else {
+      activePoints.forEach(pt => lines.push(pt.label + ": " + pt.value));
+    }
+
+    // Measure Tooltip Box Dimensions
+    ctx.font = "11px Consolas, monospace";
+    let boxW = 0;
+    lines.forEach(line => {
+      boxW = Math.max(boxW, ctx.measureText(line).width);
+    });
+    boxW += 16; // Internal padding
+    const lineH = 15;
+    const boxH = lines.length * lineH + 10;
+
+    // Position Tooltip Card (Flip to left if too close to right edge)
+    let boxX = sampleX + 12;
+    if (boxX + boxW > canvasWidth - 10) {
+      boxX = sampleX - boxW - 12;
+    }
+    let boxY = pad.top + 5;
+
+    // Draw Tooltip Card Background & Border
+    ctx.fillStyle = "rgba(18, 22, 18, 0.92)";
+    ctx.strokeStyle = "rgba(174, 184, 167, 0.35)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(boxX, boxY, boxW, boxH, 4) : ctx.rect(boxX, boxY, boxW, boxH);
+    ctx.fill();
+    ctx.stroke();
+
+    // Render Tooltip Text Lines
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+
+    // Title / Time
+    ctx.fillStyle = "rgba(174, 184, 167, 0.65)";
+    ctx.fillText(lines[0], boxX + 8, boxY + 6);
+
+    // Series values
+    let currentY = boxY + 6 + lineH;
+    if (!sample.valid) {
+      ctx.fillStyle = "#b589ff";
+      ctx.fillText(lines[1], boxX + 8, currentY);
+    } else {
+      activePoints.forEach(pt => {
+        ctx.fillStyle = pt.color;
+        ctx.fillText(pt.label + ": " + pt.value, boxX + 8, currentY);
+        currentY += lineH;
+      });
+    }
+  }
 
   function drawGrid(ctx, pad, plotW, plotH) {
     ctx.strokeStyle = "rgba(174, 184, 167, 0.12)";
@@ -2470,110 +2491,110 @@ function drawTooltip(ctx, hoverPos, samples, pad, plotW, plotH, config, yRange, 
   }
 
   function drawAxes(ctx, samples, pad, plotW, plotH, config, yRange) {
-  ctx.strokeStyle = "rgba(174, 184, 167, 0.26)";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(pad.left, pad.top, plotW, plotH);
-
-  ctx.fillStyle = "rgba(174, 184, 167, 0.72)";
-  ctx.font = "11px Consolas, monospace";
-
-  // Use pre-computed yRange instead of recalculating
-  const tickValues = buildYAxisTicks(yRange.min, yRange.max, 5);
-
-  ctx.textAlign = "right";
-  ctx.textBaseline = "middle";
-  const tickLabelX = pad.left - 7; 
-
-  tickValues.forEach(function (tickValue) {
-    const y = yFor(tickValue, yRange.min, yRange.max, pad, plotH);
-    const label = formatYAxisLabel(tickValue);
-
-    ctx.strokeStyle = "rgba(174, 184, 167, 0.18)";
-    ctx.beginPath();
-    ctx.moveTo(pad.left, y);
-    ctx.lineTo(pad.left + plotW, y);
-    ctx.stroke();
-
     ctx.strokeStyle = "rgba(174, 184, 167, 0.26)";
-    ctx.beginPath();
-    ctx.moveTo(pad.left, y);
-    ctx.lineTo(pad.left - 4, y);
-    ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.strokeRect(pad.left, pad.top, plotW, plotH);
 
-    ctx.fillText(label, tickLabelX, y);
-  });
+    ctx.fillStyle = "rgba(174, 184, 167, 0.72)";
+    ctx.font = "11px Consolas, monospace";
 
-  if (config && config.yLabel) {
-    ctx.save();
-    ctx.fillStyle = "rgba(174, 184, 167, 0.78)";
-    ctx.textAlign = "center";
+    // Use pre-computed yRange instead of recalculating
+    const tickValues = buildYAxisTicks(yRange.min, yRange.max, 5);
+
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    const tickLabelX = pad.left - 7;
+
+    tickValues.forEach(function (tickValue) {
+      const y = yFor(tickValue, yRange.min, yRange.max, pad, plotH);
+      const label = formatYAxisLabel(tickValue);
+
+      ctx.strokeStyle = "rgba(174, 184, 167, 0.18)";
+      ctx.beginPath();
+      ctx.moveTo(pad.left, y);
+      ctx.lineTo(pad.left + plotW, y);
+      ctx.stroke();
+
+      ctx.strokeStyle = "rgba(174, 184, 167, 0.26)";
+      ctx.beginPath();
+      ctx.moveTo(pad.left, y);
+      ctx.lineTo(pad.left - 4, y);
+      ctx.stroke();
+
+      ctx.fillText(label, tickLabelX, y);
+    });
+
+    if (config && config.yLabel) {
+      ctx.save();
+      ctx.fillStyle = "rgba(174, 184, 167, 0.78)";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.translate(13, pad.top + plotH / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText(config.yLabel, 0, 0);
+      ctx.restore();
+    }
+
     ctx.textBaseline = "top";
-    ctx.translate(13, pad.top + plotH / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.fillText(config.yLabel, 0, 0);
-    ctx.restore();
+    ctx.textAlign = "left";
+    ctx.fillText("-" + Math.min(samples.length, MAX_SAMPLES) + "s", pad.left, pad.top + plotH + 5);
+
+    ctx.textAlign = "right";
+    ctx.fillText("now", pad.left + plotW, pad.top + plotH + 5);
   }
-
-  ctx.textBaseline = "top";
-  ctx.textAlign = "left";
-  ctx.fillText("-" + Math.min(samples.length, MAX_SAMPLES) + "s", pad.left, pad.top + plotH + 5);
-
-  ctx.textAlign = "right";
-  ctx.fillText("now", pad.left + plotW, pad.top + plotH + 5);
-}
 
   function getChartYRange(config, samples) {
-  let minVal = Infinity;
-  let maxVal = -Infinity;
+    let minVal = Infinity;
+    let maxVal = -Infinity;
 
-  // 1. Scan all valid samples across all active series
-  if (samples && samples.length && config && config.series) {
-    samples.forEach(function (sample) {
-      if (!sample || !sample.valid) return;
+    // 1. Scan all valid samples across all active series
+    if (samples && samples.length && config && config.series) {
+      samples.forEach(function (sample) {
+        if (!sample || !sample.valid) return;
 
-      config.series.forEach(function (series) {
-        const value = sample[series.key];
-        if (typeof value === "number" && !Number.isNaN(value)) {
-          if (value < minVal) minVal = value;
-          if (value > maxVal) maxVal = value;
-        }
+        config.series.forEach(function (series) {
+          const value = sample[series.key];
+          if (typeof value === "number" && !Number.isNaN(value)) {
+            if (value < minVal) minVal = value;
+            if (value > maxVal) maxVal = value;
+          }
+        });
       });
-    });
-  }
+    }
 
-  // Optional: Ensure target band fits inside the view if present
-  if (config && config.targetBand) {
-    if (typeof config.targetBand.min === "number") minVal = Math.min(minVal, config.targetBand.min);
-    if (typeof config.targetBand.max === "number") maxVal = Math.max(maxVal, config.targetBand.max);
-  }
+    // Optional: Ensure target band fits inside the view if present
+    if (config && config.targetBand) {
+      if (typeof config.targetBand.min === "number") minVal = Math.min(minVal, config.targetBand.min);
+      if (typeof config.targetBand.max === "number") maxVal = Math.max(maxVal, config.targetBand.max);
+    }
 
-  // 2. Fallback if no valid sample data is currently present
-  if (minVal === Infinity || maxVal === -Infinity) {
-    const firstSeries = config && config.series && config.series[0];
+    // 2. Fallback if no valid sample data is currently present
+    if (minVal === Infinity || maxVal === -Infinity) {
+      const firstSeries = config && config.series && config.series[0];
+      return {
+        min: firstSeries ? firstSeries.min : 0,
+        max: firstSeries ? firstSeries.max : 1
+      };
+    }
+
+    // 3. Flatline handling (e.g. constant value where min === max)
+    if (minVal === maxVal) {
+      const delta = Math.abs(minVal) * 0.1 || 1; // 10% offset or ±1 unit
+      return {
+        min: minVal - delta,
+        max: maxVal + delta
+      };
+    }
+
+    // 4. Add 8% padding (headroom & footroom) so line graphs don't touch the borders
+    const range = maxVal - minVal;
+    const padding = range * 0.08;
+
     return {
-      min: firstSeries ? firstSeries.min : 0,
-      max: firstSeries ? firstSeries.max : 1
+      min: minVal - padding,
+      max: maxVal + padding
     };
   }
-
-  // 3. Flatline handling (e.g. constant value where min === max)
-  if (minVal === maxVal) {
-    const delta = Math.abs(minVal) * 0.1 || 1; // 10% offset or ±1 unit
-    return {
-      min: minVal - delta,
-      max: maxVal + delta
-    };
-  }
-
-  // 4. Add 8% padding (headroom & footroom) so line graphs don't touch the borders
-  const range = maxVal - minVal;
-  const padding = range * 0.08;
-
-  return {
-    min: minVal - padding,
-    max: maxVal + padding
-  };
-}
 
   function buildYAxisTicks(min, max, count) {
     if (!Number.isFinite(min) || !Number.isFinite(max) || count < 2) {
@@ -2631,21 +2652,41 @@ function drawTooltip(ctx, hoverPos, samples, pad, plotW, plotH, config, yRange, 
     }
   }
 
-  function renderHealthDetails(errors) {
+  function renderHealthDetails(errors, thermalErrors) {
     const detected = Array.isArray(errors) ? errors : [];
+    const thermalDetected = Array.isArray(thermalErrors)
+      ? thermalErrors.reduce(function (entries, errorCode, index) {
+          if (errorCode !== 0) {
+            const channelInfo = THERMAL_CHANNELS[index];
+            const errorText = THERMAL_ERROR_MODES[errorCode] || `Error code ${errorCode}`;
+            entries.push({
+              thermalChannel: index + 1,
+              message: `${channelInfo ? channelInfo.label : "Switch " + index}: ${errorText}`
+            });
+          }
+          return entries;
+        }, [])
+      : [];
+    const allErrors = detected.concat(thermalDetected);
+    const previousList = dom.healthDetails.querySelector("ul");
+    const previousScrollTop = previousList ? previousList.scrollTop : 0;
+
     dom.healthDetails.innerHTML = "<strong>Detected errors</strong>";
-    if (!detected.length) {
+    if (!allErrors.length) {
       dom.healthDetails.insertAdjacentHTML("beforeend", '<span class="health-empty">No captured errors in this loop</span>');
       return;
     }
 
     const list = document.createElement("ul");
-    detected.forEach(function (error) {
+    allErrors.forEach(function (error) {
       const item = document.createElement("li");
-      item.textContent = "Bit " + error.bit + ": " + error.message;
+      item.textContent = error.thermalChannel
+        ? `Thermal CH${error.thermalChannel} Error: ${error.message}`
+        : "Bit " + error.bit + ": " + error.message;
       list.appendChild(item);
     });
     dom.healthDetails.appendChild(list);
+    list.scrollTop = previousScrollTop;
   }
 
   function setMetricState(element, state) {
@@ -3000,113 +3041,113 @@ function drawTooltip(ctx, hoverPos, samples, pad, plotW, plotH, config, yRange, 
  * Attaches vertical top-drag resizing logic to a bottom panel
  * @param {string} handleId - Element ID of the resize handle bar
  */
-function makePanelResizable(handleId) {
-  const handle = document.getElementById(handleId);
-  const panel = handle?.closest(".panel");
+  function makePanelResizable(handleId) {
+    const handle = document.getElementById(handleId);
+    const panel = handle?.closest(".panel");
 
-  if (!handle || !panel) return;
+    if (!handle || !panel) return;
 
-  let startY = 0;
-  let startHeight = 0;
+    let startY = 0;
+    let startHeight = 0;
 
-  const onMouseMove = (e) => {
-    const deltaY = e.clientY - startY;
-    const newHeight = startHeight - deltaY;
+    const onMouseMove = (e) => {
+      const deltaY = e.clientY - startY;
+      const newHeight = startHeight - deltaY;
 
-    // Dynamics limit: prevents collapsing top panel completely (reserves 140px for top header)
-    const parentColumn = panel.parentElement;
-    const maxAllowedHeight = parentColumn ? parentColumn.clientHeight - 140 : 600;
+      // Dynamics limit: prevents collapsing top panel completely (reserves 140px for top header)
+      const parentColumn = panel.parentElement;
+      const maxAllowedHeight = parentColumn ? parentColumn.clientHeight - 140 : 600;
 
-    if (newHeight >= 120 && newHeight <= maxAllowedHeight) {
-      panel.style.height = `${newHeight}px`;
-    }
-  };
+      if (newHeight >= 120 && newHeight <= maxAllowedHeight) {
+        panel.style.height = `${newHeight}px`;
+      }
+    };
 
-  const onMouseUp = () => {
-    panel.classList.remove("is-resizing");
-    document.body.style.userSelect = "";
-    document.removeEventListener("mousemove", onMouseMove);
-    document.removeEventListener("mouseup", onMouseUp);
-  };
+    const onMouseUp = () => {
+      panel.classList.remove("is-resizing");
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
 
-  handle.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    startY = e.clientY;
-    startHeight = panel.offsetHeight;
+    handle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      startY = e.clientY;
+      startHeight = panel.offsetHeight;
 
-    panel.classList.add("is-resizing");
-    document.body.style.userSelect = "none";
+      panel.classList.add("is-resizing");
+      document.body.style.userSelect = "none";
 
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    });
+  }
+
+  function makeColumnsResizable() {
+    const grid = document.querySelector(".console-grid");
+    const handle = document.getElementById("columnResizeHandle");
+
+    if (!grid || !handle) return;
+
+    const minLeft = 330;
+    const minRight = 420;
+    let startX = 0;
+    let startLeft = 0;
+
+    const setColumns = (left, right) => {
+      grid.style.setProperty("--left-column-width", `${left}px`);
+      grid.style.setProperty("--right-column-width", `${right}px`);
+      handle.setAttribute("aria-valuenow", String(Math.round(left)));
+    };
+
+    const onMouseMove = (event) => {
+      const delta = event.clientX - startX;
+      const availableWidth = grid.clientWidth - 12 - 10;
+      const left = Math.max(minLeft, Math.min(availableWidth - minRight, startLeft + delta));
+      const right = Math.max(minRight, availableWidth - left);
+      setColumns(left, right);
+    };
+
+    const stopResizing = () => {
+      grid.classList.remove("is-resizing-columns");
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", stopResizing);
+    };
+
+    handle.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      const columns = grid.querySelectorAll(":scope > .console-column");
+      startX = event.clientX;
+      startLeft = columns[0].offsetWidth;
+      grid.classList.add("is-resizing-columns");
+      document.body.style.userSelect = "none";
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", stopResizing);
+    });
+
+    handle.setAttribute("aria-valuemin", String(minLeft));
+    handle.setAttribute("aria-valuemax", String(Math.max(minLeft, grid.clientWidth - 12 - 10 - minRight)));
+    handle.setAttribute("aria-valuenow", String(Math.round(grid.querySelector(":scope > .console-column").offsetWidth)));
+
+    handle.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const columns = grid.querySelectorAll(":scope > .console-column");
+      const currentLeft = columns[0].offsetWidth;
+      const availableWidth = grid.clientWidth - 12 - 10;
+      const nextLeft = currentLeft + (event.key === "ArrowRight" ? 20 : -20);
+      const left = Math.max(minLeft, Math.min(availableWidth - minRight, nextLeft));
+      setColumns(left, Math.max(minRight, availableWidth - left));
+    });
+  }
+
+  // Initialize resizers once DOM is fully loaded
+  document.addEventListener("DOMContentLoaded", () => {
+    makePanelResizable("commandResizeHandle");
+    makePanelResizable("terminalResizeHandle");
+    makeColumnsResizable();
   });
-}
-
-function makeColumnsResizable() {
-  const grid = document.querySelector(".console-grid");
-  const handle = document.getElementById("columnResizeHandle");
-
-  if (!grid || !handle) return;
-
-  const minLeft = 330;
-  const minRight = 420;
-  let startX = 0;
-  let startLeft = 0;
-
-  const setColumns = (left, right) => {
-    grid.style.setProperty("--left-column-width", `${left}px`);
-    grid.style.setProperty("--right-column-width", `${right}px`);
-    handle.setAttribute("aria-valuenow", String(Math.round(left)));
-  };
-
-  const onMouseMove = (event) => {
-    const delta = event.clientX - startX;
-    const availableWidth = grid.clientWidth - 12 - 10;
-    const left = Math.max(minLeft, Math.min(availableWidth - minRight, startLeft + delta));
-    const right = Math.max(minRight, availableWidth - left);
-    setColumns(left, right);
-  };
-
-  const stopResizing = () => {
-    grid.classList.remove("is-resizing-columns");
-    document.body.style.userSelect = "";
-    document.removeEventListener("mousemove", onMouseMove);
-    document.removeEventListener("mouseup", stopResizing);
-  };
-
-  handle.addEventListener("mousedown", (event) => {
-    event.preventDefault();
-    const columns = grid.querySelectorAll(":scope > .console-column");
-    startX = event.clientX;
-    startLeft = columns[0].offsetWidth;
-    grid.classList.add("is-resizing-columns");
-    document.body.style.userSelect = "none";
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", stopResizing);
-  });
-
-  handle.setAttribute("aria-valuemin", String(minLeft));
-  handle.setAttribute("aria-valuemax", String(Math.max(minLeft, grid.clientWidth - 12 - 10 - minRight)));
-  handle.setAttribute("aria-valuenow", String(Math.round(grid.querySelector(":scope > .console-column").offsetWidth)));
-
-  handle.addEventListener("keydown", (event) => {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
-    const columns = grid.querySelectorAll(":scope > .console-column");
-    const currentLeft = columns[0].offsetWidth;
-    const availableWidth = grid.clientWidth - 12 - 10;
-    const nextLeft = currentLeft + (event.key === "ArrowRight" ? 20 : -20);
-    const left = Math.max(minLeft, Math.min(availableWidth - minRight, nextLeft));
-    setColumns(left, Math.max(minRight, availableWidth - left));
-  });
-}
-
-// Initialize resizers once DOM is fully loaded
-document.addEventListener("DOMContentLoaded", () => {
-  makePanelResizable("commandResizeHandle");
-  makePanelResizable("terminalResizeHandle");
-  makeColumnsResizable();
-});
 
   init();
 })();
