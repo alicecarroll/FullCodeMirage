@@ -19,43 +19,134 @@
 #include "ErrorStatus.h"
 #include "Settings.h"
 #include "read_sensors.h"
+#include "SystemStatus.h"
+
 
 #include <stdio.h>
 #include <errno.h>
 #include <unistd.h>
+#include <time.h>
 
+#include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
 #include "driver/sdspi_host.h"
 #include "sdmmc_cmd.h"
 
-        static const char *TAG = "SDCard";
+
+static const char *TAG = "SDCard";
+// Buffer configuration
+//#define SD_BUFFER_SIZE 4096
+//#define SENSOR_READING_SIZE sizeof(SensorData)
+
+
+//#define READINGS_PER_BUFFER //(SD_BUFFER_SIZE / SENSOR_READING_SIZE)//
+
+//#define TOTAL_READING_SIZE sizeof(MainSystemStatusPacket)
+
+//#define READINGS_PER_BUFFER (SD_BUFFER_SIZE / TOTAL_READING_SIZE)
+
+static constexpr size_t SD_HALF_BUFFER = SD_BUFFER_SIZE / 2;
+static uint8_t SD_buffer[SD_HALF_BUFFER];
+static uint8_t SD_buffer2[SD_HALF_BUFFER];
+
+static size_t SD_buffer_offset = 0;
+static size_t SD_buffer_offset2 = 0;
 
 static sdmmc_card_t *s_card = NULL;
 static bool s_mounted = false;
+static char current_csv_filename[64] = "";
+static char current_metadata_filename[64] = "";
+static int64_t first_entry_time_us = -1;
+static bool datetime_synchronized = false;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-// hello
+//SensorData *sensor_datas;
 
-/*
-* Buffers with immediate storing
-// ===================================================================
-// Option 1: Binary buffer (fastest, smallest)
-// ===================================================================
-void buffer_SD_data_binary_single()
+static void create_generic_filename(const char *prefix,
+                                    char *buffer,
+                                    size_t buffer_size,
+                                    const char *extension)
 {
-    uint8_t buf[sizeof(sensor_data)];
-    memcpy(buf, &sensor_data, sizeof(buf));
-    sd_write("sensor_data.bin", buf, sizeof(buf));
-    ESP_LOGI(TAG, "Buffered %zu bytes (binary)", sizeof(buf));
+    snprintf(buffer, buffer_size,
+             "%s_noDateTimeInformation%s", prefix, extension);
 }
 
-// ===================================================================
-// Option 2: CSV text format (readable, larger)
-// ===================================================================
-void buffer_SD_data_csv_single()
+static void create_unique_csv_filename(void)
+{
+    create_generic_filename("sensor_data", current_csv_filename, sizeof(current_csv_filename), ".csv");
+}
+static void create_unique_metadata_filename(void)
+{
+    create_generic_filename("metadata", current_metadata_filename, sizeof(current_metadata_filename), ".log");
+}
+
+static void create_datetime_filename(const char *prefix,
+                                     char *buffer,
+                                     size_t buffer_size,
+                                     const struct tm *datetime,
+                                     const char *extension)
+{
+    // FAT filenames cannot contain ':', so use hyphens in the time portion.
+    snprintf(buffer, buffer_size,
+             "%s_%02d-%02d-%04dT%02d-%02d-%02d%s",
+             prefix,
+             datetime->tm_mday,
+             datetime->tm_mon + 1,
+             datetime->tm_year + 1900,
+             datetime->tm_hour,
+             datetime->tm_min,
+             datetime->tm_sec,
+             extension);
+}
+
+static bool is_leap_year(int year)
+{
+    return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+}
+
+static void subtract_seconds(struct tm *datetime, uint32_t seconds)
+{
+    while (seconds > 0) {
+        if (datetime->tm_sec > 0) {
+            const uint32_t seconds_to_subtract = seconds < static_cast<uint32_t>(datetime->tm_sec)
+                                                     ? seconds
+                                                     : static_cast<uint32_t>(datetime->tm_sec);
+            datetime->tm_sec -= static_cast<int>(seconds_to_subtract);
+            seconds -= seconds_to_subtract;
+            continue;
+        }
+
+        datetime->tm_sec = 59;
+        if (datetime->tm_min > 0) {
+            --datetime->tm_min;
+        } else {
+            datetime->tm_min = 59;
+            if (datetime->tm_hour > 0) {
+                --datetime->tm_hour;
+            } else {
+                datetime->tm_hour = 23;
+                if (datetime->tm_mday > 1) {
+                    --datetime->tm_mday;
+                } else {
+                    if (datetime->tm_mon > 0) {
+                        --datetime->tm_mon;
+                    } else {
+                        datetime->tm_mon = 11;
+                        --datetime->tm_year;
+                    }
+                    static const uint8_t days_in_month[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+                    datetime->tm_mday = days_in_month[datetime->tm_mon];
+                    if (datetime->tm_mon == 1 && is_leap_year(datetime->tm_year + 1900)) {
+                        ++datetime->tm_mday;
+                    }
+                }
+            }
+        }
+        --seconds;
+    }
+}
+
+static bool rename_current_file(const char *old_name, const char *new_name)
 {
     char old_path[SD_MAX_PATH_LEN];
     char new_path[SD_MAX_PATH_LEN];
@@ -153,7 +244,7 @@ static esp_err_t create_new_csv_file(void)
         create_unique_csv_filename();
     }
 
-    char path[SD_MAX_PATH_LEN];
+    char path[SD_MAX_PATH_LEN + sizeof(current_csv_filename)];
     snprintf(path, sizeof(path), "%s/%s", SD_MOUNT_POINT, current_csv_filename);
 
     FILE *f = fopen(path, "wb");
@@ -182,7 +273,7 @@ static esp_err_t create_new_metadata_log(void)
         create_unique_metadata_filename();
     }
 
-    char path[SD_MAX_PATH_LEN];
+    char path[SD_MAX_PATH_LEN + sizeof(current_metadata_filename)];
     snprintf(path, sizeof(path), "%s/%s", SD_MOUNT_POINT, current_metadata_filename);
 
     FILE *f = fopen(path, "wb");
@@ -208,36 +299,46 @@ static esp_err_t create_new_metadata_log(void)
 // ===================================================================
 // Option 1: Binary buffer large (fastest, smallest)
 // ===================================================================
-void buffer_SD_data_binary(const SensorData *sensor_data)
-{
-    // Check if there's space for another reading
-    if (SD_buffer_offset + SENSOR_READING_SIZE <= SD_BUFFER_SIZE)
-    {
-        // Copy current sensor reading into buffer
-        memcpy(&SD_buffer[SD_buffer_offset], sensor_data, SENSOR_READING_SIZE);
-        SD_buffer_offset += SENSOR_READING_SIZE;
-    }
-    
-    // Write to SD when buffer is full
-    if (SD_buffer_offset >= SD_BUFFER_SIZE)
-    {
-        esp_err_t err = sd_write("sensor_data.bin", SD_buffer, SD_BUFFER_SIZE);
-        if (err == ESP_OK)
-        {
-            ESP_LOGI(TAG, "Wrote %d readings (%zu bytes) to SD", 
-                     READINGS_PER_BUFFER, SD_BUFFER_SIZE);
-        }
-        else
-        {
-            ESP_LOGE_CAPTURED(ERROR_BIT_24, TAG, "Failed to write buffer to SD");
-        }
-        SD_buffer_offset = 0;  // Reset for next batch
-    }
-}
+//void buffer_SD_data_binary(const SensorData *sensor_data)
+//{
+//    // Check if there's space for another reading
+//    if (SD_buffer_offset + TOTAL_READING_SIZE <= SD_HALF_BUFFER)
+//    {
+//        // Copy current sensor reading into buffer
+//        memcpy(&SD_buffer[SD_buffer_offset], sensor_data, SENSOR_READING_SIZE);
+//        SD_buffer_offset += SENSOR_READING_SIZE;
+//    }
+//    
+//    // Write to SD when buffer is full
+//    if (SD_buffer_offset >= SD_HALF_BUFFER)
+//    {
+//        esp_err_t err = sd_write("sensor_data.bin", SD_buffer, SD_HALF_BUFFER);
+//        if (err == ESP_OK)
+//        {
+//            ESP_LOGI(TAG, "Wrote %d readings (%zu bytes) to SD", 
+//                     READINGS_PER_BUFFER, SD_HALF_BUFFER);
+//        }
+//        else
+//        {
+//            ESP_LOGE_CAPTURED(ERROR_BIT_24, TAG, "Failed to write buffer to SD");
+//        }
+//        SD_buffer_offset = 0;  // Reset for next batch
+//    }
+//}
 
-void buffer_SD_data_csv(SensorData *sensor_data)
+void buffer_SD_data_csv(MainSystemStatusPacket *system_status_packet)//SensorData *sensor_data)
 {
-    if (sensor_data == NULL) return;
+    if (system_status_packet == nullptr){
+        ESP_LOGE(TAG,"System status packet is nullpointer"); 
+        return;
+    }
+    SensorData *sensor_datas = &system_status_packet->sensor_data;
+
+    if (first_entry_time_us < 0) {
+        first_entry_time_us = esp_timer_get_time();
+    }
+
+    if (sensor_datas == NULL) return;
 
     // Create temp CSV line to store (increased size to 1024 to fit all expanded sensor fields)
     static char line[1024];
@@ -255,14 +356,14 @@ void buffer_SD_data_csv(SensorData *sensor_data)
         "%u,%u,%.2f,"
         "%u,%u,%u,"
         "%u,%.2f,%u,%u,%u\n",
-        sensor_data->hours,
-        sensor_data->minutes,
-        sensor_data->seconds,
-        sensor_data->Tp1, sensor_data->Tp2, sensor_data->Tp3, sensor_data->Tp6, 
-        sensor_data->Pp3, sensor_data->Tp4, sensor_data->Pp1, sensor_data->Pa1, 
-        sensor_data->Ta1, sensor_data->Ta2, sensor_data->Ta3, sensor_data->Ha1, 
-        sensor_data->Tp5, sensor_data->Pp2,
-        sensor_data->Tt1, sensor_data->Tt2, sensor_data->Tt3,
+        sensor_datas->hours,
+        sensor_datas->minutes,
+        sensor_datas->seconds,
+        sensor_datas->Tp1, sensor_datas->Tp2, sensor_datas->Tp3, sensor_datas->Tp6, 
+        sensor_datas->Pp3, sensor_datas->Tp4, sensor_datas->Pp1, sensor_datas->Pa1, 
+        sensor_datas->Ta1, sensor_datas->Ta2, sensor_datas->Ta3, sensor_datas->Ha1, 
+        sensor_datas->Tp5, sensor_datas->Pp2,
+        sensor_datas->Tt1, sensor_datas->Tt2, sensor_datas->Tt3,
         // K96 fields mapping
         (long)sensor_datas->K96_LPL_Signal, sensor_datas->K96_LPL_Signal_filtered,
         (long)sensor_datas->K96_SPL_Signal, sensor_datas->K96_SPL_Signal_filtered,
@@ -330,16 +431,21 @@ void buffer_SD_data_csv(SensorData *sensor_data)
     // Check if snprintf encountered an error or truncation
     if (n < 0 || (size_t)n >= sizeof(line))
     {
-        ESP_LOGE_CAPTURED(ERROR_BIT_25, TAG, "CSV line formatting failed or was truncated!");
+        ESP_LOGE_CAPTURED(ERROR_BIT_25, TAG, "sensor CSV line formatting failed or was truncated!");
+        return;
+    }
+    if (m < 0 || (size_t)m >= sizeof(sline))
+    {
+        ESP_LOGE_CAPTURED(ERROR_BIT_25, TAG, "Meta data CSV line formatting failed or was truncated!");
         return;
     }
 
     // If the line doesn't fit, flush current buffer first
     // Extra check since csv can be variable length and might exceed buffer size on its own,
     // in that case we should write it directly instead of trying to buffer it
-    if ((size_t)n + SD_buffer_offset >= SD_BUFFER_SIZE)
+    if ((size_t)n + SD_buffer_offset >= SD_HALF_BUFFER)
     {
-        esp_err_t err = sd_write("sensor_data.csv", SD_buffer, SD_buffer_offset);
+        esp_err_t err = sd_write(current_csv_filename, SD_buffer, SD_buffer_offset);
         if (err == ESP_OK)
         {
             ESP_LOGI(TAG, "Flushed %zu bytes CSV to SD", SD_buffer_offset);
@@ -350,18 +456,34 @@ void buffer_SD_data_csv(SensorData *sensor_data)
         }
         SD_buffer_offset = 0;
     }
+    if ((size_t)m + SD_buffer_offset2 >= SD_HALF_BUFFER)
+    {
+        esp_err_t err = sd_write(current_metadata_filename, SD_buffer2, SD_buffer_offset2);
+        if (err == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Flushed %zu bytes log data to SD", SD_buffer_offset2);
+        }
+        else
+        {
+            ESP_LOGE_CAPTURED(ERROR_BIT_26, TAG, "Failed to flush log buffer to SD");
+        }
+        SD_buffer_offset2 = 0;
+    }
 
     // Append the line bytes into the buffer
     memcpy(&SD_buffer[SD_buffer_offset], line, (size_t)n);
+    memcpy(&SD_buffer2[SD_buffer_offset2], sline, (size_t)m);
     SD_buffer_offset += (size_t)n;
+    SD_buffer_offset2 += (size_t)m;
 
     // If buffer full after append, write it out
-    if (SD_buffer_offset >= SD_BUFFER_SIZE)
+    if (SD_buffer_offset >= SD_HALF_BUFFER)
     {
-        esp_err_t err = sd_write("sensor_data.csv", SD_buffer, SD_BUFFER_SIZE);
+        //esp_err_t err = sd_write("sensor_data.csv", SD_buffer, SD_HALF_BUFFER);
+        esp_err_t err = sd_write(current_csv_filename, SD_buffer, SD_buffer_offset);
         if (err == ESP_OK)
         {
-            ESP_LOGI(TAG, "Wrote %zu bytes CSV to SD", SD_BUFFER_SIZE);
+            ESP_LOGI(TAG, "Wrote %zu bytes CSV to SD", SD_HALF_BUFFER);
         }
         else
         {
@@ -369,19 +491,87 @@ void buffer_SD_data_csv(SensorData *sensor_data)
         }
         SD_buffer_offset = 0;  // Reset for next batch
     }
+    if (SD_buffer_offset2 >= SD_HALF_BUFFER)
+    {
+        //esp_err_t err = sd_write("sensor_data.csv", SD_buffer, SD_HALF_BUFFER);
+        esp_err_t err = sd_write(current_metadata_filename, SD_buffer2, SD_buffer_offset2);
+        if (err == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Wrote %zu bytes log data to SD", SD_HALF_BUFFER);
+        }
+        else
+        {
+            ESP_LOGE_CAPTURED(ERROR_BIT_27, TAG, "Failed to write log buffer to SD");
+        }
+        SD_buffer_offset2 = 0;  // Reset for next batch
+    }
 }
+/*
+void log_metadata(MetaData *meta_data)
+{
+    if (event_type == nullptr || current_metadata_filename[0] == '\0')
+    {
+        return;
+    }
+
+    time_t now = time(NULL);
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
+
+    char line[256];
+    int n = snprintf(line, sizeof(line),
+                     "%02d,%02d,%02d,%s,%d,%d,0x%02X,%d,%d,%d\n",
+                     timeinfo.tm_hour,
+                     timeinfo.tm_min,
+                     timeinfo.tm_sec,
+                     event_type,
+                     mode,
+                     flight_phase,
+                     heater_mask,
+                     pump_value,
+                     secondary_value,
+                     tertiary_value);
+
+    if (n < 0 || (size_t)n >= sizeof(line))
+    {
+        ESP_LOGE_CAPTURED(ERROR_BIT_25, TAG, "Metadata log line formatting failed or was truncated");
+        return;
+    }
+
+    esp_err_t err = sd_write(current_metadata_filename, (const uint8_t *)line, (size_t)n);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE_CAPTURED(ERROR_BIT_26, TAG, "Failed to log metadata event %s", event_type);
+    }
+}
+
+*/
+
 
 // Flush remaining data (call before shutdown)
 void buffer_SD_data_flush()
 {
+    const char *csv_filename = current_csv_filename[0] != '\0' ? current_csv_filename : "sensor_data.csv";
+
     if (SD_buffer_offset > 0)
     {
-        esp_err_t err = sd_write("sensor_data.bin", SD_buffer, SD_buffer_offset);
+        esp_err_t err = sd_write(csv_filename, SD_buffer, SD_buffer_offset);
         if (err == ESP_OK)
         {
             ESP_LOGI(TAG, "Flushed %zu bytes to SD", SD_buffer_offset);
         }
         SD_buffer_offset = 0;
+    }
+    const char *meta_filename = current_metadata_filename[0] != '\0' ? current_metadata_filename : "meta_data.csv";
+
+    if (SD_buffer_offset2 > 0)
+    {
+        esp_err_t err = sd_write(meta_filename, SD_buffer2, SD_buffer_offset2);
+        if (err == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Flushed %zu bytes to SD", SD_buffer_offset2);
+        }
+        SD_buffer_offset2 = 0;
     }
 }
 
@@ -426,6 +616,22 @@ esp_err_t sd_mount(void)
     }
 
     s_mounted = true;
+    first_entry_time_us = -1;
+    datetime_synchronized = false;
+    create_unique_csv_filename();
+    create_unique_metadata_filename();
+    esp_err_t csv_err = create_new_csv_file();
+    if (csv_err != ESP_OK)
+    {
+        ESP_LOGW(TAG, "Failed to create initial CSV log file; continuing with mount");
+    }
+
+    esp_err_t metadata_err = create_new_metadata_log();
+    if (metadata_err != ESP_OK)
+    {
+        ESP_LOGW(TAG, "Failed to create metadata log file; continuing with mount");
+    }
+
     ESP_LOGI(TAG, "SD card mounted at %s", SD_MOUNT_POINT);
     return ESP_OK;
 }
@@ -471,6 +677,14 @@ bool sd_get_free_percent(uint8_t *free_percent)
 
 esp_err_t sd_write(const char *filename, const uint8_t *data, size_t length)
 {
+    
+    if (filename[0] == '\0')
+    {
+        create_new_csv_file();
+        create_new_metadata_log();
+        return ESP_FAIL;
+    }
+
     char path[SD_MAX_PATH_LEN];
     snprintf(path, sizeof(path), "%s/%s", SD_MOUNT_POINT, filename);
 
@@ -498,6 +712,13 @@ esp_err_t sd_write(const char *filename, const uint8_t *data, size_t length)
 esp_err_t sd_read(const char *filename, uint8_t *out_buf,
                   size_t buf_size, size_t *bytes_read)
 {
+    if (filename[0] == '\0')
+    {
+        create_new_csv_file();
+        create_unique_metadata_filename();
+
+    }
+
     char path[SD_MAX_PATH_LEN];
     snprintf(path, sizeof(path), "%s/%s", SD_MOUNT_POINT, filename);
 
@@ -534,7 +755,13 @@ esp_err_t sd_wipe_files(void)
             continue;
 
         char path[SD_MAX_PATH_LEN];
-        //snprintf(path, sizeof(path), "%s/%s", SD_MOUNT_POINT, entry->d_name);
+        const int path_len = snprintf(path, sizeof(path), "%s/%s", SD_MOUNT_POINT, entry->d_name);
+        if (path_len < 0 || (size_t)path_len >= sizeof(path))
+        {
+            ESP_LOGE_CAPTURED(ERROR_BIT_33, TAG, "Path too long for directory entry %s", entry->d_name);
+            failed++;
+            continue;
+        }
 
         if (unlink(path) != 0)
         {
@@ -548,7 +775,14 @@ esp_err_t sd_wipe_files(void)
     }
 
     closedir(dir);
-
+    SD_buffer_offset  = 0;
+    SD_buffer_offset2 = 0;
+    current_csv_filename[0]      = '\0';
+    current_metadata_filename[0] = '\0';
+    first_entry_time_us = -1;
+    datetime_synchronized = false;
+    create_new_csv_file();
+    create_new_metadata_log();
     if (failed > 0)
     {
         ESP_LOGW(TAG, "%d file(s) could not be deleted", failed);

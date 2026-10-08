@@ -2181,6 +2181,7 @@
     });
 
     drawChart(dom.linkChart, history, {
+      fixedYRange: { min: 0, max: 100 },
       yLabel: "%",
       series: [
         { key: "linkQuality", color: "#61d394", min: 0, max: 100 },
@@ -2192,6 +2193,7 @@
 
     drawChart(dom.heaterActuationChart, history, {
       yLabel: "%",
+      fixedYRange: { min: 0, max: 100 },
       series: [
         { key: "heater1ActuationPct", color: "#ff6b68", min: 0, max: 100 },
         { key: "heater2ActuationPct", color: "#f0c15b", min: 0, max: 100 },
@@ -2544,6 +2546,13 @@
   }
 
   function getChartYRange(config, samples) {
+    if (config && config.fixedYRange) {
+    return {
+      min: config.fixedYRange.min,
+      max: config.fixedYRange.max
+      };
+    }
+
     let minVal = Infinity;
     let maxVal = -Infinity;
 
