@@ -21,14 +21,14 @@ float compressor_safe_start_inlet_upper = 1.7f; //inlet upper boundary for compr
 // Leave 0.20 bar of headroom below the 1.70 bar safe-start ceiling for
 // sensor/update latency and pressure rise after the prefill pumps stop.
 constexpr float INLET_PREFILL_MAX_BAR = 1.5f;
-constexpr uint32_t INLET_START_WAIT_MAX_MS = 7000;
+//constexpr uint32_t INLET_START_WAIT_MAX_MS = 20000;
 constexpr float CHAMBER_TARGET_TOLERANCE_BAR = 0.1f;
 // In reality, the difference between interstage and pressure chamber is also relevant. I don't know how to account for that. 
 float pwm1 = 0.0f, pwm2 = 0.0f, pwm3 = 0.0f;
 //constexpr float FLUSH_COMPLETE_PRESSURE_BAR = 0.05f; //Why so low?
 constexpr uint8_t ERR_NONE = 0, ERR_CHAMBER_SENSOR = 1, ERR_INLET_SENSOR = 2;
 constexpr uint8_t ERR_INLET_START_TIMEOUT = 3;
-bool pwm_targets_initialized = false; // to keep track of one-time-initialisation of pwm targets
+bool pwm_targets_initialized = false; // to keep track of one-time-initialisation of pwm targestx
 bool inlet_start_wait_active = false;
 TickType_t inlet_start_wait_started = 0;
 
@@ -44,7 +44,7 @@ float previous_compressor_inlet_pressure;
 bool sensor_history_valid = false;
 
 float measure_time = 20.0f; //in s
-float flushsum = 0.0f; // sums up exchanged air
+float flushsum = 0.0; // sums up exchanged air
 float V = 0.075; //75 ml estimated chamber volume
 //float Qout = 1.0; // l/min based on compressor out flow rate measured in test for lower end of pressure range. Now replaced with flow_rate variable
 float flow_rate;
@@ -404,7 +404,7 @@ void pressure_update() {
         else if (status.compressor_inlet_pressure > compressor_safe_start_inlet_upper) {
             if (!manual_compressor) set_compressor(0);
             if (!manual_valve) set_valve(false);
-            const TickType_t now = xTaskGetTickCount();
+            /*const TickType_t now = xTaskGetTickCount();
             if (!inlet_start_wait_active) {
                 inlet_start_wait_active = true;
                 inlet_start_wait_started = now;
@@ -416,6 +416,7 @@ void pressure_update() {
                 ESP_LOGE("pressure", "Compressor inlet remained above %.3f bar for 7 seconds. Stopping pressure train.", compressor_safe_start_inlet_upper);
                 return;
             }
+            */
             ESP_LOGI("pressure", "Compressor inlet pressure too high: %.3f bar. Waiting for it to drop.", status.compressor_inlet_pressure);
             return;
         }
@@ -439,9 +440,10 @@ void pressure_update() {
         flushstep_stop = xTaskGetTickCount();
         flushticks = flushstep_stop-flushstep_start;
         float Qout = calc_Q_out();
-        flushsum = flushsum + 1/V*Qout*flushticks*portTICK_PERIOD_MS/1000/60;
+        flushsum = flushsum + 1/V*Qout*flushticks*portTICK_PERIOD_MS/1000.0f/60.0f;
+        //flushsum = 0.0f;
         flushstep_start = xTaskGetTickCount();
-        ESP_LOGI("flush", "flushsum: %.3f, flushtarget: %.3f, Qout: %.3f", flushsum, flushtarget, Qout);
+        ESP_LOGI("flush", "flushsum: %.3f, flushtarget: %.3f, Qout: %.3f, Flushticks: %ld, portTickPeriod: %ld, V: %.3f", flushsum, flushtarget, Qout, flushticks, portTICK_PERIOD_MS, V);
 
         if (chamber_at_target()) {
                 ESP_LOGI("pressure", "Chamber pressure at target (%.3f bar): %.3f bar, Inlet: %.3f bar", target_pressure, status.chamber_pressure, status.compressor_inlet_pressure);
@@ -450,7 +452,7 @@ void pressure_update() {
                     // We can only go to measurement if the air has been properly flushed.
                     if (!manual_compressor) set_compressor(0);
                     if (!manual_valve) set_valve(false);
-                    flushsum = 0;
+                    flushsum = 0.0;
                     status.state = PRESSURE_MEASUREMENT;
                     measurement_time_start = xTaskGetTickCount();
                     ESP_LOGI("pressure", "Measurement started at %.3f bar", status.chamber_pressure);
