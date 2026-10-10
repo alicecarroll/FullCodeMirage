@@ -264,6 +264,7 @@ void pressure_update_current() {
     status.current_valid = pressure_current_read(&current_ma, &saturated);
     status.current_adc_saturated = status.current_valid && saturated;
     if (status.current_valid) status.current_ma = current_ma;
+    ESP_LOGI("pressure_current", "GPIO12: %.3f V = %.3f A, cutoff 2.900 A, trip=%s%s", current_ma / 1000.0f, current_ma / 1000.0f, status.overcurrent_tripped ? "ACTIVE" : "clear", saturated ? " (ADC saturated)" : "");
 
     const bool was_tripped = status.overcurrent_tripped;
     status.overcurrent_tripped = status.current_valid &&
