@@ -15,7 +15,7 @@ bool external_sensors_valid = false;
 bool manual_pump1 = false, manual_pump2 = false, manual_compressor = false, manual_valve = false;
 bool relay_manual = false;
 uint8_t applied_mode = 0;
-float target_pressure = 3.2f; //in pressure chamber
+float target_pressure = 3.0f; //in pressure chamber
 float inlet_upper = 1.5f, inlet_lower = 1.0f; //inlet upper and lower boundaries for compressor inlet
 float compressor_safe_start_inlet_upper = 1.7f; //inlet upper boundary for compressor safe start. Otherwise it might scream at low duty cycles.
 // Leave 0.20 bar of headroom below the 1.70 bar safe-start ceiling for
@@ -441,6 +441,7 @@ void pressure_update() {
         float Qout = calc_Q_out();
         flushsum = flushsum + 1/V*Qout*flushticks*portTICK_PERIOD_MS/1000/60;
         flushstep_start = xTaskGetTickCount();
+        ESP_LOGI("flush", "flushsum: %.3f, flushtarget: %.3f, Qout: %.3f", flushsum, flushtarget, Qout);
 
         if (chamber_at_target()) {
                 ESP_LOGI("pressure", "Chamber pressure at target (%.3f bar): %.3f bar, Inlet: %.3f bar", target_pressure, status.chamber_pressure, status.compressor_inlet_pressure);
