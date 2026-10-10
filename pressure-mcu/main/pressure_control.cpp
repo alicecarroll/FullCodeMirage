@@ -21,7 +21,7 @@ float compressor_safe_start_inlet_upper = 1.7f; //inlet upper boundary for compr
 // Leave 0.20 bar of headroom below the 1.70 bar safe-start ceiling for
 // sensor/update latency and pressure rise after the prefill pumps stop.
 constexpr float INLET_PREFILL_MAX_BAR = 1.5f;
-constexpr uint32_t INLET_START_WAIT_MAX_MS = 7000;
+//constexpr uint32_t INLET_START_WAIT_MAX_MS = 7000;
 constexpr float CHAMBER_TARGET_TOLERANCE_BAR = 0.1f;
 // In reality, the difference between interstage and pressure chamber is also relevant. I don't know how to account for that. 
 float pwm1 = 0.0f, pwm2 = 0.0f, pwm3 = 0.0f;
@@ -489,6 +489,8 @@ void pressure_update() {
         else if (status.compressor_inlet_pressure > compressor_safe_start_inlet_upper) {
             if (!manual_compressor) set_compressor(0);
             if (!manual_valve) set_valve(false);
+
+            /*
             const TickType_t now = xTaskGetTickCount();
             if (!inlet_start_wait_active) {
                 inlet_start_wait_active = true;
@@ -503,6 +505,7 @@ void pressure_update() {
             }
             ESP_LOGI("pressure", "Compressor inlet pressure too high: %.3f bar. Waiting for it to drop.", status.compressor_inlet_pressure);
             return;
+            */
         }
         else {
             // Exclude an idle high-inlet wait from exchanged-air integration.
