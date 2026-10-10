@@ -76,6 +76,29 @@
               <button type="button" data-command="closeOutletValve">Close outlet valve</button>
               <button type="button" data-command="flushChamber" data-task="FLUSH_CHAMBER" data-confirm="Flush the measurement chamber now?">Flush chamber</button>
             </div>
+
+            <form class="pwm-control" id="pressurePwmForm">
+              <h4>Pump PWM duty cycle</h4>
+              <p class="control-help">Apply a manual duty cycle without overriding the current pressurisation programme.</p>
+              <div class="pwm-control-grid">
+                <label data-pwm-label="1">
+                  <span class="pwm-pump-name" tabindex="0" role="button">Vacuum pump 1</span>
+                  <input type="number" min="0" max="100" step="1" data-pwm-input="1" aria-label="Vacuum pump 1 PWM duty cycle">
+                  <span class="input-suffix">%</span>
+                </label>
+                <label data-pwm-label="2">
+                  <span class="pwm-pump-name" tabindex="0" role="button">Vacuum pump 2</span>
+                  <input type="number" min="0" max="100" step="1" data-pwm-input="2" aria-label="Vacuum pump 2 PWM duty cycle">
+                  <span class="input-suffix">%</span>
+                </label>
+                <label data-pwm-label="3">
+                  <span class="pwm-pump-name" tabindex="0" role="button">Compressor</span>
+                  <input type="number" min="0" max="100" step="1" data-pwm-input="3" aria-label="Compressor PWM duty cycle">
+                  <span class="input-suffix">%</span>
+                </label>
+              </div>
+              <button type="submit">Apply pump PWM settings</button>
+            </form>
           </section>
 
           <section class="command-group" aria-labelledby="relay-commands">

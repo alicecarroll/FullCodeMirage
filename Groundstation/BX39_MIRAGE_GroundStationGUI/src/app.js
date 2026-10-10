@@ -1416,6 +1416,96 @@
       });
     });
 
+    const pwmForm = document.getElementById("pressurePwmForm");
+    if (pwmForm) {
+      const currentPwmValue = function (pump) {
+        if (!latestTelemetry) {
+          return undefined;
+        }
+        const key = pump === 1 ? "pump1DutyPct" : pump === 2 ? "pump2DutyPct" : "compressorDutyPct";
+        const value = Number(latestTelemetry[key]);
+        return Number.isFinite(value) ? Math.round(value) : undefined;
+      };
+
+      const setPwmSelection = function (label, selected) {
+        label.classList.toggle("pwm-selected", selected);
+        label.setAttribute("aria-selected", selected ? "true" : "false");
+        if (!selected) {
+          return;
+        }
+
+        const input = label.querySelector("[data-pwm-input]");
+        if (input && input.value === "") {
+          const currentValue = currentPwmValue(Number(label.dataset.pwmLabel));
+          if (currentValue !== undefined) {
+            input.value = String(currentValue);
+            input.dataset.pwmAutofilled = "true";
+            input.focus();
+            input.select();
+          }
+        }
+      };
+
+      pwmForm.querySelectorAll("[data-pwm-label]").forEach(function (label) {
+        const input = label.querySelector("[data-pwm-input]");
+        const name = label.querySelector(".pwm-pump-name");
+        if (input) {
+          input.addEventListener("input", function () {
+            delete input.dataset.pwmAutofilled;
+            setPwmSelection(label, true);
+          });
+          input.addEventListener("focus", function () {
+            if (input.dataset.pwmAutofilled === "true") {
+              input.select();
+            }
+          });
+        }
+        if (name) {
+          const toggleSelection = function () {
+            setPwmSelection(label, !label.classList.contains("pwm-selected"));
+          };
+          name.addEventListener("click", toggleSelection);
+          name.addEventListener("keydown", function (event) {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              toggleSelection();
+            }
+          });
+        }
+      });
+
+      pwmForm.addEventListener("submit", function (event) {
+        event.preventDefault();
+
+        const values = Array.from(pwmForm.querySelectorAll("[data-pwm-label].pwm-selected [data-pwm-input]"));
+        if (!values.length) {
+          terminal.write("ERR PWM_SELECTION; select at least one pump", "error");
+          return;
+        }
+        const commands = [];
+        for (const input of values) {
+          const duty = Number(input.value);
+          if (!Number.isInteger(duty) || duty < 0 || duty > 100) {
+            input.focus();
+            terminal.write("ERR PWM_VALUE; use an integer from 0 to 100", "error");
+            return;
+          }
+          commands.push(registerPwmCommand_no_interrrupt(Number(input.dataset.pwmInput), duty));
+        }
+
+        pwmForm.querySelector("button[type=submit]").disabled = true;
+        commands.reduce(function (chain, commandId) {
+          return chain.then(function () {
+            return sendCommand(commandId, "button");
+          });
+        }, Promise.resolve()).catch(function () {
+          return undefined;
+        }).finally(function () {
+          pwmForm.querySelector("button[type=submit]").disabled = false;
+        });
+      });
+    }
+
     document.querySelectorAll("[data-heater-select]").forEach(function (button) {
       button.addEventListener("click", function () {
         const selectAll = button.dataset.heaterSelect === "all";
@@ -3060,6 +3150,25 @@
     }
     return commandId;
   }
+
+  function registerPwmCommand_no_interrrupt(pump, percentage) {
+    // This function is defining the command to set the pwm of the pumps in the currently running programme
+    const commandId = "pwm" + pump + "_" + percentage + "_NoInterrupt";
+    if (!COMMANDS[commandId]) {
+      const label = "set pump " + pump + " PWM to " + percentage + "% without changing programme";
+      COMMANDS[commandId] = {
+        label: label,
+        wireCommand: "PWM" + pump + " " + percentage + " NoInterrupt",
+        aliases: [],
+        effect: function (sim) {
+          sim.setPeripheral(pump === 3 ? "compressor" : "pump" + pump, percentage > 0);
+          return label + " queued";
+        }
+      };
+    }
+    return commandId;
+  }
+
 
   function formatClock(date) {
     return date.toLocaleTimeString([], {
