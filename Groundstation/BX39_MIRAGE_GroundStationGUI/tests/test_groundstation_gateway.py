@@ -222,6 +222,8 @@ class FrontendCommandContractTest(unittest.TestCase):
         self.assertIn('data-heater-action="off"', index_html)
         self.assertIn('wireCommand: "HEATER " + action.toUpperCase()', app_js)
         self.assertIn('heaterBit: channel.bit', app_js)
+        self.assertIn('function registerThresholdValueCommand(target, value)', app_js)
+        self.assertIn('wireCommand: "SET THRESHOLD " + target + " " + String(value)', app_js)
 
 
 class CommandAcknowledgementTest(unittest.TestCase):

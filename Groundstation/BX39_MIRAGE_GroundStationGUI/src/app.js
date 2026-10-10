@@ -1605,6 +1605,11 @@
         }
 
         const commandId = registerThresholdValueCommand(button.dataset.thresholdSet, value);
+        if (!commandId) {
+          log.add("warn", "Threshold update rejected", "Unknown threshold target");
+          return;
+        }
+
         button.disabled = true;
         sendCommand(commandId, "button")
           .catch(function () {
@@ -3011,6 +3016,40 @@
         wireCommand: wireCommand,
         aliases: aliases || [],
         effect: effect
+      };
+    }
+    return commandId;
+  }
+
+  function registerThresholdValueCommand(target, value) {
+    const validTargets = [
+      "MAX_PRESSURE",
+      "CONNECTION_LOSS",
+      "CHAMBER_PRESSURE",
+      "INLET_TEMPERATURE",
+      "WATCHDOG_TIMEOUT",
+      "THERMAL_WATCHDOG_TOLERANCE",
+      "PRESSURE_WATCHDOG_TOLERANCE",
+      "RETRY_INTERVAL"
+    ];
+
+    if (!validTargets.includes(target)) {
+      return null;
+    }
+
+    const commandId = "setThreshold_" + target + "_" + String(value);
+    if (!COMMANDS[commandId]) {
+      COMMANDS[commandId] = {
+        label: "set " + target.toLowerCase() + " threshold to " + value,
+        wireCommand: "SET THRESHOLD " + target + " " + String(value),
+        aliases: [],
+        effect: function (sim) {
+          if (!sim.thresholds) {
+            sim.thresholds = {};
+          }
+          sim.thresholds[target] = value;
+          return target + " threshold set to " + value;
+        }
       };
     }
     return commandId;
