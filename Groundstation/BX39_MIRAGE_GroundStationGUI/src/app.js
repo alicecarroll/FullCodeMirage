@@ -3,7 +3,8 @@
 
   const MAX_SAMPLES = 120;
   const TELEMETRY_PERIOD_MS = 1000;
-  const EXPECTED_PACKET_SIZE = 230;
+  const EXPECTED_PACKET_SIZE = 233;
+  const LEGACY_PACKET_SIZE = 230;
 
   const RELAY_LINES = [
     { id: "relay1", label: "PDB relay 1", pin: "GPIO48 / PDB pin 1" },
@@ -451,6 +452,9 @@
     overviewViewButton: document.getElementById("overviewViewButton"),
     gasChart: document.getElementById("gasChart"),
     pressureChart: document.getElementById("pressureChart"),
+    currentChart: document.getElementById("currentChart"),
+    currentValue: document.getElementById("currentValue"),
+    currentSafetyState: document.getElementById("currentSafetyState"),
     thermalChart: document.getElementById("thermalChart"),
     ambientChart: document.getElementById("ambientChart"),
     linkChart: document.getElementById("linkChart"),
@@ -484,6 +488,7 @@
   let previousLinkStatus = "unknown";
   let usingGateway = false;
   let legacyProtocol = false;
+  let previousCurrentTrip = false;
   const commandedState = {
     relays: {
       relay1: false,
@@ -1208,7 +1213,11 @@
         return;
       }
 
-      const nextLegacyProtocol = Number.isFinite(status.packetSize) && status.packetSize < EXPECTED_PACKET_SIZE;
+      const nextLegacyProtocol = Number.isFinite(status.packetSize) && status.packetSize < LEGACY_PACKET_SIZE;
+      if (status.packetSize >= LEGACY_PACKET_SIZE && status.packetSize < EXPECTED_PACKET_SIZE && !this.currentLegacyWarned) {
+        this.onLogEvent("warn", "Current telemetry unavailable", "Update both MCU firmware images and restart the gateway for the Supply Current graph.");
+        this.currentLegacyWarned = true;
+      }
       if (nextLegacyProtocol && !legacyProtocol) {
         this.onLogEvent("warn", "Payload protocol update required", "live gateway still uses the legacy " + status.packetSize + "-byte status packet");
         terminal.write("payload firmware/gateway update required for SD, controller, raw detector, and task telemetry", "warn");
@@ -1724,6 +1733,11 @@
   }
 
   function handleFrame(sample) {
+    if (sample.pressureOvercurrentTripped && !previousCurrentTrip) {
+      log.add("fault", "Overcurrent shutdown latched", "All four relay lines are OFF. Pressure MCU restart required; check the load before restarting.");
+    }
+    // A dropout must not erase the last reported trip.
+    if (sample.valid) previousCurrentTrip = Boolean(sample.pressureOvercurrentTripped);
     history.push(sample);
     while (history.length > MAX_SAMPLES) {
       history.shift();
@@ -1747,6 +1761,18 @@
     const health = sample.valid ? sample.health : "dropout";
     const linkStatus = sample.valid ? sample.linkStatus : "DROPOUT";
     const linkQuality = sample.valid ? sample.linkQuality : 0;
+
+    const currentAvailable = sample.valid && sample.pressureCurrentValid && Number.isFinite(sample.pressureCurrentA);
+    dom.currentValue.textContent = currentAvailable ? sample.pressureCurrentA.toFixed(3) + " A" : "-- A";
+    if (sample.pressureOvercurrentTripped || (display && display.pressureOvercurrentTripped)) {
+      setChip(dom.currentSafetyState, "TRIPPED · restart pressure MCU" + (sample.valid ? "" : " · last reported"), "fault");
+    } else if (!sample.valid) {
+      setChip(dom.currentSafetyState, "Current telemetry offline", "dropout");
+    } else if (!currentAvailable) {
+      setChip(dom.currentSafetyState, sample.pressureError === 4 ? "ADC unavailable · relays OFF" : "No current telemetry · update firmware", "warning");
+    } else {
+      setChip(dom.currentSafetyState, "Cutoff armed · 2.9 A", "healthy");
+    }
 
     setChip(dom.overallHealth, healthLabel(health), health);
     renderHealthDetails(
@@ -1855,6 +1881,8 @@
     setChip(dom.linkState, "E-Link dropout", "dropout");
     setChip(dom.missionMode, resolveMissionMode(latestTelemetry), "neutral");
     dom.controllerState.textContent = "No telemetry";
+    dom.currentValue.textContent = "-- A";
+    setChip(dom.currentSafetyState, previousCurrentTrip ? "TRIPPED · last reported · restart pressure MCU" : "Current telemetry offline", previousCurrentTrip ? "fault" : "dropout");
     renderActiveTask(null);
   }
 
@@ -2151,6 +2179,15 @@
       ]
     });
 
+    drawChart(dom.currentChart, history, {
+      yLabel: "A",
+      fixedYRange: { min: 0, max: 3.3 },
+      threshold: { value: 2.9, color: getComputedStyle(document.documentElement).getPropertyValue("--fault").trim() },
+      series: [
+        { key: "pressureCurrentA", label: "Current (A)", color: getColorFromCssClass("supply-current", "background-color"), min: 0, max: 3.3 }
+      ]
+    });
+
     drawChart(dom.thermalChart, history, {
       targetBand: { min: 19, max: 24, seriesMin: -60, seriesMax: 80 },
       yLabel: "deg C",
@@ -2304,6 +2341,19 @@
       ctx.lineTo(pad.left + plotW, y2);
       ctx.stroke();
       ctx.setLineDash([]);
+    }
+
+    if (config.threshold) {
+      const y = yFor(config.threshold.value, yRange.min, yRange.max, pad, plotH);
+      ctx.save();
+      ctx.strokeStyle = config.threshold.color;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(pad.left, y);
+      ctx.lineTo(pad.left + plotW, y);
+      ctx.stroke();
+      ctx.restore();
     }
 
     config.series.forEach(function (series) {

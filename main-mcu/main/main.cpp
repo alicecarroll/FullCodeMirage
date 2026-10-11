@@ -61,7 +61,7 @@ size_t ethernet_recieve_buf_size = ETHERNET_BUF_SIZE;
 size_t ethernet_recieve_buf_bytes_read = 0;
 uint8_t main_ip[4] = WIZ_IP;
 uint16_t portw = WIZ_SOCKET;
-uint8_t targetip[4] = {192, 168, 0, 3};
+uint8_t targetip[4] = {172, 16, 18, 120}; // IP address of the target device to send data to
 bool command_received = false;
 bool con_lost = false; // To track connection status
 bool status_ok = true;
@@ -520,6 +520,8 @@ static esp_err_t send_system_status_packet()
     system_status_packet.storage_free_pct = storage_available ? storage_free_pct : 0;
     system_status_packet.controller_state = static_cast<uint8_t>(controller_state);
     system_status_packet.captured_errors = captured_errors;
+    system_status_packet.pressure_current_ma = pressure_status.current_ma;
+    system_status_packet.pressure_current_flags = pressure_status.current_flags;
 
     return wiz_send((uint8_t *)&system_status_packet, MAIN_SYSTEM_STATUS_PACKET_SIZE);
 }
@@ -751,7 +753,10 @@ static void comms_pressure_default(SensorData &sensor_data, uint32_t current_tim
     }
 
     // Watchdog reset for pressure
-    if ((current_time_ms - last_pressure_ping_time) > SLAVE_WATCHDOG_TIMEOUT_MS)
+    // A watchdog reset must not silently clear a known, latched current trip.
+    if ((current_time_ms - last_pressure_ping_time) > SLAVE_WATCHDOG_TIMEOUT_MS &&
+        !(pressure_status.current_flags & PRESSURE_CURRENT_TRIPPED) &&
+        pressure_status.error_code != PRESSURE_ERROR_OVERCURRENT)
     {
         ESP_LOGW(TAG, "!!! Watchdog Triggered: Pressure MCU timed out. Resetting device via Pin %d !!!", Pressure_reset_PIN);
         slave_reset(pressure_mcu);

@@ -53,5 +53,15 @@ enum PressureMode : uint8_t {
 enum : uint8_t {
     PRESSURE_COMMAND_FRAME_SIZE = 4,
     PRESSURE_SENSOR_FRAME_SIZE = 16,
-    PRESSURE_STATUS_FRAME_SIZE = 8,
+    // Keep the original eight-byte status (including its CRC) as a prefix.
+    // Current extension: big-endian mA, flags, then a CRC over bytes 0..10.
+    PRESSURE_STATUS_LEGACY_FRAME_SIZE = 8,
+    PRESSURE_STATUS_FRAME_SIZE = 12,
 };
+
+constexpr uint16_t PRESSURE_OVERCURRENT_LIMIT_MA = 2900;
+constexpr uint8_t PRESSURE_CURRENT_VALID = 0x01;
+constexpr uint8_t PRESSURE_CURRENT_TRIPPED = 0x02;
+constexpr uint8_t PRESSURE_CURRENT_ADC_SATURATED = 0x04;
+constexpr uint8_t PRESSURE_ERROR_CURRENT_SENSOR = 4;
+constexpr uint8_t PRESSURE_ERROR_OVERCURRENT = 5;

@@ -86,6 +86,8 @@ struct PressureStatusData {
     uint8_t compressor_pwm;
     bool valve_open;
     bool manual_override;
+    uint16_t current_ma;
+    uint8_t current_flags;
 };
 //Thermal mcu data struct
 struct ThermalDataValues{ //Channel id is the same as the number in the array ie if at thermalDataValues dataArray[2] we are at channel 2 

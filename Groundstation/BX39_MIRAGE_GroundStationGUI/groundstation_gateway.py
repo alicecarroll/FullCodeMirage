@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 
-SENSOR_STRUCT_FORMAT = (
+LEGACY_SENSOR_STRUCT_FORMAT = (
     "<3B"        # seconds, minutes, hours
     "17f"       # Tp1 through Tt3
     "ididid"    # K96 signals & filtered doubles (int32, double, int32, double, int32, double)
@@ -43,8 +43,14 @@ SENSOR_STRUCT_FORMAT = (
     "BB8B11B16s"  #thermal online, thermal status, 8thermal error SD/controller status, 128-bit captured_errors
 )
 
+LEGACY_STATUS_PACKET_SIZE = struct.calcsize(LEGACY_SENSOR_STRUCT_FORMAT)
+SENSOR_STRUCT_FORMAT = LEGACY_SENSOR_STRUCT_FORMAT + "HB"  # current mA, current flags
 STATUS_PACKET_SIZE = struct.calcsize(SENSOR_STRUCT_FORMAT)
-EXPECTED_STATUS_PACKET_SIZE = 230
+EXPECTED_STATUS_PACKET_SIZE = 233
+CURRENT_VALID = 0x01
+CURRENT_TRIPPED = 0x02
+CURRENT_ADC_SATURATED = 0x04
+CURRENT_TRIP_A = 2.9
 if STATUS_PACKET_SIZE != EXPECTED_STATUS_PACKET_SIZE:
     raise RuntimeError(
         f"groundstation packet layout is {STATUS_PACKET_SIZE} bytes; "
@@ -71,6 +77,9 @@ PRESSURE_STATES = {
     2: "AIR_EXCHANGE",
     3: "ERROR",
     4: "FLUSH_CHAMBER",
+    5: "COMPRESSION",
+    6: "MEASUREMENT",
+    7: "CORRECTION",
 }
 
 ERROR_MANIFEST_PATH = Path(__file__).resolve().parents[2] / "main-mcu" / "main" / "ErrorBits.def"
@@ -152,6 +161,8 @@ def pressure_to_hpa(value: float) -> float:
 
 
 def evaluate_health(frame: dict[str, Any]) -> str:
+    if frame.get("pressureOvercurrentTripped") or frame.get("pressureError") in {4, 5}:
+        return "fault"
     if frame.get("connectionLost") or not frame.get("statusOk", True):
         return "fault"
     if frame.get("capturedErrors", 0):
@@ -192,10 +203,15 @@ def evaluate_health(frame: dict[str, Any]) -> str:
 
 
 def parse_status_packet(data: bytes, seq: int = 0, timestamp_ms: int | None = None) -> dict[str, Any]:
-    if len(data) != STATUS_PACKET_SIZE:
-        raise ValueError(f"expected {STATUS_PACKET_SIZE} bytes, got {len(data)}")
-
-    values = struct.unpack(SENSOR_STRUCT_FORMAT, data)
+    if len(data) == STATUS_PACKET_SIZE:
+        values = struct.unpack(SENSOR_STRUCT_FORMAT, data)
+        current_ma, current_flags = values[-2:]
+        values = values[:-2]
+    elif len(data) == LEGACY_STATUS_PACKET_SIZE:
+        values = struct.unpack(LEGACY_SENSOR_STRUCT_FORMAT, data)
+        current_ma, current_flags = 0, 0
+    else:
+        raise ValueError(f"expected {STATUS_PACKET_SIZE} or {LEGACY_STATUS_PACKET_SIZE} bytes, got {len(data)}")
     (
         seconds,
         minutes,
@@ -362,6 +378,11 @@ def parse_status_packet(data: bytes, seq: int = 0, timestamp_ms: int | None = No
         "pressureCompressorPwm": int(pressure_compressor_pwm),
         "pressureValveOpen": bool(pressure_valve_open),
         "pressureManualOverride": bool(pressure_manual_override),
+        "pressureCurrentA": current_ma / 1000.0 if current_flags & CURRENT_VALID else None,
+        "pressureCurrentValid": bool(current_flags & CURRENT_VALID),
+        "pressureOvercurrentTripped": bool(current_flags & CURRENT_TRIPPED),
+        "pressureCurrentAdcSaturated": bool(current_flags & CURRENT_ADC_SATURATED),
+        "pressureCurrentTripA": CURRENT_TRIP_A,
         "capturedErrors": int(captured_errors),
         "errors": decode_captured_errors(int(captured_errors)),
         "commandReceived": bool(command_received),
@@ -442,6 +463,8 @@ def parse_status_packet(data: bytes, seq: int = 0, timestamp_ms: int | None = No
             "pressure_compressor_pwm": int(pressure_compressor_pwm),
             "pressure_manual_override": int(pressure_manual_override),
             "pressure_valve_open": int(pressure_valve_open),
+            "pressure_current_ma": int(current_ma),
+            "pressure_current_flags": int(current_flags),
             "onboard_logging": int(onboard_logging),
             "storage_free_pct": int(storage_free_pct),
             "controller_state": int(controller_state),
@@ -492,7 +515,8 @@ class SessionLog:
 
 
 class GroundStationState:
-    def __init__(self, session_log: SessionLog | None = None) -> None:
+    def __init__(self, session_log: SessionLog | None = None, packet_size: int = STATUS_PACKET_SIZE) -> None:
+        self.packet_size = packet_size
         self._lock = threading.RLock()
         self._frame_condition = threading.Condition(self._lock)
         self._command_lock = threading.Lock()
@@ -636,7 +660,7 @@ class GroundStationState:
             "payloadAddress": f"{payload_addr[0]}:{payload_addr[1]}" if payload_addr else None,
             "browserClients": client_count,
             "lastSeq": last_frame["seq"] if last_frame else None,
-            "packetSize": STATUS_PACKET_SIZE,
+            "packetSize": self.packet_size,
             "logFile": str(self._session_log.path) if self._session_log else None,
         }
 
@@ -663,7 +687,7 @@ class PayloadTCPHandler(socketserver.BaseRequestHandler):
 
     def handle(self) -> None:
         while True:
-            packet = recv_exact(self.request, STATUS_PACKET_SIZE)
+            packet = recv_exact(self.request, self.state.packet_size)
             if not packet:
                 break
             self.state.next_frame(packet)
@@ -776,9 +800,9 @@ def make_http_handler(static_root: Path, state: GroundStationState):
     return GroundStationHTTPHandler
 
 
-def run_servers(host: str, http_port: int, payload_port: int, static_root: Path) -> None:
+def run_servers(host: str, http_port: int, payload_port: int, static_root: Path, packet_size: int = STATUS_PACKET_SIZE) -> None:
     session_log = SessionLog(static_root / "logs")
-    state = GroundStationState(session_log)
+    state = GroundStationState(session_log, packet_size=packet_size)
 
     PayloadTCPHandler.state = state
     payload_server = ReusableThreadingTCPServer((host, payload_port), PayloadTCPHandler)
@@ -790,7 +814,7 @@ def run_servers(host: str, http_port: int, payload_port: int, static_root: Path)
     payload_thread.start()
 
     print(f"MIRAGE GUI: http://127.0.0.1:{http_port}")
-    print(f"Payload TCP listener: {host}:{payload_port} expecting {STATUS_PACKET_SIZE} byte status packets")
+    print(f"Payload TCP listener: {host}:{payload_port} expecting {packet_size} byte status packets")
     print(f"Session log: {session_log.path}")
 
     try:
@@ -811,9 +835,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--http-port", default=int(os.environ.get("MIRAGE_HTTP_PORT", "8001")), type=int)
     parser.add_argument("--payload-port", default=int(os.environ.get("MIRAGE_PAYLOAD_PORT", "5001")), type=int)
     parser.add_argument("--static-root", default=Path(__file__).resolve().parent, type=Path)
+    parser.add_argument("--legacy-status", action="store_true", help="read 230-byte packets from older main firmware (no current telemetry)")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    run_servers(args.host, args.http_port, args.payload_port, args.static_root.resolve())
+    run_servers(args.host, args.http_port, args.payload_port, args.static_root.resolve(),
+                LEGACY_STATUS_PACKET_SIZE if args.legacy_status else STATUS_PACKET_SIZE)
