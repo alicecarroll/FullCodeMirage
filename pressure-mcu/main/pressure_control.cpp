@@ -10,7 +10,7 @@
 
 namespace {
 PressureStatus status = {};
-float external_sensors[7] = {};
+float external_sensors[10] = {};
 bool external_sensors_valid = false;
 bool manual_pump1 = false, manual_pump2 = false, manual_compressor = false, manual_valve = false;
 bool relay_manual = false;
@@ -240,7 +240,7 @@ void pressure_init() {
     for (uint8_t relay = 1; relay <= 4; ++relay) set_relay(relay, false);
 }
 
-void pressure_update_external_sensors(const float sensors[7]) {
+void pressure_update_external_sensors(const float sensors[10]) {
     const TickType_t now = xTaskGetTickCount();
     if (external_sensors_valid) {
         sensor_update_interval = now - last_sensor_update;
@@ -254,6 +254,9 @@ void pressure_update_external_sensors(const float sensors[7]) {
     status.chamber_pressure = sensors[2];
     status.ambient_pressure = sensors[3];
     status.compressor_inlet_pressure = (sensors[1]+status.ambient_pressure);
+    target_pressure = sensors[7];
+    inlet_lower = sensors[8];
+    inlet_upper = sensors[9];
     if (!pwm_targets_initialized) {
         pressure_init_pwm();
         pwm_targets_initialized = true;

@@ -429,13 +429,15 @@
     thresholds: [
       { commandId: "resetThresholdAll", target: "ALL", label: "reset all thresholds", wireCommand: "RESET THRESHOLD ALL" },
       { commandId: "resetThresholdMaxPressure", target: "MAX_PRESSURE", label: "reset flight pressure threshold", wireCommand: "RESET THRESHOLD MAX_PRESSURE" },
-      { commandId: "resetThresholdConnectionLoss", target: "CONNECTION_LOSS", label: "reset connection-loss threshold", wireCommand: "RESET THRESHOLD CONNECTION_LOSS" },
+      //{ commandId: "resetThresholdConnectionLoss", target: "CONNECTION_LOSS", label: "reset connection-loss threshold", wireCommand: "RESET THRESHOLD CONNECTION_LOSS" },
       { commandId: "resetThresholdChamberPressure", target: "CHAMBER_PRESSURE", label: "reset chamber-pressure threshold", wireCommand: "RESET THRESHOLD CHAMBER_PRESSURE" },
-      { commandId: "resetThresholdInletTemperature", target: "INLET_TEMPERATURE", label: "reset inlet-temperature threshold", wireCommand: "RESET THRESHOLD INLET_TEMPERATURE" },
-      { commandId: "resetThresholdWatchdogTimeout", target: "WATCHDOG_TIMEOUT", label: "reset watchdog timeout", wireCommand: "RESET THRESHOLD WATCHDOG_TIMEOUT" },
-      { commandId: "resetThresholdThermalTolerance", target: "THERMAL_WATCHDOG_TOLERANCE", label: "reset thermal watchdog tolerance", wireCommand: "RESET THRESHOLD THERMAL_WATCHDOG_TOLERANCE" },
-      { commandId: "resetThresholdPressureTolerance", target: "PRESSURE_WATCHDOG_TOLERANCE", label: "reset pressure watchdog tolerance", wireCommand: "RESET THRESHOLD PRESSURE_WATCHDOG_TOLERANCE" },
-      { commandId: "resetThresholdRetryInterval", target: "RETRY_INTERVAL", label: "reset connection retry interval", wireCommand: "RESET THRESHOLD RETRY_INTERVAL" }
+      { commandId: "resetThresholdInletlower", target: "INLET_LOWER", label: "reset inlet lower threshold", wireCommand: "RESET THRESHOLD INLET LOWER" },
+      { commandId: "resetThresholdInletupper", target: "INLET_UPPER", label: "reset inlet upper threshold", wireCommand: "RESET THRESHOLD INLET UPPER" },
+      //{ commandId: "resetThresholdInletTemperature", target: "INLET_TEMPERATURE", label: "reset inlet-temperature threshold", wireCommand: "RESET THRESHOLD INLET_TEMPERATURE" },
+      //{ commandId: "resetThresholdWatchdogTimeout", target: "WATCHDOG_TIMEOUT", label: "reset watchdog timeout", wireCommand: "RESET THRESHOLD WATCHDOG_TIMEOUT" },
+      //{ commandId: "resetThresholdThermalTolerance", target: "THERMAL_WATCHDOG_TOLERANCE", label: "reset thermal watchdog tolerance", wireCommand: "RESET THRESHOLD THERMAL_WATCHDOG_TOLERANCE" },
+      //{ commandId: "resetThresholdPressureTolerance", target: "PRESSURE_WATCHDOG_TOLERANCE", label: "reset pressure watchdog tolerance", wireCommand: "RESET THRESHOLD PRESSURE_WATCHDOG_TOLERANCE" },
+      //{ commandId: "resetThresholdRetryInterval", target: "RETRY_INTERVAL", label: "reset connection retry interval", wireCommand: "RESET THRESHOLD RETRY_INTERVAL" }
     ]
   };
 
@@ -3024,13 +3026,15 @@
   function registerThresholdValueCommand(target, value) {
     const validTargets = [
       "MAX_PRESSURE",
-      "CONNECTION_LOSS",
+      //"CONNECTION_LOSS",
       "CHAMBER_PRESSURE",
-      "INLET_TEMPERATURE",
-      "WATCHDOG_TIMEOUT",
-      "THERMAL_WATCHDOG_TOLERANCE",
-      "PRESSURE_WATCHDOG_TOLERANCE",
-      "RETRY_INTERVAL"
+      "INLET_LOWER",
+      "INLET_UPPER",
+      //"INLET_TEMPERATURE",
+      //"WATCHDOG_TIMEOUT",
+      //"THERMAL_WATCHDOG_TOLERANCE",
+      //"PRESSURE_WATCHDOG_TOLERANCE",
+      //"RETRY_INTERVAL"
     ];
 
     if (!validTargets.includes(target)) {

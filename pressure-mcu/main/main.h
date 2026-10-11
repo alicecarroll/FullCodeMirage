@@ -26,6 +26,9 @@ typedef struct
                                        // the compressor, between the
                                        // vacuum pumps and the compressor
     float ambient_pressure; //and is1 pressure should be also received
+    float max_chamber_pressure_threshold;
+    float inlet_lower_threshold;
+    float inlet_upper_threshold;
 
     uint8_t error;
 

@@ -295,7 +295,10 @@ bool thermal_receive_big_packet(
 
 bool pressure_send_sensors(
     SlaveDevice slave, 
-    const SensorData &sensor_data
+    const SensorData &sensor_data,
+    float max_chamber_pressure_threshold,
+    float inlet_lower_threshold,
+    float inlet_upper_threshold
 ) {
     uint8_t mux_channel; 
     gpio_num_t reset_pin;
@@ -312,17 +315,20 @@ bool pressure_send_sensors(
 
     package[0] = PRESSURE_PACKET_SENSORS;
 
-    int16_t sensor_ints[7] = {
+    int16_t sensor_ints[10] = {
         (int16_t)(sensor_data.Pp3 * SENSOR_SCALE),
         (int16_t)(sensor_data.Pp1 * SENSOR_SCALE),
         (int16_t)(sensor_data.Pp2 * SENSOR_SCALE),
         (int16_t)(sensor_data.Pa1 * SENSOR_SCALE),
         (int16_t)(sensor_data.Tp1 * SENSOR_SCALE),
         (int16_t)(sensor_data.Tp2 * SENSOR_SCALE),
-        (int16_t)(sensor_data.Tp3 * SENSOR_SCALE)
+        (int16_t)(sensor_data.Tp3 * SENSOR_SCALE),
+        (int16_t)(max_chamber_pressure_threshold * SENSOR_SCALE),
+        (int16_t)(inlet_lower_threshold * SENSOR_SCALE),
+        (int16_t)(inlet_upper_threshold * SENSOR_SCALE)
     };
 
-    for(int i = 0; i < 7; i++) {
+    for(int i = 0; i < 10; i++) {
         package[1 + (i*2)] = (sensor_ints[i] >> 8) & 0xFF; // MSB
         package[2 + (i*2)] = sensor_ints[i] & 0xFF;        // LSB
     }

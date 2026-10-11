@@ -68,9 +68,10 @@ CONTROLLER_STATES = {
 PRESSURE_STATES = {
     0: "STANDBY",
     1: "PREPRESSURISATION",
-    2: "AIR_EXCHANGE",
-    3: "ERROR",
-    4: "FLUSH_CHAMBER",
+    2: "COMPRESSION",
+    3: "AIR_EXCHANGE",
+    4: "ERROR",
+    5: "FLUSH_CHAMBER",
 }
 
 ERROR_MANIFEST_PATH = Path(__file__).resolve().parents[2] / "main-mcu" / "main" / "ErrorBits.def"
@@ -175,7 +176,7 @@ def evaluate_health(frame: dict[str, Any]) -> str:
         or chamber_pressure < 2.35
         or chamber_temp > 50
         or chamber_temp < 5
-        or humidity > 84
+        or humidity > 94
     ):
         return "fault"
 
@@ -184,7 +185,7 @@ def evaluate_health(frame: dict[str, Any]) -> str:
         or chamber_pressure < 2.74
         or chamber_temp > 40
         or chamber_temp < 15
-        or humidity > 65
+        or humidity > 84
     ):
         return "warning"
 

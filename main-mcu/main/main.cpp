@@ -73,10 +73,12 @@ CapturedErrors captured_errors = {};
 CapturedErrors captured_errors_for_k96 = {}; // To store the captured errors for K96 before clearing them
 static constexpr int32_t DEFAULT_LOOP_RETRY_CONNECTION = 10;
 int32_t LOOP_RETRY_CONNECTION = DEFAULT_LOOP_RETRY_CONNECTION; // Number of loops to wait before retrying connection
-float max_pressure_threshold = P_STRATOSPHERE;
-int max_loops_without_connection = LOOP_WO_CONNECTION;
-float max_chamber_pressure_threshold = CHAMBER_P_SHUTTER_THRESHOLD;
-float min_inlet_temperature_threshold = INLET_TEMPERATURE_THRESHOLD;
+float max_pressure_threshold = P_STRATOSPHERE; //threshold for max ambient pressure for measuring
+//int max_loops_without_connection = LOOP_WO_CONNECTION;
+float max_chamber_pressure_threshold = CHAMBER_P_THRESHOLD; //threshold for chamber pressure at which measurement phase starts
+float inlet_lower_threshold = INLET_LOWER_THRESHOLD; //lower threshold at compressor inlet to go to prepressurisation
+float inlet_upper_threshold = INLET_UPPER_THRESHOLD; //upper threshold at comporessor inlet to go from prepressurisation to compression
+//float min_inlet_temperature_threshold = INLET_TEMPERATURE_THRESHOLD;
 int64_t loss_timestamp_us = -1; // To track when connection was lost for termination
 int loops_since_connection = 0; // To buffer short con losses for stable running
 static SlaveStatus thermal_status = {};
@@ -568,7 +570,11 @@ static bool reset_thresholds(const std::string &target)
     else if (target == "CONNECTION_LOSS")
         max_loops_without_connection = LOOP_WO_CONNECTION;
     else if (target == "CHAMBER_PRESSURE")
-        max_chamber_pressure_threshold = CHAMBER_P_SHUTTER_THRESHOLD;
+        max_chamber_pressure_threshold = CHAMBER_P_THRESHOLD;
+    else if (target == "INLET_LOWER")
+        inlet_lower_threshold = INLET_LOWER_THRESHOLD;
+    else if (target == "INLET_UPPER")
+        inlet_lower_threshold = INLET_UPPER_THRESHOLD;
     else if (target == "INLET_TEMPERATURE")
         min_inlet_temperature_threshold = INLET_TEMPERATURE_THRESHOLD;
     else if (target == "WATCHDOG_TIMEOUT")
@@ -586,7 +592,9 @@ static bool reset_thresholds(const std::string &target)
     {
         max_pressure_threshold = P_STRATOSPHERE;
         max_loops_without_connection = LOOP_WO_CONNECTION;
-        max_chamber_pressure_threshold = CHAMBER_P_SHUTTER_THRESHOLD;
+        max_chamber_pressure_threshold = CHAMBER_P_THRESHOLD;
+        inlet_lower_threshold = INLET_LOWER;
+        inlet_upper_threshold = INLET_UPPER;
         min_inlet_temperature_threshold = INLET_TEMPERATURE_THRESHOLD;
         current_slave_watchdog_timeout = SLAVE_WATCHDOG_TIMEOUT_MS;
         thermal_watchdog_tolerance = DEFAULT_WATCHDOG_TOLERANCE;
@@ -610,10 +618,15 @@ static bool set_threshold(const std::string &target, const std::string &value_te
     const bool is_integer = value == std::trunc(value);
     if (target == "MAX_PRESSURE" && value >= 0.0 && value <= 1000.0)
         max_pressure_threshold = static_cast<float>(value);
-    else if (target == "CONNECTION_LOSS" && is_integer && value >= 0.0 && value <= std::numeric_limits<int>::max())
-        max_loops_without_connection = static_cast<int>(value);
-    else if (target == "CHAMBER_PRESSURE" && value >= 0.0 && value <= 1000.0)
+    //else if (target == "CONNECTION_LOSS" && is_integer && value >= 0.0 && value <= std::numeric_limits<int>::max())
+    //    max_loops_without_connection = static_cast<int>(value);
+    else if (target == "CHAMBER_PRESSURE" && value >= 0.0 && value <= 5.0)
         max_chamber_pressure_threshold = static_cast<float>(value);
+    else if (target == "INLET_LOWER" && value >= 0.0 && value <= 3.0)
+        inlet_lower_threshold = static_cast<float>(value);
+    else if (target == "INLET_UPPER" && value >= 0.0 && value <= 3.0)
+        inlet_upper_threshold = static_cast<float>(value);
+    /* 
     else if (target == "INLET_TEMPERATURE" && value >= -100.0 && value <= 200.0)
         min_inlet_temperature_threshold = static_cast<float>(value);
     else if (target == "WATCHDOG_TIMEOUT" && is_integer && value >= 1.0 && value <= std::numeric_limits<uint16_t>::max())
@@ -624,6 +637,7 @@ static bool set_threshold(const std::string &target, const std::string &value_te
         pressure_watchdog_tolerance = static_cast<int16_t>(value);
     else if (target == "RETRY_INTERVAL" && is_integer && value >= 1.0 && value <= std::numeric_limits<int32_t>::max())
         LOOP_RETRY_CONNECTION = static_cast<int32_t>(value);
+    */
     else
         return false;
 
@@ -673,6 +687,7 @@ static esp_err_t send_system_status_packet()
     system_status_packet.pressure_pump1_pwm = pressure_status.pump1_pwm;
     system_status_packet.pressure_pump2_pwm = pressure_status.pump2_pwm;
     system_status_packet.pressure_compressor_pwm = pressure_status.compressor_pwm;
+//    system_status_packet.chamber_pressure_threshold =
     system_status_packet.pressure_manual_override = pressure_status.manual_override ? 1 : 0;
     system_status_packet.pressure_valve_open = pressure_status.valve_open ? 1 : 0;
     uint8_t storage_free_pct = 0;
@@ -879,9 +894,9 @@ static void commands_comms_pressure_mcu(uint8_t cmd, uint8_t info_bit=0)
 }
 
 
-static void comms_pressure_default(SensorData &sensor_data, uint32_t current_time_ms)
+static void comms_pressure_default(SensorData &sensor_data, uint32_t current_time_ms, float max_chamber_pressure_threshold, float inlet_lower_threshold, float inlet_upper_threshold)
 {
-    pressure_send_sensors(pressure_mcu, sensor_data);
+    pressure_send_sensors(pressure_mcu, sensor_data, max_chamber_pressure_threshold, inlet_lower_threshold, inlet_upper_threshold);
 
     // Send the actual Main-MCU mode, including its numeric value. The
     // pressure MCU uses mode 3/2 to control relay 2/3 automatically.
@@ -1122,7 +1137,7 @@ void loop()
             // Bark at pressure subsystem
             if (not pressure_mcu_lost)
             {
-                comms_pressure_default(sensor_data, current_time_ms);
+                comms_pressure_default(sensor_data, current_time_ms, max_chamber_pressure_threshold, inlet_lower_threshold, inlet_upper_threshold);
             }
 
             //Bark at thermal subsystem
@@ -1164,7 +1179,7 @@ void loop()
         //Pressure communication
         if (not pressure_mcu_lost)
         {
-            comms_pressure_default(sensor_data, current_time_ms);
+            comms_pressure_default(sensor_data, current_time_ms, max_chamber_pressure_threshold, inlet_lower_threshold, inlet_upper_threshold);
         }
         
         //Thermal communication
@@ -1180,7 +1195,7 @@ void loop()
         // Pressure communication block 
         if (not pressure_mcu_lost)
         {
-            comms_pressure_default(sensor_data, current_time_ms);
+            comms_pressure_default(sensor_data, current_time_ms, max_chamber_pressure_threshold, inlet_lower_threshold, inlet_upper_threshold);
         }
 
         // Thermal communication block

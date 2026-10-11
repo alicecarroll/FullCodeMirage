@@ -214,13 +214,16 @@
               <div class="reset-checkbox-grid">
                 <label class="reset-all-option"><input type="checkbox" data-reset-all="thresholds" data-reset-command-id="resetThresholdAll"><span>All thresholds</span><small>Restore every threshold default</small></label>
                 <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdMaxPressure"><span>Flight pressure</span><small>Maximum flight pressure</small></label>
-                <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdConnectionLoss"><span>Connection loss</span><small>Loops before standby</small></label>
+                <!--label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdConnectionLoss"><span>Connection loss</span><small>Loops before standby</small></label-->
                 <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdChamberPressure"><span>Chamber pressure</span><small>Maximum chamber pressure</small></label>
-                <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdInletTemperature"><span>Inlet temperature</span><small>Minimum inlet temperature</small></label>
+                <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdInletlower"><span>Inlet lower pressure</span><small>Maximum chamber pressure</small></label>
+                <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdInletupper"><span>Inlet upper pressure</span><small>Maximum chamber pressure</small></label>
+
+                <!--label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdInletTemperature"><span>Inlet temperature</span><small>Minimum inlet temperature</small></label>
                 <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdWatchdogTimeout"><span>Watchdog timeout</span><small>Thermal and pressure timeout</small></label>
                 <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdThermalTolerance"><span>Thermal watchdog tolerance</span><small>Thermal MCU reset limit</small></label>
                 <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdPressureTolerance"><span>Pressure watchdog tolerance</span><small>Pressure MCU reset limit</small></label>
-                <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdRetryInterval"><span>Retry interval</span><small>Connection retry loop interval</small></label>
+                <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdRetryInterval"><span>Retry interval</span><small>Connection retry loop interval</small></label-->
               </div>
               <button type="button" class="reset-apply" data-reset-apply="thresholds">Apply threshold reset</button>
             </fieldset>
@@ -233,15 +236,23 @@
                 <input id="thresholdMaxPressure" type="number" step="any" min="0" max="1000" placeholder="Default: 0.040">
                 <button type="button" data-threshold-set="MAX_PRESSURE" data-threshold-input="thresholdMaxPressure">Set</button>
 
-                <label for="thresholdConnectionLoss">Connection-loss limit (loops)</label>
+                <!--label for="thresholdConnectionLoss">Connection-loss limit (loops)</label>
                 <input id="thresholdConnectionLoss" type="number" step="1" min="0" max="2147483647" placeholder="Default: 50">
-                <button type="button" data-threshold-set="CONNECTION_LOSS" data-threshold-input="thresholdConnectionLoss">Set</button>
+                <button type="button" data-threshold-set="CONNECTION_LOSS" data-threshold-input="thresholdConnectionLoss">Set</button-->
 
                 <label for="thresholdChamberPressure">Maximum chamber pressure (bar)</label>
                 <input id="thresholdChamberPressure" type="number" step="any" min="0" max="1000" placeholder="Default: 4.000">
                 <button type="button" data-threshold-set="CHAMBER_PRESSURE" data-threshold-input="thresholdChamberPressure">Set</button>
 
-                <label for="thresholdInletTemperature">Minimum inlet temperature (°C)</label>
+                <label for="thresholdInletUpper">Upper inlet pressure (bar)</label>
+                <input id="thresholdInletUpper" type="number" step="any" min="0" max="1000" placeholder="Default: 1.700">
+                <button type="button" data-threshold-set="INLET_UPPER" data-threshold-input="thresholdInletUpper">Set</button>
+
+                <label for="thresholdInletLower">Lower inlet pressure (bar)</label>
+                <input id="thresholdInletLower" type="number" step="any" min="0" max="1000" placeholder="Default: 0.95">
+                <button type="button" data-threshold-set="INLET_LOWER" data-threshold-input="thresholdInletLower">Set</button>
+
+                <!--label for="thresholdInletTemperature">Minimum inlet temperature (°C)</label>
                 <input id="thresholdInletTemperature" type="number" step="any" min="-100" max="200" placeholder="Default: -35.0">
                 <button type="button" data-threshold-set="INLET_TEMPERATURE" data-threshold-input="thresholdInletTemperature">Set</button>
 
@@ -259,7 +270,7 @@
 
                 <label for="thresholdRetryInterval">Connection retry interval (loops)</label>
                 <input id="thresholdRetryInterval" type="number" step="1" min="1" max="2147483647" placeholder="Default: 10">
-                <button type="button" data-threshold-set="RETRY_INTERVAL" data-threshold-input="thresholdRetryInterval">Set</button>
+                <button type="button" data-threshold-set="RETRY_INTERVAL" data-threshold-input="thresholdRetryInterval">Set</button-->
               </div>
             </fieldset>
           </section>
