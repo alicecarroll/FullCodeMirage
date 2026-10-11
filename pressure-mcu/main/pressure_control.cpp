@@ -32,7 +32,6 @@ constexpr uint8_t ERR_CURRENT_SENSOR = PRESSURE_ERROR_CURRENT_SENSOR, ERR_OVERCU
 TickType_t last_current_log = 0;
 bool current_shutdown_standby = false;
 bool pwm_targets_initialized = false; // to keep track of one-time-initialisation of pwm targets
-bool pwm_targets_initialized = false; // to keep track of one-time-initialisation of pwm targestx
 bool inlet_start_wait_active = false;
 TickType_t inlet_start_wait_started = 0;
 
@@ -327,7 +326,7 @@ void pressure_update_external_sensors(const float sensors[7]) {
 void adjust_pressure_target(){
     //upper limit of compressor inlet pressure should depend on ambient pressure
     if ((status.ambient_pressure < 1.1) and (status.ambient_pressure>=0.7)){
-        inlet_upper = 1.7;
+        inlet_upper = 1.5;
         inlet_lower = 0.95;
     }
     else if ((status.ambient_pressure < 0.7) and (status.ambient_pressure>=0.5)){
@@ -505,7 +504,6 @@ void pressure_update() {
             */
             ESP_LOGI("pressure", "Compressor inlet pressure too high: %.3f bar. Waiting for it to drop.", status.compressor_inlet_pressure);
             return;
-            */
         }
         else {
             // Exclude an idle high-inlet wait from exchanged-air integration.

@@ -20,4 +20,4 @@ int K96_request(const char *command,
 
 void check_k96_errors();
 
-void read_k96();
+void read_k96(bool full_readout);

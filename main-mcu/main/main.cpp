@@ -51,6 +51,7 @@ int16_t thermal_watchdog_count = 0; // Count of subsequent times the thermal sla
 int16_t pressure_watchdog_count = 0; // Count of subsequent times the pressure slave is reset
 
 int32_t flightphase = 0; // To track flight phase: 0 = ascend, 1 = float, 2 = descend
+bool first_startup_received = false; // To track if the first startup command has been received
 
 static const char *TAG = "main";
 MainSystemStatusPacket system_status_packet = {};
@@ -67,6 +68,7 @@ bool con_lost = false; // To track connection status
 bool status_ok = true;
 CapturedErrors captured_errors = {};
 CapturedErrors captured_errors_for_k96 = {}; // To store the captured errors for K96 before clearing them
+bool full_k96_readout = false; // To track if a full K96 readout is required
 int32_t LOOP_RETRY_CONNECTION = 10; // Number of loops to wait before retrying connection
 int64_t loss_timestamp_us = -1; // To track when connection was lost for termination
 int loops_since_connection = 0; // To buffer short con losses for stable running
@@ -387,6 +389,7 @@ bool handle_command()
     {
         mode = 3;
         manual_mode_overwrite = true;
+        first_startup_received = true; // Mark that the first startup command has been received
         ESP_LOGI(TAG, "Mode changed to MEASUREMENTS");
         return true;
     }
@@ -746,6 +749,13 @@ static void comms_pressure_default(SensorData &sensor_data, uint32_t current_tim
                  pressure_status.channel_id, pressure_status.state, pressure_status.error_code,
                  pressure_status.relay_mask & 0x0F,
                  pressure_status.manual_override ? "yes" : "no");
+        if (pressure_status.state == 6){
+            // If in measurement phase, set full k96 readout to true.
+            full_k96_readout = true;
+        }
+        else {
+            full_k96_readout = false;
+        }
     }
     else
     {
@@ -785,8 +795,11 @@ extern "C" void app_main()
         vTaskDelay(pdMS_TO_TICKS(500));
     }
         
-
-    ESP_LOGI(TAG,"Ethernet link up");
+    if (!wizphy_getphylink()) {
+        ESP_LOGE(TAG, "Ethernet link could not be established within 5 seconds. Proceeding without Ethernet.");
+    } else {
+        ESP_LOGI(TAG, "Ethernet link up");
+    }
     init_i2c();
     init_uart();
     init_sensors();
@@ -806,7 +819,7 @@ extern "C" void app_main()
     setSn_IR(WIZ_SOCKET, Sn_IR_CON);
 
     wiz_ensure_connected(targetip, REMOTE_PORT, system_ok);
-    wiz_ping(targetip, "h\n");
+    //wiz_ping(targetip, "h\n");
 
     // Set baseline slave watchdog timestamps here, AFTER Ethernet blocks!
     uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
@@ -892,6 +905,12 @@ void loop()
                 
             }
         }
+    }
+
+    if (mode!=2 and !first_startup_received)
+    {
+        ESP_LOGW(TAG, "First startup not received yet. Entering standby mode.");
+        mode = 2; // Enter standby mode if first startup not received
     }
 
     // I (Jonathan) skipped the thermal checks, because I do not understand why they are necessary. The thermal slave should be able to handle its own temperature regulation.
@@ -1001,7 +1020,7 @@ void loop()
         }
         if (K96_is_on())
         {
-            read_k96();
+            read_k96(full_k96_readout);
         }
 
         //Reset overrides
@@ -1100,7 +1119,7 @@ void loop()
         // Take meassurements!!!
         if (K96_is_on())
         {
-            read_k96();
+            read_k96(full_k96_readout);
         }
         //buffer_SD_data_csv(sensor_data); 
         break;

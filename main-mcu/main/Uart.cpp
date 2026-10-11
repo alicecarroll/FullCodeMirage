@@ -13,6 +13,8 @@
 static const char *TAG = "K96_SENSOR";
 static bool k96_enabled = false;
 
+uint8_t k96_delay = 20; // ms of delay used throughout the code
+
 //Turn sensor on
 void K96_on()
 {
@@ -86,7 +88,7 @@ static bool K96_read_ram(
 
     // Send MODBUS frame
     uart_write_bytes(UART_PORT, (const char *)frame, sizeof(frame));
-    uart_wait_tx_done(UART_PORT, pdMS_TO_TICKS(10));
+    uart_wait_tx_done(UART_PORT, pdMS_TO_TICKS(k96_delay)); 
 
     // Read expected response bytes: header (3 bytes) + payload (num_bytes) + CRC (2 bytes)
     uint16_t expected_len = num_bytes + 5;
@@ -94,7 +96,7 @@ static bool K96_read_ram(
         UART_PORT,
         response,
         expected_len,
-        pdMS_TO_TICKS(10)); // Reduced timeout for faster recovery if a frame drops
+        pdMS_TO_TICKS(k96_delay)); // Reduced timeout for faster recovery if a frame drops
 
     // Return false if expected number of bytes were not received
     if (len != expected_len)
@@ -143,6 +145,18 @@ typedef struct
     const char *unit;
     K96_DataType type;
 } K96_RAM_Item;
+
+static const K96_RAM_Item ram_items_minimal_readout[] =
+{
+    //{0x0180, "LPL_Signal",             "counts", K96_S32},
+    //{0x0190, "SPL_Signal",             "counts", K96_S32},
+    //{0x0360, "MPL_Signal",             "counts", K96_S32},
+    {0x01F0, "RH",                     "%RH",    K96_S16},
+    //{0x01F8, "RH_Temp",                "°C",     K96_S16},
+    {0x01B8, "NTC0_Temp",              "°C",     K96_S16_8},
+    {0x01C0, "NTC1_Temp",              "°C",     K96_S16_8},
+};
+
 
 static const K96_RAM_Item ram_items[] =
 {
@@ -220,15 +234,33 @@ void check_k96_errors(void)
 }
 
 //----- Read and update all sensor data in the global struct -----
-void read_k96(void)
+void read_k96(bool full_readout)
 {
     check_k96_errors(); // Check for any hardware errors first
     uint8_t response[32];
-    size_t num_items = sizeof(ram_items) / sizeof(ram_items[0]);
+    const K96_RAM_Item *ram_items_to_be_used = nullptr;
+    size_t num_items = 0;
+
+    if (full_readout)
+    {
+        ESP_LOGI(TAG, "Performing full K96 readout.");
+        ram_items_to_be_used = ram_items;
+        num_items = sizeof(ram_items) / sizeof(ram_items[0]);
+    }
+    else
+    {
+        ESP_LOGI(TAG, "Performing minimal K96 readout.");
+        ram_items_to_be_used = ram_items_minimal_readout;
+        num_items = sizeof(ram_items_minimal_readout) /
+                    sizeof(ram_items_minimal_readout[0]);
+    }
 
     for (size_t i = 0; i < num_items; i++)
     {
-        const K96_RAM_Item *item = &ram_items[i];
+
+
+
+        const K96_RAM_Item *item = &ram_items_to_be_used[i];
         uint8_t bytes = 0;
 
         switch(item->type)
@@ -244,7 +276,7 @@ void read_k96(void)
 
         // Read data from K96 
         memset(response, 0, sizeof(response));
-        vTaskDelay(pdMS_TO_TICKS(10)); // Small delay to avoid overwhelming the sensor with requests
+        vTaskDelay(pdMS_TO_TICKS(k96_delay)); // Small delay to avoid overwhelming the sensor with requests
         if (!K96_read_ram(item->address, bytes, response))
         {
             ESP_LOGW(TAG, "Failed to read K96 RAM address 0x%04X (%s)", item->address, item->name);
