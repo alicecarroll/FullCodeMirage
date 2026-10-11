@@ -10,14 +10,14 @@
 
 namespace {
 PressureStatus status = {};
-float external_sensors[10] = {};
+float external_sensors[11] = {};
 bool external_sensors_valid = false;
 bool manual_pump1 = false, manual_pump2 = false, manual_compressor = false, manual_valve = false;
 bool relay_manual = false;
 uint8_t applied_mode = 0;
 float target_pressure = 3.2f; //in pressure chamber
 float inlet_upper = 1.5f; float inlet_lower = 1.0f; //inlet upper and lower boundaries for compressor inlet
-float compressor_safe_start_inlet_upper = 1.5f; //inlet upper boundary for compressor safe start. Otherwise it might scream at low duty cycles.
+float compressor_safe_start_inlet_upper = 1.7f; //inlet upper boundary for compressor safe start. Otherwise it might scream at low duty cycles.
 int reset_pressure_threshold = 5;
 // Leave 0.20 bar of headroom below the 1.70 bar safe-start ceiling for
 // sensor/update latency and pressure rise after the prefill pumps stop.
@@ -223,14 +223,25 @@ float calc_Q_out() {
 void pressure_init_pwm(){
     // the pwm settings of the pumps need to depend on the ambient pressure as the vacuum pumps would overpressurise the interstage otherwise.
     // the pwm settings should be linearly dependent such that 0.04 bar -> 100% pwm and 1.0 bar -> 20% pwm
-    pwm1 = 100.0f - ((status.ambient_pressure - 0.04f) / (1.0f - 0.04f)) * 80.0f;
-    pwm1 = (pwm1 > 100) ? 100 : ((pwm1 < 20) ? 20 : pwm1);
+    if (!manual_pump1){
+        if (status.ambient_pressure <0.7){
+        pwm1 = 100.0f - ((status.ambient_pressure - 0.04f) / (1.0f - 0.04f)) * 80.0f;
+        pwm1 = (pwm1 > 100) ? 100 : ((pwm1 < 20) ? 20 : pwm1);
+        }
+        else{
+            pwm1 = 0.0f;
+        }
+    }
+    if (!manual_pump2){
     pwm2 = 100.0f - ((status.ambient_pressure - 0.04f) / (1.0f - 0.04f)) * 80.0f;
     pwm2 = (pwm2 > 100) ? 100 : ((pwm2 < 20) ? 20 : pwm2);
+    }
     //The pwm setting of the compressor might be decided to depend on ambient conditions
     //For now (02.10.) the compressor will just be set to 10% duty cycle
+    if (!manual_compressor){
     pwm3 = 10.0f;
     pwm3 = (pwm3 > 100) ? 100 : ((pwm3 < 10) ? 10 : pwm3);
+    }
 }
 
 void pressure_init() {
@@ -241,7 +252,7 @@ void pressure_init() {
     for (uint8_t relay = 1; relay <= 4; ++relay) set_relay(relay, false);
 }
 
-void pressure_update_external_sensors(const float sensors[10]) {
+void pressure_update_external_sensors(const float sensors[11]) {
     const TickType_t now = xTaskGetTickCount();
     if (external_sensors_valid) {
         sensor_update_interval = now - last_sensor_update;
@@ -258,11 +269,12 @@ void pressure_update_external_sensors(const float sensors[10]) {
     status.max_chamber_pressure_threshold = sensors[7];
     status.inlet_lower_threshold = sensors[8];
     status.inlet_upper_threshold = sensors[9];
-    status.reset_pressure_threshold = sensors[11];
-    if (!pwm_targets_initialized) {
-        pressure_init_pwm();
-        pwm_targets_initialized = true;
-    }
+    status.reset_pressure_threshold = sensors[10];
+    pressure_init_pwm();
+    //if (!pwm_targets_initialized) {
+    //    pressure_init_pwm();
+    //    pwm_targets_initialized = true;
+    //}
 }
 
 
@@ -270,6 +282,7 @@ void pressure_update_external_sensors(const float sensors[10]) {
 void adjust_pressure_target(){
     //upper limit of compressor inlet pressure should depend on ambient pressure
     if (status.reset_pressure_threshold==5){
+        target_pressure = 3.0;
         if ((status.ambient_pressure < 1.1) and (status.ambient_pressure>=0.7)){
             inlet_upper = 1.2;
             inlet_lower = 0.95;
@@ -372,6 +385,8 @@ void pressure_update() {
     if (status.state != PRESSURE_COMPRESSION) inlet_start_wait_active = false;
     ESP_LOGI("pressure", "Starting pressure update. State: %d, Chamber: %.3f bar, Inlet: %.3f bar, Ambient: %.3f bar",
              status.state, status.chamber_pressure, status.compressor_inlet_pressure, status.ambient_pressure);
+    ESP_LOGI("pressure", "Target pressure: %.3f bar, Inlet upper: %.3f bar, Inlet lower: %.3f bar, Reset threshold: %d",
+             target_pressure, inlet_upper, inlet_lower, status.reset_pressure_threshold);
     //ESP_LOGI("Sensors2: ", "Ambient pressure: %.3f, Inlet of Compressor %.3f, Chamber pressure: %.3f", status.ambient_pressure, status.compressor_inlet_pressure, status.chamber_pressure);
 
     if (!external_sensors_valid) {
@@ -428,6 +443,7 @@ void pressure_update() {
         else if (status.compressor_inlet_pressure > compressor_safe_start_inlet_upper) {
             if (!manual_compressor) set_compressor(0);
             if (!manual_valve) set_valve(false);
+            /*
             const TickType_t now = xTaskGetTickCount();
             if (!inlet_start_wait_active) {
                 inlet_start_wait_active = true;
@@ -440,6 +456,7 @@ void pressure_update() {
                 ESP_LOGE("pressure", "Compressor inlet remained above %.3f bar for 7 seconds. Stopping pressure train.", compressor_safe_start_inlet_upper);
                 return;
             }
+                */
             ESP_LOGI("pressure", "Compressor inlet pressure too high: %.3f bar. Waiting for it to drop.", status.compressor_inlet_pressure);
             return;
         }
@@ -463,8 +480,9 @@ void pressure_update() {
         flushstep_stop = xTaskGetTickCount();
         flushticks = flushstep_stop-flushstep_start;
         float Qout = calc_Q_out();
-        flushsum = flushsum + 1/V*Qout*flushticks*portTICK_PERIOD_MS/1000/60;
+        flushsum = flushsum + 1/V*Qout*flushticks*portTICK_PERIOD_MS/1000.0/60.0;
         flushstep_start = xTaskGetTickCount();
+        ESP_LOGI("pressure", "Flushsum: %.3f, Flushtarget: %.3f, Qout: %.3f L/min", flushsum, flushtarget, Qout);
 
         if (chamber_at_target()) {
                 ESP_LOGI("pressure", "Chamber pressure at target (%.3f bar): %.3f bar, Inlet: %.3f bar", target_pressure, status.chamber_pressure, status.compressor_inlet_pressure);

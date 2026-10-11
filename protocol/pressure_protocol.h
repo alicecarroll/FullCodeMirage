@@ -52,6 +52,6 @@ enum PressureMode : uint8_t {
 
 enum : uint8_t {
     PRESSURE_COMMAND_FRAME_SIZE = 4,
-    PRESSURE_SENSOR_FRAME_SIZE = 16,
+    PRESSURE_SENSOR_FRAME_SIZE = 24,
     PRESSURE_STATUS_FRAME_SIZE = 8,
 };

@@ -65,7 +65,7 @@ size_t ethernet_recieve_buf_size = ETHERNET_BUF_SIZE;
 size_t ethernet_recieve_buf_bytes_read = 0;
 uint8_t main_ip[4] = WIZ_IP;
 uint16_t portw = WIZ_SOCKET;
-uint8_t targetip[4] = {192, 168, 0, 3};
+uint8_t targetip[4] = {172, 16, 18, 120};
 bool command_received = false;
 bool con_lost = false; // To track connection status
 bool status_ok = true;
@@ -1240,7 +1240,7 @@ void loop()
         //} 
         //Check if pressure in chamber is above threshold, if so, stop pressurisation system. 
         //if (sensor_data.Pp2 + sensor_data.Pa1 > CHAMBER_P_SHUTTER_THRESHOLD) //Why adding the ambient pressure?
-        if (sensor_data.Pp2 > max_chamber_pressure_threshold)
+        if (sensor_data.Pp2 > CHAMBER_P_SHUTTER_THRESHOLD)
         {
             commands_comms_pressure_mcu(PRESSURE_CMD_STOP_PRESSURISATION);
             commands_comms_pressure_mcu(PRESSURE_CMD_VALVE_OPEN);

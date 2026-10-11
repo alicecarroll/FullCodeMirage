@@ -87,8 +87,8 @@ extern spi_device_handle_t WIZ_handle;
 
 // Ethernet Network configuration
 #define WIZ_MAC {0x00, 0x08, 0xDC, 0x01, 0x02, 0x03}
-#define WIZ_IP {192, 168, 0, 2}
-#define WIZ_GATEWAY {192, 168, 0, 1}
+#define WIZ_IP {172, 16, 18, 121}
+#define WIZ_GATEWAY {172, 16, 18, 1}
 #define WIZ_SUBNET {255, 255, 255, 0}
 #define WIZ_DNS {8, 8, 8, 8}
 #define USE_DHCP  0
