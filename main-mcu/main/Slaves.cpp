@@ -298,7 +298,8 @@ bool pressure_send_sensors(
     const SensorData &sensor_data,
     float max_chamber_pressure_threshold,
     float inlet_lower_threshold,
-    float inlet_upper_threshold
+    float inlet_upper_threshold,
+    int reset_pressure_threshold
 ) {
     uint8_t mux_channel; 
     gpio_num_t reset_pin;
@@ -308,29 +309,31 @@ bool pressure_send_sensors(
     
     // Packet layout:
     // [0] opcode
-    // [1..14] seven int16 sensor values
-    // [15] CRC8
-    const int package_length = 16;
+    // [1..22] eleven int16 sensor/threshold values
+    // [23] CRC8
+    const int sensor_count = 11;
+    const int package_length = 1 + (sensor_count * 2) + 1;
     uint8_t package[package_length];
 
     package[0] = PRESSURE_PACKET_SENSORS;
 
-    int16_t sensor_ints[10] = {
-        (int16_t)(sensor_data.Pp3 * SENSOR_SCALE),
-        (int16_t)(sensor_data.Pp1 * SENSOR_SCALE),
-        (int16_t)(sensor_data.Pp2 * SENSOR_SCALE),
-        (int16_t)(sensor_data.Pa1 * SENSOR_SCALE),
-        (int16_t)(sensor_data.Tp1 * SENSOR_SCALE),
-        (int16_t)(sensor_data.Tp2 * SENSOR_SCALE),
-        (int16_t)(sensor_data.Tp3 * SENSOR_SCALE),
-        (int16_t)(max_chamber_pressure_threshold * SENSOR_SCALE),
-        (int16_t)(inlet_lower_threshold * SENSOR_SCALE),
-        (int16_t)(inlet_upper_threshold * SENSOR_SCALE)
+    const int16_t sensor_ints[sensor_count] = {
+        static_cast<int16_t>(sensor_data.Pp3 * SENSOR_SCALE),
+        static_cast<int16_t>(sensor_data.Pp1 * SENSOR_SCALE),
+        static_cast<int16_t>(sensor_data.Pp2 * SENSOR_SCALE),
+        static_cast<int16_t>(sensor_data.Pa1 * SENSOR_SCALE),
+        static_cast<int16_t>(sensor_data.Tp1 * SENSOR_SCALE),
+        static_cast<int16_t>(sensor_data.Tp2 * SENSOR_SCALE),
+        static_cast<int16_t>(sensor_data.Tp3 * SENSOR_SCALE),
+        static_cast<int16_t>(max_chamber_pressure_threshold * SENSOR_SCALE),
+        static_cast<int16_t>(inlet_lower_threshold * SENSOR_SCALE),
+        static_cast<int16_t>(inlet_upper_threshold * SENSOR_SCALE),
+        static_cast<int16_t>(static_cast<float>(reset_pressure_threshold) * SENSOR_SCALE)
     };
 
-    for(int i = 0; i < 10; i++) {
-        package[1 + (i*2)] = (sensor_ints[i] >> 8) & 0xFF; // MSB
-        package[2 + (i*2)] = sensor_ints[i] & 0xFF;        // LSB
+    for (int i = 0; i < sensor_count; i++) {
+        package[1 + (i * 2)] = (sensor_ints[i] >> 8) & 0xFF; // MSB
+        package[2 + (i * 2)] = sensor_ints[i] & 0xFF;        // LSB
     }
 
     package[package_length - 1] = computeCRC8(package, package_length - 1);

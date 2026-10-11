@@ -52,8 +52,8 @@ void queue_status() {
 void process_frame(const uint8_t *frame, size_t length) {
     if (length == PRESSURE_SENSOR_FRAME_SIZE && frame[0] == PRESSURE_PACKET_SENSORS) {
         if (crc8(frame, 15) != frame[15]) return;
-        float sensors[10] = {};
-        for (size_t i = 0; i < 10; ++i) {
+        float sensors[11] = {};
+        for (size_t i = 0; i < 11; ++i) {
             const int16_t raw = static_cast<int16_t>(static_cast<uint16_t>(frame[1 + 2 * i]) << 8 | frame[2 + 2 * i]);
             sensors[i] = static_cast<float>(raw) / SENSOR_SCALE;
         }

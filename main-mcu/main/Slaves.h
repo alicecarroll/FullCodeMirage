@@ -126,7 +126,11 @@ bool thermal_receive_big_packet(
 );
 bool pressure_send_sensors(
     SlaveDevice slave,
-    const SensorData& sensor_data
+    const SensorData& sensor_data,
+    float max_chamber_pressure_threshold,
+    float inlet_lower_threshold,
+    float inlet_upper_threshold,
+    int reset_pressure_threshold
 );
 
 bool pressure_receive_package(

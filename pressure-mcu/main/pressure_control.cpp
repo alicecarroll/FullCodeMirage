@@ -16,11 +16,12 @@ bool manual_pump1 = false, manual_pump2 = false, manual_compressor = false, manu
 bool relay_manual = false;
 uint8_t applied_mode = 0;
 float target_pressure = 3.2f; //in pressure chamber
-float inlet_upper = 1.5f, inlet_lower = 1.0f; //inlet upper and lower boundaries for compressor inlet
-float compressor_safe_start_inlet_upper = 1.7f; //inlet upper boundary for compressor safe start. Otherwise it might scream at low duty cycles.
+float inlet_upper = 1.5f; float inlet_lower = 1.0f; //inlet upper and lower boundaries for compressor inlet
+float compressor_safe_start_inlet_upper = 1.5f; //inlet upper boundary for compressor safe start. Otherwise it might scream at low duty cycles.
+int reset_pressure_threshold = 5;
 // Leave 0.20 bar of headroom below the 1.70 bar safe-start ceiling for
 // sensor/update latency and pressure rise after the prefill pumps stop.
-constexpr float INLET_PREFILL_MAX_BAR = 1.5f;
+constexpr float INLET_PREFILL_MAX_BAR = 2.0f;
 constexpr uint32_t INLET_START_WAIT_MAX_MS = 7000;
 constexpr float CHAMBER_TARGET_TOLERANCE_BAR = 0.1f;
 // In reality, the difference between interstage and pressure chamber is also relevant. I don't know how to account for that. 
@@ -254,9 +255,10 @@ void pressure_update_external_sensors(const float sensors[10]) {
     status.chamber_pressure = sensors[2];
     status.ambient_pressure = sensors[3];
     status.compressor_inlet_pressure = (sensors[1]+status.ambient_pressure);
-    target_pressure = sensors[7];
-    inlet_lower = sensors[8];
-    inlet_upper = sensors[9];
+    status.max_chamber_pressure_threshold = sensors[7];
+    status.inlet_lower_threshold = sensors[8];
+    status.inlet_upper_threshold = sensors[9];
+    status.reset_pressure_threshold = sensors[11];
     if (!pwm_targets_initialized) {
         pressure_init_pwm();
         pwm_targets_initialized = true;
@@ -267,22 +269,34 @@ void pressure_update_external_sensors(const float sensors[10]) {
 
 void adjust_pressure_target(){
     //upper limit of compressor inlet pressure should depend on ambient pressure
-    if ((status.ambient_pressure < 1.1) and (status.ambient_pressure>=0.7)){
-        inlet_upper = 1.7;
+    if (status.reset_pressure_threshold==5){
+        if ((status.ambient_pressure < 1.1) and (status.ambient_pressure>=0.7)){
+            inlet_upper = 1.2;
+            inlet_lower = 0.95;
+        }
+        else if ((status.ambient_pressure < 0.7) and (status.ambient_pressure>=0.5)){
+            inlet_upper = 1.5;
+            inlet_lower = 0.95;
+        }
+        else if ((status.ambient_pressure < 0.5) and (status.ambient_pressure>=0.2)){
+            inlet_upper = 1.5;
+            inlet_lower = 0.95;
+        }
+        else if (status.ambient_pressure < 0.2){
+            inlet_upper = 1.2;
+            inlet_lower = 0.95;
+        }
+    }
+    else if (status.reset_pressure_threshold==1){
+        target_pressure = 3.0;
+    }
+    else if (status.reset_pressure_threshold==2){
         inlet_lower = 0.95;
     }
-    else if ((status.ambient_pressure < 0.7) and (status.ambient_pressure>=0.5)){
+    else if (status.reset_pressure_threshold==3){
         inlet_upper = 1.5;
-        inlet_lower = 0.95;
-    }
-    else if ((status.ambient_pressure < 0.5) and (status.ambient_pressure>=0.2)){
-        inlet_upper = 1.5;
-        inlet_lower = 0.95;
-    }
-    else if (status.ambient_pressure < 0.2){
-        inlet_upper = 1.5;
-        inlet_lower = 0.95;
-    }
+    }  
+
 }
 
 void pressure_execute_command(uint8_t command, uint8_t info) {
@@ -347,7 +361,14 @@ void pressure_execute_command(uint8_t command, uint8_t info) {
 }
 
 void pressure_update() {
-    adjust_pressure_target();
+    if (status.reset_pressure_threshold != 0){
+        adjust_pressure_target();
+    }
+    else {
+        target_pressure = status.max_chamber_pressure_threshold;
+        inlet_lower = status.inlet_lower_threshold;
+        inlet_upper = status.inlet_upper_threshold;
+    }
     if (status.state != PRESSURE_COMPRESSION) inlet_start_wait_active = false;
     ESP_LOGI("pressure", "Starting pressure update. State: %d, Chamber: %.3f bar, Inlet: %.3f bar, Ambient: %.3f bar",
              status.state, status.chamber_pressure, status.compressor_inlet_pressure, status.ambient_pressure);
@@ -372,9 +393,9 @@ void pressure_update() {
         //    if (!manual_compressor) set_compressor(0); 
         //    return;
         //}
-
+        
         const float inlet_fill_target = std::min(inlet_upper, INLET_PREFILL_MAX_BAR);
-        if (status.compressor_inlet_pressure >= inlet_fill_target) {
+        if (status.compressor_inlet_pressure >= inlet_upper) {
             // Stop filling in this update, not one update after changing state.
             if (!manual_pump1) set_pump1(0);
             if (!manual_pump2) set_pump2(0);

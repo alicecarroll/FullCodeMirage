@@ -29,6 +29,7 @@ typedef struct
     float max_chamber_pressure_threshold;
     float inlet_lower_threshold;
     float inlet_upper_threshold;
+    int reset_pressure_threshold;
 
     uint8_t error;
 
