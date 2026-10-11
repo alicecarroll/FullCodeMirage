@@ -125,7 +125,9 @@ extern spi_device_handle_t WIZ_handle;
 // Sensor value thresholds
 #define P_STRATOSPHERE 0.040 // Stratosphere limit, TBD
 #define CHAMBER_P_SHUTTER_THRESHOLD 4.000// Safety limit Pressure threshold for opening shutter to meassurment chamber, TBD
-#define CHAMBER_P_CHAMBER_THRESHOLD 2.800// Pressure threshold for taking measurements,TBD
+#define INLET_LOWER_THRESHOLD 0.95
+#define INLET_UPPER_THRESHOLD 1.7
+#define CHAMBER_P_THRESHOLD 3.000// Pressure threshold for taking measurements,TBD
 #define OUTLET_TEMPERATURE_THRESHOLD 50 // Threshold for outlet temperature in Celsius
 #define INLET_TEMPERATURE_THRESHOLD -35.0 // Threshold for inlet temperature in Celsius
 //#define INLET_TEMPERATURE_THRESHOLD // Temperature threshold for taking measurements, TBD

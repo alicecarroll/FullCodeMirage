@@ -26,6 +26,10 @@ typedef struct
                                        // the compressor, between the
                                        // vacuum pumps and the compressor
     float ambient_pressure; //and is1 pressure should be also received
+    float max_chamber_pressure_threshold;
+    float inlet_lower_threshold;
+    float inlet_upper_threshold;
+    int reset_pressure_threshold;
 
     uint8_t error;
 
@@ -55,7 +59,7 @@ void pressure_update();
 void pressure_update_current();
 
 // Called by the communication task when the Main MCU sends its sensor frame.
-void pressure_update_external_sensors(const float sensors[7]);
+void pressure_update_external_sensors(const float sensors[11]);
 
 // Apply one canonical command frame.
 void pressure_execute_command(uint8_t command, uint8_t info);

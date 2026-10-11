@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cctype>
 #include <cmath>
+#include <cerrno>
+#include <cstdlib>
 #include <forward_list>
 #include <limits>
 
@@ -45,6 +47,8 @@ bool system_ok = true;
 
 // Watchdog variables for tracking slave pings locally inside the loop
 #define SLAVE_WATCHDOG_TIMEOUT_MS 5000
+uint16_t current_slave_watchdog_timeout = SLAVE_WATCHDOG_TIMEOUT_MS;
+static constexpr int16_t DEFAULT_WATCHDOG_TOLERANCE = 3000;
 uint32_t last_thermal_ping_time = 0;
 uint32_t last_pressure_ping_time = 0;
 int16_t thermal_watchdog_count = 0; // Count of subsequent times the thermal slave is reset
@@ -69,7 +73,15 @@ bool status_ok = true;
 CapturedErrors captured_errors = {};
 CapturedErrors captured_errors_for_k96 = {}; // To store the captured errors for K96 before clearing them
 bool full_k96_readout = false; // To track if a full K96 readout is required
-int32_t LOOP_RETRY_CONNECTION = 10; // Number of loops to wait before retrying connection
+static constexpr int32_t DEFAULT_LOOP_RETRY_CONNECTION = 10;
+int32_t LOOP_RETRY_CONNECTION = DEFAULT_LOOP_RETRY_CONNECTION; // Number of loops to wait before retrying connection
+float max_pressure_threshold = P_STRATOSPHERE; //threshold for max ambient pressure for measuring
+int max_loops_without_connection = LOOP_WO_CONNECTION;
+float max_chamber_pressure_threshold = CHAMBER_P_THRESHOLD; //threshold for chamber pressure at which measurement phase starts
+float inlet_lower_threshold = INLET_LOWER_THRESHOLD; //lower threshold at compressor inlet to go to prepressurisation
+float inlet_upper_threshold = INLET_UPPER_THRESHOLD; //upper threshold at comporessor inlet to go from prepressurisation to compression
+int reset_pressure_threshold = 5; //0: no reset, 1: max_chamber, 2: inlet_lower, 3: inlet_upper, 5: reset all
+float min_inlet_temperature_threshold = INLET_TEMPERATURE_THRESHOLD;
 int64_t loss_timestamp_us = -1; // To track when connection was lost for termination
 int loops_since_connection = 0; // To buffer short con losses for stable running
 static SlaveStatus thermal_status = {};
@@ -85,6 +97,9 @@ bool manual_mode_overwrite = false; // To track if manual mode overwrite is acti
 static bool k96_manual_override = false;
 static bool k96_manual_state = false;
 static HeaterSystem *heater_system = nullptr;
+static bool reset_overrides(const std::string &target);
+static bool reset_thresholds(const std::string &target);
+static bool set_threshold(const std::string &target, const std::string &value_text);
 
 //Values for thermal slave
 uint8_t number_channels_thermal=8;  //0-8 depending on the number of switches used
@@ -92,7 +107,8 @@ uint8_t number_channels_thermal=8;  //0-8 depending on the number of switches us
 uint8_t thermal_mode=1; //0 bang bang 1 PID 155-255 D_cycle
 int16_t thermal_currentTemp=2000; // 5000 = 50,0C  
 int16_t thermal_target=2000;
-int16_t thermal_watchdog_tolerance=3000; // 1 according to SEDv3. Number of subsequent times where the thermal slave is reset. If reset more than this number of times, the thermal MCU will be considered lost.
+int16_t thermal_watchdog_tolerance=DEFAULT_WATCHDOG_TOLERANCE; // 1 according to SEDv3. Number of subsequent times where the thermal slave is reset. If reset more than this number of times, the thermal MCU will be considered lost.
+int16_t pressure_watchdog_tolerance=DEFAULT_WATCHDOG_TOLERANCE;
 bool thermal_mcu_lost=false; // To track if the thermal slave is lost.
 
 //Data recieved from thermal this struct is defined under slaves.h For errors 0 is thats ok anything else is error
@@ -409,6 +425,56 @@ bool handle_command()
         return true;
     }
 
+    constexpr char RESET_OVERRIDE_PREFIX[] = "RESET OVERRIDE ";
+    if (ethernet_command_text.rfind(RESET_OVERRIDE_PREFIX, 0) == 0)
+    {
+        const std::string target = ethernet_command_text.substr(sizeof(RESET_OVERRIDE_PREFIX) - 1);
+        if (reset_overrides(target))
+        {
+            ESP_LOGI(TAG, "Override reset: %s", target.c_str());
+            return true;
+        }
+        ESP_LOGW(TAG, "Unknown override reset target: %s", target.c_str());
+        return false;
+    }
+
+    constexpr char RESET_THRESHOLD_PREFIX[] = "RESET THRESHOLD ";
+    if (ethernet_command_text.rfind(RESET_THRESHOLD_PREFIX, 0) == 0)
+    {
+        const std::string target = ethernet_command_text.substr(sizeof(RESET_THRESHOLD_PREFIX) - 1);
+        if (reset_thresholds(target))
+        {
+            ESP_LOGI(TAG, "Threshold reset: %s", target.c_str());
+            return true;
+        }
+        ESP_LOGW(TAG, "Unknown threshold reset target: %s", target.c_str());
+        return false;
+    }
+
+    constexpr char SET_THRESHOLD_PREFIX[] = "SET THRESHOLD ";
+    if (ethernet_command_text.rfind(SET_THRESHOLD_PREFIX, 0) == 0)
+    {
+        std::string arguments = ethernet_command_text.substr(sizeof(SET_THRESHOLD_PREFIX) - 1);
+        const size_t separator = arguments.find_last_of(" \t");
+        if (separator == std::string::npos)
+        {
+            ESP_LOGW(TAG, "Invalid threshold command: %s", ethernet_command_text.c_str());
+            return false;
+        }
+
+        std::string target = arguments.substr(0, separator);
+        std::string value_text = arguments.substr(separator + 1);
+        trim_in_place(target);
+        trim_in_place(value_text);
+        if (set_threshold(target, value_text))
+        {
+            ESP_LOGI(TAG, "Threshold %s set to %s", target.c_str(), value_text.c_str());
+            return true;
+        }
+        ESP_LOGW(TAG, "Invalid threshold target or value: %s", ethernet_command_text.c_str());
+        return false;
+    }
+
     if (ethernet_command_text == "K96 ON")
     {
         k96_manual_override = true;
@@ -472,6 +538,124 @@ bool handle_command()
     return false;
 }
 
+static bool reset_overrides(const std::string &target)
+{
+    const bool reset_all = target == "ALL";
+    const bool reset_heaters = reset_all || target == "HEATERS";
+    if (reset_heaters && heater_system == nullptr)
+    {
+        ESP_LOGE(TAG, "Cannot reset heater overrides before heater system initialization");
+        return false;
+    }
+
+    if (reset_all || target == "MODE")
+    {
+        manual_mode_overwrite = false;
+    }
+    if (reset_all || target == "K96")
+    {
+        k96_manual_override = false;
+        k96_manual_state = false;
+    }
+    if (reset_heaters)
+    {
+        heater_system_init(heater_system);
+        active_heater_mask = 0x00;
+    }
+
+    return reset_all || target == "MODE" || target == "K96" || target == "HEATERS";
+}
+
+static bool reset_thresholds(const std::string &target)
+{
+    const bool reset_all = target == "ALL";
+    if (target == "MAX_PRESSURE")
+        max_pressure_threshold = P_STRATOSPHERE;
+    else if (target == "CONNECTION_LOSS")
+        max_loops_without_connection = LOOP_WO_CONNECTION;
+    else if (target == "CHAMBER_PRESSURE")
+    {
+        max_chamber_pressure_threshold = CHAMBER_P_THRESHOLD;
+        reset_pressure_threshold = 1;}
+    else if (target == "INLET_LOWER")
+    {
+        inlet_lower_threshold = INLET_LOWER_THRESHOLD;
+        reset_pressure_threshold = 2;}
+    else if (target == "INLET_UPPER")
+    {
+        inlet_lower_threshold = INLET_UPPER_THRESHOLD;
+        reset_pressure_threshold = 3;}
+    else if (target == "INLET_TEMPERATURE")
+        min_inlet_temperature_threshold = INLET_TEMPERATURE_THRESHOLD;
+    else if (target == "WATCHDOG_TIMEOUT")
+        current_slave_watchdog_timeout = SLAVE_WATCHDOG_TIMEOUT_MS;
+    else if (target == "THERMAL_WATCHDOG_TOLERANCE")
+        thermal_watchdog_tolerance = DEFAULT_WATCHDOG_TOLERANCE;
+    else if (target == "PRESSURE_WATCHDOG_TOLERANCE")
+        pressure_watchdog_tolerance = DEFAULT_WATCHDOG_TOLERANCE;
+    else if (target == "RETRY_INTERVAL")
+        LOOP_RETRY_CONNECTION = 10;
+
+    if (reset_all)
+    {
+        reset_pressure_threshold = 5;
+
+        max_pressure_threshold = P_STRATOSPHERE;
+        max_loops_without_connection = LOOP_WO_CONNECTION;
+        max_chamber_pressure_threshold = CHAMBER_P_THRESHOLD;
+        inlet_lower_threshold = INLET_LOWER_THRESHOLD;
+        inlet_upper_threshold = INLET_UPPER_THRESHOLD;
+        min_inlet_temperature_threshold = INLET_TEMPERATURE_THRESHOLD;
+        current_slave_watchdog_timeout = SLAVE_WATCHDOG_TIMEOUT_MS;
+        thermal_watchdog_tolerance = DEFAULT_WATCHDOG_TOLERANCE;
+        pressure_watchdog_tolerance = DEFAULT_WATCHDOG_TOLERANCE;
+        LOOP_RETRY_CONNECTION = DEFAULT_LOOP_RETRY_CONNECTION;
+    }
+
+    return true;
+}
+
+static bool set_threshold(const std::string &target, const std::string &value_text)
+{
+    char *value_end = nullptr;
+    errno = 0;
+    const double value = std::strtod(value_text.c_str(), &value_end);
+    if (errno == ERANGE || value_end == value_text.c_str() || *value_end != '\0' || !std::isfinite(value))
+    {
+        return false;
+    }
+    const bool is_integer = value == std::trunc(value);
+    if (target == "MAX_PRESSURE" && value >= 0.0 && value <= 1000.0)
+        max_pressure_threshold = static_cast<float>(value);
+    //else if (target == "CONNECTION_LOSS" && is_integer && value >= 0.0 && value <= std::numeric_limits<int>::max())
+    //    max_loops_without_connection = static_cast<int>(value);
+    else if (target == "CHAMBER_PRESSURE" && value >= 0.0 && value <= 5.0)
+        max_chamber_pressure_threshold = static_cast<float>(value);
+    else if (target == "INLET_LOWER" && value >= 0.0 && value <= 3.0)
+        inlet_lower_threshold = static_cast<float>(value);
+    else if (target == "INLET_UPPER" && value >= 0.0 && value <= 3.0)
+        inlet_upper_threshold = static_cast<float>(value);
+    
+     //no resets
+    /* 
+    else if (target == "INLET_TEMPERATURE" && value >= -100.0 && value <= 200.0)
+        min_inlet_temperature_threshold = static_cast<float>(value);
+    else if (target == "WATCHDOG_TIMEOUT" && is_integer && value >= 1.0 && value <= std::numeric_limits<uint16_t>::max())
+        current_slave_watchdog_timeout = static_cast<uint16_t>(value);
+    else if (target == "THERMAL_WATCHDOG_TOLERANCE" && is_integer && value >= 1.0 && value <= std::numeric_limits<int16_t>::max())
+        thermal_watchdog_tolerance = static_cast<int16_t>(value);
+    else if (target == "PRESSURE_WATCHDOG_TOLERANCE" && is_integer && value >= 1.0 && value <= std::numeric_limits<int16_t>::max())
+        pressure_watchdog_tolerance = static_cast<int16_t>(value);
+    else if (target == "RETRY_INTERVAL" && is_integer && value >= 1.0 && value <= std::numeric_limits<int32_t>::max())
+        LOOP_RETRY_CONNECTION = static_cast<int32_t>(value);
+    */
+    else
+        return false;
+
+    reset_pressure_threshold = 0;
+    return true;
+}
+
 static esp_err_t send_system_status_packet()
 {
 
@@ -515,6 +699,7 @@ static esp_err_t send_system_status_packet()
     system_status_packet.pressure_pump1_pwm = pressure_status.pump1_pwm;
     system_status_packet.pressure_pump2_pwm = pressure_status.pump2_pwm;
     system_status_packet.pressure_compressor_pwm = pressure_status.compressor_pwm;
+//    system_status_packet.chamber_pressure_threshold =
     system_status_packet.pressure_manual_override = pressure_status.manual_override ? 1 : 0;
     system_status_packet.pressure_valve_open = pressure_status.valve_open ? 1 : 0;
     uint8_t storage_free_pct = 0;
@@ -688,7 +873,7 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
     }
 
     //Watchdog reset for thermal
-    if ((current_time_ms - last_thermal_ping_time) > SLAVE_WATCHDOG_TIMEOUT_MS)
+    if ((current_time_ms - last_thermal_ping_time) > current_slave_watchdog_timeout)
     {
         ESP_LOGW(TAG, "!!! Watchdog Triggered: Thermal MCU timed out. Resetting device via Pin %d !!!", Thermal_reset_PIN);
         slave_reset(thermal_mcu);
@@ -705,7 +890,6 @@ static void comms_thermal_sensor(SensorData &sensor_data, uint32_t current_time_
 
 //Pressure
 bool shutters_open = false; // To track if shutters are open
-int16_t pressure_watchdog_tolerance=3000; // 1 according to SEDv3. Number of subsequent times where the pressure slave is reset. If reset more than this number of times, the pressure MCU will be considered lost.
 bool pressure_mcu_lost=false; // To track if the pressure slave is lost.
 
 static void commands_comms_pressure_mcu(uint8_t cmd, uint8_t info_bit=0)
@@ -724,9 +908,9 @@ static void commands_comms_pressure_mcu(uint8_t cmd, uint8_t info_bit=0)
 }
 
 
-static void comms_pressure_default(SensorData &sensor_data, uint32_t current_time_ms)
+static void comms_pressure_default(SensorData &sensor_data, uint32_t current_time_ms, float max_chamber_pressure_threshold, float inlet_lower_threshold, float inlet_upper_threshold, int reset_pressure_threshold)
 {
-    pressure_send_sensors(pressure_mcu, sensor_data);
+    pressure_send_sensors(pressure_mcu, sensor_data, max_chamber_pressure_threshold, inlet_lower_threshold, inlet_upper_threshold, reset_pressure_threshold);
 
     // Send the actual Main-MCU mode, including its numeric value. The
     // pressure MCU uses mode 3/2 to control relay 2/3 automatically.
@@ -879,7 +1063,7 @@ void loop()
     print_sensor_data(&sensor_data);
 
     // Status Check Block
-    if (sensor_data.Pa1 < P_STRATOSPHERE)
+    if (sensor_data.Pa1 < max_pressure_threshold)
     {
         if (flightphase == 0) // If flightphase was in ascent, switch it to float
         {
@@ -986,7 +1170,7 @@ void loop()
             // Bark at pressure subsystem
             if (not pressure_mcu_lost)
             {
-                comms_pressure_default(sensor_data, current_time_ms);
+                comms_pressure_default(sensor_data, current_time_ms, max_chamber_pressure_threshold, inlet_lower_threshold, inlet_upper_threshold, reset_pressure_threshold);
             }
 
             //Bark at thermal subsystem
@@ -1028,7 +1212,7 @@ void loop()
         //Pressure communication
         if (not pressure_mcu_lost)
         {
-            comms_pressure_default(sensor_data, current_time_ms);
+            comms_pressure_default(sensor_data, current_time_ms, max_chamber_pressure_threshold, inlet_lower_threshold, inlet_upper_threshold, reset_pressure_threshold);
         }
         
         //Thermal communication
@@ -1044,7 +1228,7 @@ void loop()
         // Pressure communication block 
         if (not pressure_mcu_lost)
         {
-            comms_pressure_default(sensor_data, current_time_ms);
+            comms_pressure_default(sensor_data, current_time_ms, max_chamber_pressure_threshold, inlet_lower_threshold, inlet_upper_threshold, reset_pressure_threshold);
         }
 
         // Thermal communication block
@@ -1054,12 +1238,12 @@ void loop()
         }
 
         // Elevation check in terms of pressure
-        if (sensor_data.Pa1 < P_STRATOSPHERE)
+        if (sensor_data.Pa1 < max_pressure_threshold)
         {
-            if (loops_since_connection > LOOP_WO_CONNECTION) // If connection lost for more than LOOP_WO_CONNECTION loops, enter safe mode
+            if (loops_since_connection > max_loops_without_connection) // If connection is lost for too many loops, enter safe mode
             {
                 mode = 2; // Standby
-                ESP_LOGE_CAPTURED(ERROR_BIT_55, TAG, "Connection lost for more than %d loops. Entering standby mode.", LOOP_WO_CONNECTION);
+                ESP_LOGE_CAPTURED(ERROR_BIT_55, TAG, "Connection lost for more than %d loops. Entering standby mode.", max_loops_without_connection);
                 //con_lost = true;
                 //connection_lost(&con_lost, &loss_timestamp_us);
                 //wiz_ping(targetip, "Connection lost. Entering safe mode."); // Why are we pinging when the connection is lost? This seems counterintuitive. If the connection is lost, how can we ping? This might be a logic error or a misunderstanding of the system's state.
@@ -1090,7 +1274,7 @@ void loop()
 
         // Thermal check block to see if temperatures are out of limits 
         // Check if inlet temperature is below threshold. If so, stop the pressurisation system and increase inlet temperature first.
-        if (sensor_data.Tt3 < INLET_TEMPERATURE_THRESHOLD)
+        if (sensor_data.Tt3 < min_inlet_temperature_threshold)
         {
             //Thermal communication: increase inlet temperature
             commands_comms_pressure_mcu(PRESSURE_CMD_STOP_PRESSURISATION);

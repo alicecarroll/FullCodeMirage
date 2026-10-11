@@ -186,7 +186,7 @@ def evaluate_health(frame: dict[str, Any]) -> str:
         or chamber_pressure < 2.35
         or chamber_temp > 50
         or chamber_temp < 5
-        or humidity > 84
+        or humidity > 94
     ):
         return "fault"
 
@@ -195,7 +195,7 @@ def evaluate_health(frame: dict[str, Any]) -> str:
         or chamber_pressure < 2.74
         or chamber_temp > 40
         or chamber_temp < 15
-        or humidity > 65
+        or humidity > 84
     ):
         return "warning"
 
