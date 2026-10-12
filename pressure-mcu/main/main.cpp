@@ -44,13 +44,23 @@ void queue_status() {
     frame[4] = status.pump1_pwm;
     frame[5] = status.pump2_pwm;
     frame[6] = status.compressor_pwm;
-    frame[7] = crc8(frame, 7);
-    frame[8] = static_cast<uint8_t>(status.current_ma >> 8);
-    frame[9] = static_cast<uint8_t>(status.current_ma & 0xFF);
-    frame[10] = (status.current_valid ? PRESSURE_CURRENT_VALID : 0) |
+    frame[7] = static_cast<uint8_t>(status.current_ma >> 8);
+    frame[8] = static_cast<uint8_t>(status.current_ma & 0xFF);
+    frame[9] = (status.current_valid ? PRESSURE_CURRENT_VALID : 0) |
                 (status.overcurrent_tripped ? PRESSURE_CURRENT_TRIPPED : 0) |
                 (status.current_adc_saturated ? PRESSURE_CURRENT_ADC_SATURATED : 0);
-    frame[11] = crc8(frame, 11);
+    frame[10] = crc8(frame, 10);
+    /*
+    ESP_LOGI(TAG, "Queueing pressure status: state=%d, error=%d, relay_mask=0x%02X, pump1_pwm=%d, pump2_pwm=%d, compressor_pwm=%d, current_ma=%d, current_flags=0x%02X",
+             status.state, status.error, status.relay_mask, status.pump1_pwm, status.pump2_pwm, status.compressor_pwm,
+             status.current_ma, frame[9]);
+    if (status.pump1_pwm > 0 || status.pump2_pwm > 0 || status.compressor_pwm > 0 || status.valve_open || status.relay_mask > 0) {
+        ESP_LOGW(TAG, "Warning: One or more pumps are active. Pump1 PWM: %d, Pump2 PWM: %d, Compressor PWM: %d",
+                 status.pump1_pwm, status.pump2_pwm, status.compressor_pwm);
+        vTaskDelay(pdMS_TO_TICKS(1000)); // Delay to allow for any necessary processing
+    }
+    */
+
     i2c_reset_tx_fifo(I2C_PORT);
     i2c_slave_write_buffer(I2C_PORT, frame, sizeof(frame), 0);
 }

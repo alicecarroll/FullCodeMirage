@@ -932,7 +932,10 @@ static void comms_pressure_default(SensorData &sensor_data, uint32_t current_tim
         commands_comms_pressure_mcu(queued.command, queued.info);
     }
 
-    if (pressure_receive_package(pressure_mcu, &pressure_status))
+    // Save the last pressure_status to have fallback in case the pressure MCU does not respond.
+    PressureStatusData last_pressure_status = pressure_status;
+    bool receive_status = pressure_receive_package(pressure_mcu, &pressure_status);
+    if (receive_status && pressure_status.current_flags != 0x00)
     {
         last_pressure_ping_time = current_time_ms;
         pressure_system_active = pressure_status.state != 0;
@@ -952,7 +955,19 @@ static void comms_pressure_default(SensorData &sensor_data, uint32_t current_tim
     else
     {
         ESP_LOGE_CAPTURED(ERROR_BIT_53, TAG, "Pressure MCU failed to respond to sensor query");
+        pressure_status = last_pressure_status; // Restore the last known status
+        pressure_status.error_code = PRESSURE_READOUT_ERROR;
+
     }
+    ESP_LOGI(TAG, "Pressure MCU status: Channel ID: %d, State: %d, Error Code: %d, "
+             "Relay mask: 0x%02X, manual override: %s, pumps PWM: %d, %d, %d, current: %d, current flags: 0x%02X",
+             pressure_status.channel_id, pressure_status.state, pressure_status.error_code,
+             pressure_status.relay_mask & 0x0F,
+             pressure_status.manual_override ? "yes" : "no", pressure_status.pump1_pwm, pressure_status.pump2_pwm, pressure_status.compressor_pwm, pressure_status.current_ma, pressure_status.current_flags);
+    if (pressure_status.pump1_pwm > 0 || pressure_status.pump2_pwm > 0 || pressure_status.compressor_pwm > 0 || pressure_status.valve_open || pressure_status.relay_mask > 0) {
+        ESP_LOGW(TAG, "Anomaly detected.");
+        vTaskDelay(pdMS_TO_TICKS(1000)); // Delay to allow for logging
+    } 
 
     // Watchdog reset for pressure
     // A watchdog reset must not silently clear a known, latched current trip.
