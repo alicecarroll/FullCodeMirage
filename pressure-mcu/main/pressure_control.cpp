@@ -10,7 +10,7 @@
 
 namespace {
 PressureStatus status = {};
-float external_sensors[11] = {};
+float external_sensors[12] = {};
 bool external_sensors_valid = false;
 bool manual_pump1 = false, manual_pump2 = false, manual_compressor = false, manual_valve = false;
 bool relay_manual = false;
@@ -18,6 +18,7 @@ uint8_t applied_mode = 0;
 float target_pressure; //in pressure chamber
 float inlet_upper = 1.5f, inlet_lower = 1.0f; //inlet upper and lower boundaries for compressor inlet
 float compressor_safe_start_inlet_upper = 1.7f; //inlet upper boundary for compressor safe start. Otherwise it might scream at low duty cycles.
+float air_exchange_threshold = 2.0f; // the chamber pressure after which the air exchange phase is exited
 int reset_pressure_threshold = 5;
 // Leave 0.20 bar of headroom below the 1.70 bar safe-start ceiling for
 // sensor/update latency and pressure rise after the prefill pumps stop.
@@ -288,11 +289,11 @@ void pressure_update_current() {
         stop_pressure_train(false);
         current_shutdown_standby = true;
         status.error = status.overcurrent_tripped ? ERR_OVERCURRENT : ERR_CURRENT_SENSOR;
-        status.state = PRESSURE_STANDBY;
+        status.state = PRESSURE_CURRENT_ERROR;
     } else if (status.error == ERR_CURRENT_SENSOR || status.error == ERR_OVERCURRENT) {
         // Recovery unlocks manual controls, but does not restore any outputs.
         status.error = ERR_NONE;
-        status.state = PRESSURE_STANDBY;
+        status.state = PRESSURE_CURRENT_ERROR;
     }
 
     // Never put potentially blocking console logging ahead of relay shutdown.
@@ -313,7 +314,7 @@ void pressure_update_current() {
     }
 }
 
-void pressure_update_external_sensors(const float sensors[11]) {
+void pressure_update_external_sensors(const float sensors[12]) {
     const TickType_t now = xTaskGetTickCount();
     if (external_sensors_valid) {
         sensor_update_interval = now - last_sensor_update;
@@ -330,7 +331,8 @@ void pressure_update_external_sensors(const float sensors[11]) {
     status.max_chamber_pressure_threshold = sensors[7];
     status.inlet_lower_threshold = sensors[8];
     status.inlet_upper_threshold = sensors[9];
-    status.reset_pressure_threshold = sensors[10];
+    status.air_exchange_threshold = sensors[10];
+    status.reset_pressure_threshold = sensors[11];
     pressure_init_pwm();
     //if (!pwm_targets_initialized) {
     //    pressure_init_pwm();
@@ -360,6 +362,7 @@ void adjust_pressure_target(){
             inlet_upper = 1.2;
             inlet_lower = 0.95;
         }
+        air_exchange_threshold = 2.0f;
     }
     else if (status.reset_pressure_threshold==1){
         target_pressure = 3.2;
@@ -391,7 +394,10 @@ void adjust_pressure_target(){
         else if (status.ambient_pressure < 0.2){
             inlet_upper = 1.2;
         }
-    }  
+    }
+    else if (status.reset_pressure_threshold==4){
+        air_exchange_threshold = 2.0f;
+    }
 
 }
 
@@ -488,6 +494,7 @@ void pressure_update() {
         target_pressure = status.max_chamber_pressure_threshold;
         inlet_lower = status.inlet_lower_threshold;
         inlet_upper = status.inlet_upper_threshold;
+        air_exchange_threshold = status.air_exchange_threshold;
     }
     if (status.state != PRESSURE_COMPRESSION) inlet_start_wait_active = false;
     ESP_LOGI("pressure", "Starting pressure update. State: %d, Chamber: %.3f bar, Inlet: %.3f bar, Ambient: %.3f bar",
@@ -647,7 +654,7 @@ void pressure_update() {
             TickType_t measurement_time_start = xTaskGetTickCount();
             ESP_LOGI("pressure", "Measurement started at %.3f bar", status.chamber_pressure);
         }
-        else if (status.chamber_pressure <= 2.0){
+        else if (status.chamber_pressure <= air_exchange_threshold){
             set_valve(false);
             status.state = PRESSURE_PREPRESSURISATION;
         }
@@ -684,6 +691,11 @@ void pressure_update() {
                  status.chamber_pressure, status.compressor_inlet_pressure, status.ambient_pressure);
         safe_off();
     } 
+    else if (status.state == PRESSURE_CURRENT_ERROR) {
+        ESP_LOGE("pressure", "Current error state. Chamber: %.3f bar, Inlet: %.3f bar, Ambient: %.3f bar",
+                 status.chamber_pressure, status.compressor_inlet_pressure, status.ambient_pressure);
+        safe_off();
+    }
     else {
         ESP_LOGE("pressure", "Unknown state %d. Stopping all pumps and valves.", status.state);
         safe_off();

@@ -247,6 +247,18 @@ h3 {
   white-space: nowrap;
 }
 
+.chip-main {
+  border-color: rgba(93, 196, 211, 0.58);
+  color: #8fe5ef;
+  background: rgba(33, 104, 115, 0.24);
+}
+
+.chip-pressure {
+  border-color: rgba(240, 193, 91, 0.58);
+  color: #f5cf7d;
+  background: rgba(121, 87, 28, 0.24);
+}
+
 .chip-ok,
 .state-ok {
   border-color: rgba(97, 211, 148, 0.5);

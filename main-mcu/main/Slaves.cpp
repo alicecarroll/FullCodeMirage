@@ -299,6 +299,7 @@ bool pressure_send_sensors(
     float max_chamber_pressure_threshold,
     float inlet_lower_threshold,
     float inlet_upper_threshold,
+    float air_exchange_threshold,
     int reset_pressure_threshold
 ) {
     uint8_t mux_channel; 
@@ -309,9 +310,9 @@ bool pressure_send_sensors(
     
     // Packet layout:
     // [0] opcode
-    // [1..22] eleven int16 sensor/threshold values
-    // [23] CRC8
-    const int sensor_count = 11;
+    // [1..24] twelve int16 sensor/threshold values
+    // [25] CRC8
+    const int sensor_count = 12;
     const int package_length = 1 + (sensor_count * 2) + 1;
     uint8_t package[package_length];
 
@@ -328,6 +329,7 @@ bool pressure_send_sensors(
         static_cast<int16_t>(max_chamber_pressure_threshold * SENSOR_SCALE),
         static_cast<int16_t>(inlet_lower_threshold * SENSOR_SCALE),
         static_cast<int16_t>(inlet_upper_threshold * SENSOR_SCALE),
+        static_cast<int16_t>(air_exchange_threshold * SENSOR_SCALE),
         static_cast<int16_t>(static_cast<float>(reset_pressure_threshold) * SENSOR_SCALE)
     };
 

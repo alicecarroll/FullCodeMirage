@@ -434,6 +434,7 @@
       { commandId: "resetThresholdChamberPressure", target: "CHAMBER_PRESSURE", label: "reset chamber-pressure threshold", wireCommand: "RESET THRESHOLD CHAMBER_PRESSURE" },
       { commandId: "resetThresholdInletlower", target: "INLET_LOWER", label: "reset inlet lower threshold", wireCommand: "RESET THRESHOLD INLET LOWER" },
       { commandId: "resetThresholdInletupper", target: "INLET_UPPER", label: "reset inlet upper threshold", wireCommand: "RESET THRESHOLD INLET UPPER" },
+      { commandId: "resetThresholdAirExchange", target: "AIR_EXCHANGE", label: "reset air-exchange threshold", wireCommand: "RESET THRESHOLD AIR_EXCHANGE" },
       //{ commandId: "resetThresholdInletTemperature", target: "INLET_TEMPERATURE", label: "reset inlet-temperature threshold", wireCommand: "RESET THRESHOLD INLET_TEMPERATURE" },
       //{ commandId: "resetThresholdWatchdogTimeout", target: "WATCHDOG_TIMEOUT", label: "reset watchdog timeout", wireCommand: "RESET THRESHOLD WATCHDOG_TIMEOUT" },
       //{ commandId: "resetThresholdThermalTolerance", target: "THERMAL_WATCHDOG_TOLERANCE", label: "reset thermal watchdog tolerance", wireCommand: "RESET THRESHOLD THERMAL_WATCHDOG_TOLERANCE" },
@@ -473,6 +474,7 @@
     overallHealth: document.getElementById("overallHealth"),
     healthDetails: document.getElementById("healthDetails"),
     missionMode: document.getElementById("missionMode"),
+    pressureState: document.getElementById("pressureState"),
     linkState: document.getElementById("linkState"),
     lastFrameAge: document.getElementById("lastFrameAge"),
     storageState: document.getElementById("storageState"),
@@ -1302,7 +1304,7 @@
         }
       }
       setChip(dom.linkState, "E-Link dropout", "dropout");
-      setChip(dom.missionMode, resolveMissionMode(latestTelemetry), "neutral");
+      renderMissionChips(latestTelemetry);
       dom.controllerState.textContent = "No telemetry";
       renderActiveTask(null);
 
@@ -1320,7 +1322,7 @@
       }
 
       setChip(dom.linkState, "E-Link dropout", "dropout");
-      setChip(dom.missionMode, resolveMissionMode(latestTelemetry), "neutral");
+      renderMissionChips(latestTelemetry);
       dom.controllerState.textContent = "No telemetry";
       renderActiveTask(null);
     }
@@ -1934,7 +1936,7 @@
       sample && sample.valid ? sample.errors : [],
       sample && sample.valid ? sample.thermalErrors : []
     );
-    setChip(dom.missionMode, resolveMissionMode(display), "neutral");
+    renderMissionChips(display);
     setChip(dom.linkState, linkLabel(linkStatus), linkStatus === "ONLINE" ? "healthy" : linkStatus === "DEGRADED" ? "warning" : "dropout");
 
     dom.frameNumber.textContent = display && display.seq ? String(display.seq) : "--";
@@ -2034,7 +2036,7 @@
     }
 
     setChip(dom.linkState, "E-Link dropout", "dropout");
-    setChip(dom.missionMode, resolveMissionMode(latestTelemetry), "neutral");
+    renderMissionChips(latestTelemetry);
     dom.controllerState.textContent = "No telemetry";
     dom.currentValue.textContent = "-- A";
     setChip(dom.currentSafetyState, previousCurrentTrip ? "TRIPPED · last reported · restart pressure MCU" : "Current telemetry offline", previousCurrentTrip ? "fault" : "dropout");
@@ -3001,21 +3003,49 @@
   }
 
   function resolveMissionMode(sample) {
+    let mode = null;
     if (sample) {
       if (typeof sample.missionMode === "string" && sample.missionMode) {
-        return sample.missionMode;
-      }
-
-      if (typeof sample.mode === "string" && sample.mode) {
-        return sample.mode;
-      }
-
-      if (typeof sample.mode === "number" && Number.isFinite(sample.mode)) {
-        return "MODE_" + sample.mode;
+        mode = sample.missionMode;
+      } else if (typeof sample.mode === "string" && sample.mode) {
+        mode = sample.mode;
+      } else if (typeof sample.mode === "number" && Number.isFinite(sample.mode)) {
+        mode = "MODE_" + sample.mode;
       }
     }
 
-    return latestMissionMode || "No telemetry";
+    mode = mode || latestMissionMode || "No telemetry";
+    return mode === "MEASUREMENTS" || mode === "MEASUREMENT" ? "ACTIVE" : mode;
+  }
+
+  function resolvePressureState(sample) {
+    if (sample) {
+      if (typeof sample.pressureStateName === "string" && sample.pressureStateName) {
+        return sample.pressureStateName;
+      }
+
+      if (typeof sample.pressureState === "number" && Number.isFinite(sample.pressureState)) {
+        const names = [
+          "STANDBY",
+          "PREPRESSURISATION",
+          "AIR EXCHANGE",
+          "ERROR",
+          "FLUSH CHAMBER",
+          "COMPRESSION",
+          "MEASUREMENT",
+          "CORRECTION",
+          "CURRENT ERROR"
+        ];
+        return names[sample.pressureState] || "STATE_" + sample.pressureState;
+      }
+    }
+
+    return "No telemetry";
+  }
+
+  function renderMissionChips(sample) {
+    setChip(dom.missionMode, "MAIN MCU: " + resolveMissionMode(sample), "neutral");
+    setChip(dom.pressureState, "PRESSURE MCU: " + resolvePressureState(sample), "neutral");
   }
 
   function formatStatusLine(sample) {
@@ -3080,6 +3110,7 @@
       "CHAMBER_PRESSURE",
       "INLET_LOWER",
       "INLET_UPPER",
+      "AIR_EXCHANGE",
       //"INLET_TEMPERATURE",
       //"WATCHDOG_TIMEOUT",
       //"THERMAL_WATCHDOG_TOLERANCE",

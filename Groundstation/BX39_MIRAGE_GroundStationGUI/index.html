@@ -24,7 +24,8 @@
                 <span class="health-empty">No captured errors</span>
               </span>
             </span>
-            <span id="missionMode" class="chip">No telemetry</span>
+            <span id="missionMode" class="chip chip-main">No telemetry</span>
+            <span id="pressureState" class="chip chip-pressure">No telemetry</span>
             <span id="linkState" class="chip chip-ok">E-Link online</span>
           </div>
         </header>
@@ -218,6 +219,7 @@
                 <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdChamberPressure"><span>Chamber pressure</span><small>Maximum chamber pressure</small></label>
                 <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdInletlower"><span>Inlet lower pressure</span><small>Maximum chamber pressure</small></label>
                 <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdInletupper"><span>Inlet upper pressure</span><small>Maximum chamber pressure</small></label>
+                <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdAirExchange"><span>Air exchange pressure</span><small>Pressure to exit air exchange</small></label>
 
                 <!--label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdInletTemperature"><span>Inlet temperature</span><small>Minimum inlet temperature</small></label>
                 <label><input type="checkbox" data-reset-checkbox="thresholds" data-reset-command-id="resetThresholdWatchdogTimeout"><span>Watchdog timeout</span><small>Thermal and pressure timeout</small></label>
@@ -251,6 +253,10 @@
                 <label for="thresholdInletLower">Lower inlet pressure (bar)</label>
                 <input id="thresholdInletLower" type="number" step="any" min="0" max="1000" placeholder="Default: 0.95">
                 <button type="button" data-threshold-set="INLET_LOWER" data-threshold-input="thresholdInletLower">Set</button>
+
+                <label for="thresholdAirExchange">Air exchange pressure (bar)</label>
+                <input id="thresholdAirExchange" type="number" step="any" min="0" max="5" placeholder="Default: 2.000">
+                <button type="button" data-threshold-set="AIR_EXCHANGE" data-threshold-input="thresholdAirExchange">Set</button>
 
                 <!--label for="thresholdInletTemperature">Minimum inlet temperature (°C)</label>
                 <input id="thresholdInletTemperature" type="number" step="any" min="-100" max="200" placeholder="Default: -35.0">

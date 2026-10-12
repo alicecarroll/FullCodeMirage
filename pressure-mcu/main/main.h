@@ -12,7 +12,8 @@ typedef enum
     PRESSURE_FLUSHING, //not used 
     PRESSURE_COMPRESSION,
     PRESSURE_MEASUREMENT,
-    PRESSURE_CORRECTION
+    PRESSURE_CORRECTION,
+    PRESSURE_CURRENT_ERROR
 
 } PressureState;
 
@@ -29,6 +30,7 @@ typedef struct
     float max_chamber_pressure_threshold;
     float inlet_lower_threshold;
     float inlet_upper_threshold;
+    float air_exchange_threshold;
     int reset_pressure_threshold;
 
     uint8_t error;
@@ -59,7 +61,7 @@ void pressure_update();
 void pressure_update_current();
 
 // Called by the communication task when the Main MCU sends its sensor frame.
-void pressure_update_external_sensors(const float sensors[11]);
+void pressure_update_external_sensors(const float sensors[12]);
 
 // Apply one canonical command frame.
 void pressure_execute_command(uint8_t command, uint8_t info);
