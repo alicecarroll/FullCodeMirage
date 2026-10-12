@@ -73,7 +73,7 @@ bool status_ok = true;
 CapturedErrors captured_errors = {};
 CapturedErrors captured_errors_for_k96 = {}; // To store the captured errors for K96 before clearing them
 bool full_k96_readout = false; // To track if a full K96 readout is required
-static constexpr int32_t DEFAULT_LOOP_RETRY_CONNECTION = 10;
+static constexpr int32_t DEFAULT_LOOP_RETRY_CONNECTION = 100;
 int32_t LOOP_RETRY_CONNECTION = DEFAULT_LOOP_RETRY_CONNECTION; // Number of loops to wait before retrying connection
 float max_pressure_threshold = P_STRATOSPHERE; //threshold for max ambient pressure for measuring
 int max_loops_without_connection = LOOP_WO_CONNECTION;
@@ -599,7 +599,7 @@ static bool reset_thresholds(const std::string &target)
     else if (target == "PRESSURE_WATCHDOG_TOLERANCE")
         pressure_watchdog_tolerance = DEFAULT_WATCHDOG_TOLERANCE;
     else if (target == "RETRY_INTERVAL")
-        LOOP_RETRY_CONNECTION = 10;
+        LOOP_RETRY_CONNECTION = DEFAULT_LOOP_RETRY_CONNECTION;
 
     if (reset_all)
     {
