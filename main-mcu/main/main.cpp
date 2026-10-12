@@ -1025,7 +1025,14 @@ extern "C" void app_main()
     //wiz_connect(targetip, REMOTE_PORT);
     setSn_IR(WIZ_SOCKET, Sn_IR_CON);
 
-    wiz_ensure_connected(targetip, REMOTE_PORT, system_ok);
+    const esp_err_t ethernet_connect_status = wiz_ensure_connected(targetip, REMOTE_PORT, system_ok);
+    if (ethernet_connect_status != ESP_OK)
+    {
+        con_lost = true;
+        status_ok = false;
+        connection_lost(&con_lost, &loss_timestamp_us);
+        ESP_LOGW(TAG, "Initial groundstation connection failed; retrying from main loop");
+    }
     //wiz_ping(targetip, "h\n");
 
     // Set baseline slave watchdog timestamps here, AFTER Ethernet blocks!

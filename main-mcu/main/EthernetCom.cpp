@@ -47,6 +47,7 @@
 #include <lwip/inet.h>
 
 static const char *TAG = "Ethernet WIZ850io";
+static constexpr int TCP_SEND_BUSY_RETRIES = 1000;
 
 // SPI device handle — registered on the existing SPI2 bus
 // static spi_device_handle_t WIZ_handle = NULL;
@@ -239,9 +240,24 @@ esp_err_t wiz_send(const uint8_t *data, size_t length)
     if (!data || length == 0)
         return ESP_ERR_INVALID_ARG;
 
+    if (getSn_SR(WIZ_SOCKET) != SOCK_ESTABLISHED)
+    {
+        ESP_LOGW(TAG, "Cannot send: TCP socket state is 0x%02X", getSn_SR(WIZ_SOCKET));
+        return ESP_FAIL;
+    }
+
     // send() writes data into the W5500's internal TX buffer.
     // The chip's hardwired TCP/IP stack handles segmentation and transmission.
-    int32_t sent = wizsend(WIZ_SOCKET, (uint8_t *)data, (uint16_t)length);
+    int32_t sent = SOCK_BUSY;
+    for (int attempt = 0; attempt < TCP_SEND_BUSY_RETRIES; ++attempt)
+    {
+        sent = wizsend(WIZ_SOCKET, (uint8_t *)data, (uint16_t)length);
+        if (sent != SOCK_BUSY)
+        {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
     if (sent != (int32_t)length)
     {
         ESP_LOGE_CAPTURED(ERROR_BIT_05, TAG, "send() failed, returned %ld", (long)sent);
@@ -275,6 +291,13 @@ esp_err_t wiz_receive(uint8_t *buf, size_t buf_size, size_t *bytes_read)
 {
     if (!buf || !bytes_read)
         return ESP_ERR_INVALID_ARG;
+
+    if (getSn_SR(WIZ_SOCKET) != SOCK_ESTABLISHED)
+    {
+        *bytes_read = 0;
+        ESP_LOGW(TAG, "Cannot receive: TCP socket state is 0x%02X", getSn_SR(WIZ_SOCKET));
+        return ESP_FAIL;
+    }
 
     // Check how many bytes are waiting in the W5500's internal RX buffer
     uint16_t available = getSn_RX_RSR(WIZ_SOCKET);
@@ -340,7 +363,7 @@ esp_err_t wiz_ping(uint8_t *target_ip, const char *message)
         ESP_LOGE_CAPTURED(ERROR_BIT_08, TAG, "ping: socket() failed");
         return ESP_FAIL;
     }
-    wait_socket_command(WIZ_SOCKET);
+    wait_socket_command(WIZ_PING_SOCKET);
 
     icmp_packet_t request;
     build_icmp_request(&request, ID, ++s_seq, message);
@@ -353,7 +376,7 @@ esp_err_t wiz_ping(uint8_t *target_ip, const char *message)
             REMOTE_PORT);
 
     wizclose(WIZ_PING_SOCKET);
-    wait_socket_command(WIZ_SOCKET);
+    wait_socket_command(WIZ_PING_SOCKET);
     //printf("%d\n", sent);
 
     if (sent != sizeof(request))
@@ -427,7 +450,7 @@ esp_err_t wiz_connect(uint8_t *remote_ip, uint16_t remote_port)
              getSn_SR(WIZ_SOCKET));
 
     // Open TCP socket
-    int8_t s = wizsocket(WIZ_SOCKET, Sn_MR_TCP, 5000, 0);
+    int8_t s = wizsocket(WIZ_SOCKET, Sn_MR_TCP, LOCAL_PORT, 0);
     wait_socket_command(WIZ_SOCKET);
     // Clear all pending socket interrupts
     setSn_IR(WIZ_SOCKET, 0xFF);
