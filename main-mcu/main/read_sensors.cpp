@@ -541,13 +541,25 @@ void read_sensors()
 
     //vTaskDelay(pdMS_TO_TICKS(20));
 
+    read_ms5803(&pa1_cal, &sensor_data.Pa1, ERROR_BIT_73, "PA1",
+                &sensor_data.Ta2, ERROR_BIT_70, "TA2");
+
     read_tmp117(&sensor_data.Ta1, ERROR_BIT_69, "TA1");
 
     read_sht45(&sensor_data.Ta3, ERROR_BIT_71, "TA3",
                &sensor_data.Ha1, ERROR_BIT_72, "HA1");
 
-    read_ms5803(&pa1_cal, &sensor_data.Pa1, ERROR_BIT_73, "PA1",
-                &sensor_data.Ta2, ERROR_BIT_70, "TA2");
+
+    // Channel 5: Tt1 + Tt2
+    sel_mux_channel(multiplex_Outlet);
+    //printf("Switching to MUX channel: %i\n", multiplex_Outlet);
+
+    //vTaskDelay(pdMS_TO_TICKS(20));
+
+    read_sht45(&sensor_data.Tt1, ERROR_BIT_57, "TT1",
+               nullptr, ERROR_BIT_57, "TT1");
+    //vTaskDelay(pdMS_TO_TICKS(20));
+    read_tmp1075(&sensor_data.Tt2, ERROR_BIT_58, "TT2");
 
 
     // Channel 3: Tp4 + Pp1 + Tp5 + Pp2
@@ -576,16 +588,6 @@ void read_sensors()
     //vTaskDelay(pdMS_TO_TICKS(20));
     read_tmp1075(&sensor_data.Tp3, ERROR_BIT_62, "TP3");
 
-    // Channel 5: Tt1 + Tt2
-    sel_mux_channel(multiplex_Outlet);
-    //printf("Switching to MUX channel: %i\n", multiplex_Outlet);
-
-    //vTaskDelay(pdMS_TO_TICKS(20));
-
-    read_sht45(&sensor_data.Tt1, ERROR_BIT_57, "TT1",
-               nullptr, ERROR_BIT_57, "TT1");
-    //vTaskDelay(pdMS_TO_TICKS(20));
-    read_tmp1075(&sensor_data.Tt2, ERROR_BIT_58, "TT2");
 
     // Channel 6: Tp6 + Pp3
     sel_mux_channel(multiplex_Tp6_Pp3);
