@@ -4,10 +4,13 @@
 
 
 #include "driver/i2c.h"
+#include "driver/gpio.h"
+#include "rom/ets_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "Settings.h"
 #include "Multiplexer.h"
+#include "Initialize.h"
 #include "read_sensors.h"
 #include "ErrorStatus.h"
 
@@ -15,11 +18,76 @@ SensorData sensor_data;
 
 static const char *TAG = "read_sensors";
 
+static uint8_t active_mux_channel = multiplex_RTC_Tp2;
+
+static esp_err_t recover_i2c_bus(uint8_t mux_channel);
+
+static esp_err_t select_sensor_channel(uint8_t channel)
+{
+    esp_err_t err = sel_mux_channel(channel);
+
+    if (err == ESP_OK)
+    {
+        active_mux_channel = channel;
+    }
+
+    return err;
+}
+
+static esp_err_t recover_i2c_bus(uint8_t mux_channel)
+{
+    ESP_LOGW(TAG, "Recovering I2C bus");
+
+    i2c_driver_delete(I2C_master);
+    vTaskDelay(pdMS_TO_TICKS(1));
+
+    // Temporarily control both lines as open-drain GPIOs.
+    gpio_set_direction(I2C_SCL, GPIO_MODE_INPUT_OUTPUT_OD);
+    gpio_set_direction(I2C_SDA, GPIO_MODE_INPUT_OUTPUT_OD);
+    gpio_set_pull_mode(I2C_SCL, GPIO_PULLUP_ONLY);
+    gpio_set_pull_mode(I2C_SDA, GPIO_PULLUP_ONLY);
+
+    // Release both lines.
+    gpio_set_level(I2C_SCL, 1);
+    gpio_set_level(I2C_SDA, 1);
+    ets_delay_us(5);
+
+    // Clock the stuck slave until it releases SDA.
+    for (int pulse = 0; pulse < 9 && gpio_get_level(I2C_SDA) == 0; ++pulse)
+    {
+        gpio_set_level(I2C_SCL, 0);
+        ets_delay_us(5);
+        gpio_set_level(I2C_SCL, 1);
+        ets_delay_us(5);
+    }
+
+    // Generate STOP: SDA low, then release SCL and SDA.
+    gpio_set_level(I2C_SDA, 0);
+    ets_delay_us(5);
+    gpio_set_level(I2C_SCL, 1);
+    ets_delay_us(5);
+    gpio_set_level(I2C_SDA, 1);
+    ets_delay_us(5);
+
+    esp_err_t err = init_i2c();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to reinstall I2C driver: %s",
+                 esp_err_to_name(err));
+        return err;
+    }
+
+    // The mux loses its selected state after recovery.
+    return sel_mux_channel(mux_channel);
+}
+
+
 static void log_sensor_error(ErrorBit bit, const char *reading,
                              const char *operation, esp_err_t err)
 {
     ESP_LOGE_CAPTURED(bit, TAG, "%s (%s) failed: %s", reading, operation,
                       esp_err_to_name(err));
+    //recover_i2c_bus(active_mux_channel);
 }
 
 static void log_sensor_crc_error(ErrorBit bit, const char *reading,
@@ -27,6 +95,7 @@ static void log_sensor_crc_error(ErrorBit bit, const char *reading,
 {
     ESP_LOGE_CAPTURED(bit, TAG, "%s %s CRC check failed; data corrupted on I2C bus",
                       reading, quantity);
+    //recover_i2c_bus(active_mux_channel);
 }
 
 // continous sensor
@@ -515,7 +584,7 @@ void read_sensors()
 {
 
     // Channel 0: RTC + Tp2
-    sel_mux_channel(multiplex_RTC_Tp2);
+    select_sensor_channel(multiplex_RTC_Tp2);
     //printf("Switching to MUX channel: %i\n", multiplex_RTC_Tp2);
 
     vTaskDelay(pdMS_TO_TICKS(20));
@@ -528,7 +597,7 @@ void read_sensors()
     read_tmp1075(&sensor_data.Tp2, ERROR_BIT_61, "TP2");
 
     // Channel 1: Tp1
-    sel_mux_channel(multiplex_Tp1_devT);
+    select_sensor_channel(multiplex_Tp1_devT);
     //printf("Switching to MUX channel: %i\n", multiplex_Tp1_devT);
 
     //vTaskDelay(pdMS_TO_TICKS(20));
@@ -536,22 +605,21 @@ void read_sensors()
     read_tmp1075(&sensor_data.Tp1, ERROR_BIT_60, "TP1");
 
     // Channel 2: Ambient sensors (temperature, humidity, preassure)
-    sel_mux_channel(multiplex_Ambient);
+    select_sensor_channel(multiplex_Ambient);
     //printf("Switching to MUX channel: %i\n", multiplex_Ambient);
 
     //vTaskDelay(pdMS_TO_TICKS(20));
+
+    read_ms5803(&pa1_cal, &sensor_data.Pa1, ERROR_BIT_73, "PA1",
+                &sensor_data.Ta2, ERROR_BIT_70, "TA2");
 
     read_tmp117(&sensor_data.Ta1, ERROR_BIT_69, "TA1");
 
     read_sht45(&sensor_data.Ta3, ERROR_BIT_71, "TA3",
                &sensor_data.Ha1, ERROR_BIT_72, "HA1");
 
-    read_ms5803(&pa1_cal, &sensor_data.Pa1, ERROR_BIT_73, "PA1",
-                &sensor_data.Ta2, ERROR_BIT_70, "TA2");
-
-
     // Channel 3: Tp4 + Pp1 + Tp5 + Pp2
-    sel_mux_channel(multiplex_Tp4_Pp1_Tp5_Pp2);
+    select_sensor_channel(multiplex_Tp4_Pp1_Tp5_Pp2);
     //printf("Switching to MUX channel: %i\n", multiplex_Tp4_Pp1_Tp5_Pp2);
 
     //vTaskDelay(pdMS_TO_TICKS(20));
@@ -570,14 +638,14 @@ void read_sensors()
                 &sensor_data.Tp5, ERROR_BIT_64, "TP5");
 
     // Channel 4: Tp3
-    sel_mux_channel(multiplex_Tp3);
+    select_sensor_channel(multiplex_Tp3);
     //printf("Switching to MUX channel: %i\n", multiplex_Tp3);
 
     //vTaskDelay(pdMS_TO_TICKS(20));
     read_tmp1075(&sensor_data.Tp3, ERROR_BIT_62, "TP3");
 
     // Channel 5: Tt1 + Tt2
-    sel_mux_channel(multiplex_Outlet);
+    select_sensor_channel(multiplex_Outlet);
     //printf("Switching to MUX channel: %i\n", multiplex_Outlet);
 
     //vTaskDelay(pdMS_TO_TICKS(20));
@@ -588,7 +656,7 @@ void read_sensors()
     read_tmp1075(&sensor_data.Tt2, ERROR_BIT_58, "TT2");
 
     // Channel 6: Tp6 + Pp3
-    sel_mux_channel(multiplex_Tp6_Pp3);
+    select_sensor_channel(multiplex_Tp6_Pp3);
     //printf("Switching to MUX channel: %i\n", multiplex_Tp6_Pp3);
 
     //vTaskDelay(pdMS_TO_TICKS(20));
@@ -597,7 +665,7 @@ void read_sensors()
               &sensor_data.Tp6, ERROR_BIT_65, "TP6");
 
     // Channel 7: Tt3
-    sel_mux_channel(multiplex_Tt3_devP);
+    select_sensor_channel(multiplex_Tt3_devP);
     //printf("Switching to MUX channel: %i\n", multiplex_Tt3_devP);
 
     //vTaskDelay(pdMS_TO_TICKS(20));

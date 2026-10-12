@@ -491,6 +491,8 @@ void control_loop(void *pvParameters) {
                      -99.0f) // Idunno i believe its error code
         {
           error[lastSwitch]=4;
+          ESP_LOGE("Control", "Temperature out of bounds for switch %d, temperature: %.2f",
+                   i, controllerData[i].temperature);
           controllerData[i].duty_cycle = 0;
         } else {
           //ESP_LOGI("Control:", "Normal case");
@@ -576,6 +578,10 @@ void control_loop(void *pvParameters) {
     if(delta/4+last_recieved_last_switch<current_time && allowSend){ //Send function 1/4 * timeS0-timeS7 <currenttime
       xQueueOverwrite(dataQueue_slave_tx, &data); // Writes to send task
       //ESP_LOGI("Control", "delta val %" PRId64, delta);
+      for(int i=0;i<number_switches;i++)
+      {
+        error[i]=0; // Resets error after sending it to main MCU
+      }
       newData = false;
       allowSend=false;
     }
