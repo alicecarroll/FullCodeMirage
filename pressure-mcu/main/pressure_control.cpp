@@ -283,6 +283,7 @@ void pressure_update_current() {
     status.overcurrent_tripped = status.current_valid &&
         (current_ma >= PRESSURE_OVERCURRENT_LIMIT_MA || saturated);
     const bool just_tripped = status.overcurrent_tripped && !was_tripped;
+    /*
     if (status.overcurrent_tripped || !status.current_valid) {
         // Independent of mode and manual overrides. De-energize relays first.
         for (uint8_t relay = 1; relay <= 4; ++relay) set_relay(relay, false);
@@ -295,6 +296,7 @@ void pressure_update_current() {
         status.error = ERR_NONE;
         status.state = PRESSURE_CURRENT_ERROR;
     }
+    */
 
     // Never put potentially blocking console logging ahead of relay shutdown.
     if (just_tripped) {
@@ -333,7 +335,7 @@ void pressure_update_external_sensors(const float sensors[12]) {
     status.inlet_upper_threshold = sensors[9];
     status.air_exchange_threshold = sensors[10];
     status.reset_pressure_threshold = sensors[11];
-    pressure_init_pwm();
+    //pressure_init_pwm();
     //if (!pwm_targets_initialized) {
     //    pressure_init_pwm();
     //    pwm_targets_initialized = true;
