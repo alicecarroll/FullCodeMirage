@@ -24,6 +24,9 @@
 
 #include <stdio.h>
 #include <errno.h>
+#include <limits.h>
+#include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <time.h>
 
@@ -62,6 +65,8 @@ static bool datetime_synchronized = false;
 
 //SensorData *sensor_datas;
 
+
+
 static void create_generic_filename(const char *prefix,
                                     char *buffer,
                                     size_t buffer_size,
@@ -71,13 +76,85 @@ static void create_generic_filename(const char *prefix,
              "%s_noDateTimeInformation%s", prefix, extension);
 }
 
+static bool create_next_numbered_filename(const char *prefix,
+                                          const char *extension,
+                                          char *buffer,
+                                          size_t buffer_size)
+{
+    DIR *dir = opendir(SD_MOUNT_POINT);
+    if (dir == nullptr)
+    {
+        return false;
+    }
+
+    char name_prefix[64];
+    const int prefix_length = snprintf(name_prefix, sizeof(name_prefix), "%s_no", prefix);
+    if (prefix_length < 0 || static_cast<size_t>(prefix_length) >= sizeof(name_prefix))
+    {
+        closedir(dir);
+        return false;
+    }
+
+    int maximum_suffix = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != nullptr)
+    {
+        const char *filename = entry->d_name;
+        if (strncmp(filename, name_prefix, static_cast<size_t>(prefix_length)) != 0)
+        {
+            continue;
+        }
+
+        char *number_end = nullptr;
+        errno = 0;
+        const long suffix = strtol(
+            const_cast<char *>(filename + prefix_length),
+            &number_end,
+            10);
+
+        if (number_end == filename + prefix_length ||
+            errno == ERANGE ||
+            suffix < 1 ||
+            suffix > INT_MAX ||
+            strcmp(number_end, extension) != 0)
+        {
+            continue;
+        }
+
+        if (suffix > maximum_suffix)
+        {
+            maximum_suffix = static_cast<int>(suffix);
+        }
+    }
+
+    closedir(dir);
+
+    const int written = snprintf(buffer,
+                                 buffer_size,
+                                 "%s_no%d%s",
+                                 prefix,
+                                 maximum_suffix + 1,
+                                 extension);
+    return written >= 0 && static_cast<size_t>(written) < buffer_size;
+}
+
 static void create_unique_csv_filename(void)
 {
-    create_generic_filename("sensor_data", current_csv_filename, sizeof(current_csv_filename), ".csv");
+    if (!create_next_numbered_filename("sensor_data", ".csv",
+                                       current_csv_filename, sizeof(current_csv_filename)))
+    {
+        create_generic_filename("sensor_data", current_csv_filename,
+                                sizeof(current_csv_filename), ".csv");
+    }
 }
 static void create_unique_metadata_filename(void)
 {
-    create_generic_filename("metadata", current_metadata_filename, sizeof(current_metadata_filename), ".log");
+    if (!create_next_numbered_filename("metadata", ".log",
+                                       current_metadata_filename, sizeof(current_metadata_filename)))
+    {
+        create_generic_filename("metadata", current_metadata_filename,
+                                sizeof(current_metadata_filename), ".log");
+    }
 }
 
 static void create_datetime_filename(const char *prefix,

@@ -964,10 +964,6 @@ static void comms_pressure_default(SensorData &sensor_data, uint32_t current_tim
              pressure_status.channel_id, pressure_status.state, pressure_status.error_code,
              pressure_status.relay_mask & 0x0F,
              pressure_status.manual_override ? "yes" : "no", pressure_status.pump1_pwm, pressure_status.pump2_pwm, pressure_status.compressor_pwm, pressure_status.current_ma, pressure_status.current_flags);
-    if (pressure_status.pump1_pwm > 0 || pressure_status.pump2_pwm > 0 || pressure_status.compressor_pwm > 0 || pressure_status.valve_open || pressure_status.relay_mask > 0) {
-        ESP_LOGW(TAG, "Anomaly detected.");
-        vTaskDelay(pdMS_TO_TICKS(1000)); // Delay to allow for logging
-    } 
 
     // Watchdog reset for pressure
     // A watchdog reset must not silently clear a known, latched current trip.
