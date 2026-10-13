@@ -56,7 +56,7 @@ enum : uint8_t {
     PRESSURE_STATUS_FRAME_SIZE = 11,
 };
 
-constexpr uint16_t PRESSURE_OVERCURRENT_LIMIT_MA = 2900;
+constexpr uint16_t PRESSURE_OVERCURRENT_LIMIT_MA = 27856;
 constexpr uint8_t PRESSURE_CURRENT_VALID = 0x01;
 constexpr uint8_t PRESSURE_CURRENT_TRIPPED = 0x02;
 constexpr uint8_t PRESSURE_CURRENT_ADC_SATURATED = 0x04;

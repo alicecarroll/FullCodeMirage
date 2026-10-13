@@ -269,6 +269,7 @@ void pressure_init() {
     set_pump1(0); set_pump2(0); set_compressor(0); set_valve(false);
     for (uint8_t relay = 1; relay <= 4; ++relay) set_relay(relay, false);
     pressure_update_current();
+    pressure_init_pwm();
 }
 
 void pressure_update_current() {
