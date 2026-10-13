@@ -27,13 +27,16 @@ constexpr float INLET_PREFILL_MAX_BAR = 2.0f;
 constexpr float CHAMBER_TARGET_TOLERANCE_BAR = 0.1f;
 // In reality, the difference between interstage and pressure chamber is also relevant. I don't know how to account for that. 
 float pwm1 = 0.0f, pwm2 = 0.0f, pwm3 = 0.0f;
+// Operator-selected automatic targets survive sensor updates and phase changes.
+// These flags do not override automatic output sequencing or current protection.
+// They are initialized again on reboot; later PWM commands can change the targets.
+bool pump1_pwm_user_set = false, pump2_pwm_user_set = false, compressor_pwm_user_set = false;
 //constexpr float FLUSH_COMPLETE_PRESSURE_BAR = 0.05f; //Why so low?
 constexpr uint8_t ERR_NONE = 0, ERR_CHAMBER_SENSOR = 1, ERR_INLET_SENSOR = 2;
 constexpr uint8_t ERR_INLET_START_TIMEOUT = 3;
 constexpr uint8_t ERR_CURRENT_SENSOR = PRESSURE_ERROR_CURRENT_SENSOR, ERR_OVERCURRENT = PRESSURE_ERROR_OVERCURRENT;
 TickType_t last_current_log = 0;
 bool current_shutdown_standby = false;
-bool pwm_targets_initialized = false; // to keep track of one-time-initialisation of pwm targets
 bool inlet_start_wait_active = false;
 TickType_t inlet_start_wait_started = 0;
 
@@ -241,7 +244,7 @@ float calc_Q_out() {
 void pressure_init_pwm(){
     // the pwm settings of the pumps need to depend on the ambient pressure as the vacuum pumps would overpressurise the interstage otherwise.
     // the pwm settings should be linearly dependent such that 0.04 bar -> 100% pwm and 1.0 bar -> 20% pwm
-    if (!manual_pump1){
+    if (!manual_pump1 && !pump1_pwm_user_set){
         if (status.ambient_pressure <0.7){
         pwm1 = 100.0f - ((status.ambient_pressure - 0.04f) / (1.0f - 0.04f)) * 80.0f;
         pwm1 = (pwm1 > 100) ? 100 : ((pwm1 < 20) ? 20 : pwm1);
@@ -250,13 +253,13 @@ void pressure_init_pwm(){
             pwm1 = 0.0f;
         }
     }
-    if (!manual_pump2){
+    if (!manual_pump2 && !pump2_pwm_user_set){
     pwm2 = 100.0f - ((status.ambient_pressure - 0.04f) / (1.0f - 0.04f)) * 80.0f;
     pwm2 = (pwm2 > 100) ? 100 : ((pwm2 < 20) ? 20 : pwm2);
     }
     //The pwm setting of the compressor might be decided to depend on ambient conditions
     //For now (02.10.) the compressor will just be set to 10% duty cycle
-    if (!manual_compressor){
+    if (!manual_compressor && !compressor_pwm_user_set){
     pwm3 = 10.0f;
     pwm3 = (pwm3 > 100) ? 100 : ((pwm3 < 10) ? 10 : pwm3);
     }
@@ -334,10 +337,6 @@ void pressure_update_external_sensors(const float sensors[12]) {
     status.air_exchange_threshold = sensors[10];
     status.reset_pressure_threshold = sensors[11];
     pressure_init_pwm();
-    //if (!pwm_targets_initialized) {
-    //    pressure_init_pwm();
-    //    pwm_targets_initialized = true;
-    //}
 }
 
 
@@ -419,9 +418,21 @@ void pressure_execute_command(uint8_t command, uint8_t info) {
         case PRESSURE_CMD_PUMP1_PWM: manual_pump1 = true; pwm1 = (info > 100 ? 100 : (info < 15 ? 15 : info)); set_pump1(pwm1); break;
         case PRESSURE_CMD_PUMP2_PWM: manual_pump2 = true; pwm2 = (info > 100 ? 100 : (info < 15 ? 15 : info)); set_pump2(pwm2); break;
         case PRESSURE_CMD_COMPRESSOR_PWM: manual_compressor = true; pwm3 = (info > 100 ? 100 : (info < 15 ? 15 : info)); set_compressor(pwm3); break;
-        case PRESSURE_CMD_PUMP1_PWM_NoInterrupt: manual_pump1 = false; pwm1 = (info > 100 ? 100 : info); break;
-        case PRESSURE_CMD_PUMP2_PWM_NoInterrupt: manual_pump2 = false; pwm2 = (info > 100 ? 100 : info); break;
-        case PRESSURE_CMD_COMPRESSOR_PWM_NoInterrupt: manual_compressor = false; pwm3 = (info > 100 ? 100 : info); break;
+        case PRESSURE_CMD_PUMP1_PWM_NoInterrupt:
+            manual_pump1 = false;
+            pwm1 = (info > 100 ? 100 : info);
+            pump1_pwm_user_set = true;
+            break;
+        case PRESSURE_CMD_PUMP2_PWM_NoInterrupt:
+            manual_pump2 = false;
+            pwm2 = (info > 100 ? 100 : info);
+            pump2_pwm_user_set = true;
+            break;
+        case PRESSURE_CMD_COMPRESSOR_PWM_NoInterrupt:
+            manual_compressor = false;
+            pwm3 = (info > 100 ? 100 : info);
+            compressor_pwm_user_set = true;
+            break;
         case PRESSURE_CMD_VALVE_OPEN: manual_valve = true; set_valve(true); break;
         case PRESSURE_CMD_VALVE_CLOSE: manual_valve = true; set_valve(false); break;
         case PRESSURE_CMD_SET_MODE:

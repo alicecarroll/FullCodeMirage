@@ -32,7 +32,7 @@ void reset_controller(PressureState state, float chamber, float inlet) {
     inlet_start_wait_active = false;
     inlet_start_wait_started = 0;
     external_sensors_valid = true;
-    pwm_targets_initialized = true;
+    pump1_pwm_user_set = pump2_pwm_user_set = compressor_pwm_user_set = false;
     sensor_history_valid = true;
     sensor_update_interval = pdMS_TO_TICKS(100);
     last_sensor_update = simulated_ticks;
